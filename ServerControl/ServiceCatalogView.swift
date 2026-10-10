@@ -515,7 +515,7 @@ private struct ClasseraRecipientSheet: View {
         do {
             try await api.saveClasseraRecipients(id: target.service.id, recipients: drafts.map(\.number))
             dismiss()
-        } catch { error = api.friendly(error) }
+        } catch { self.error = api.friendly(error) }
     }
 }
 
