@@ -286,6 +286,133 @@ final class ServerControlTests: XCTestCase {
         XCTAssertNil(legacy.aiCache)
     }
 
+    nonisolated private func recipientHandler(_ request: URLRequest) throws -> (Int, Data) {
+        if request.url?.path == "/api/services" {
+            return (200, Data(#"{"classera":[{"id":"classera-1","name":"Classera 1","status":"Working","canForceFire":true}]}"#.utf8))
+        }
+        if request.url?.path.hasSuffix("/recipients") == true && request.httpMethod == "GET" {
+            return (200, Data(#"{"ok":true,"classera":"classera-1","recipients":["201000000001","201000000002"]}"#.utf8))
+        }
+        if request.httpMethod != "GET" { return (200, Data(#"{"ok":true}"#.utf8)) }
+        return (200, try JSONEncoder().encode(PreviewFixtures.dashboard))
+    }
+
+    private func requestJSON(_ request: URLRequest) throws -> [String: Any] {
+        var data = request.httpBody ?? Data()
+        if data.isEmpty, let stream = request.httpBodyStream {
+            stream.open()
+            defer { stream.close() }
+            var buffer = [UInt8](repeating: 0, count: 1024)
+            while stream.hasBytesAvailable {
+                let count = stream.read(&buffer, maxLength: buffer.count)
+                if count <= 0 { break }
+                data.append(contentsOf: buffer.prefix(count))
+            }
+        }
+        return try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+    }
+
+    func testRecipientDecodingAndVerifiedGET() async throws {
+        let raw = Data(#"{"ok":true,"classera":"classera-1","recipients":["201000000001"]}"#.utf8)
+        let decoded = try JSONDecoder().decode(ClasseraRecipientsResponse.self, from: raw)
+        XCTAssertTrue(decoded.ok)
+        XCTAssertEqual(decoded.classera, "classera-1")
+        XCTAssertEqual(decoded.recipients, ["201000000001"])
+        let api = makeAPI()
+        MockURLProtocol.handler = recipientHandler
+        await api.loadServices()
+        let recipients = try await api.loadClasseraRecipients(id: "classera-1")
+        XCTAssertEqual(recipients, ["201000000001", "201000000002"])
+        XCTAssertEqual(MockURLProtocol.requests.last?.value(forHTTPHeaderField: "Authorization"), "Bearer unit-test-placeholder")
+        MockURLProtocol.handler = { _ in (200, Data(#"{"ok":true,"classera":"classera-2","recipients":["201000000001"]}"#.utf8)) }
+        do { _ = try await api.loadClasseraRecipients(id: "classera-1"); XCTFail("Must reject mismatched instance") } catch {}
+    }
+
+    func testPUTRecipientsJSONAndRefresh() async throws {
+        var authorizations = 0
+        let api = makeAPI(authorize: { _ in authorizations += 1 })
+        MockURLProtocol.handler = recipientHandler
+        await api.loadDashboard()
+        await api.loadServices()
+        MockURLProtocol.requests = []
+        try await api.saveClasseraRecipients(id: "classera-1", recipients: ["201000000003", "201000000004"])
+        XCTAssertEqual(authorizations, 1)
+        let put = try XCTUnwrap(MockURLProtocol.requests.first { $0.httpMethod == "PUT" })
+        XCTAssertEqual(put.url?.path, "/api/services/classera/classera-1/recipients")
+        XCTAssertEqual(put.value(forHTTPHeaderField: "Content-Type"), "application/json")
+        let body = try requestJSON(put)
+        XCTAssertEqual(Set(body.keys), ["recipients"])
+        XCTAssertEqual(body["recipients"] as? [String], ["201000000003", "201000000004"])
+        XCTAssertEqual(MockURLProtocol.requests.filter { $0.httpMethod == "PUT" }.count, 1)
+        XCTAssertTrue(MockURLProtocol.requests.contains { $0.url?.path == "/api/services" })
+    }
+
+    func testForceOneAuthorizationExactJSONAndNoRetry() async throws {
+        for outcome in ["success", "cancel", "timeout", "networkLost", "serverFailure"] {
+            var reasons: [String] = []
+            let api = makeAPI(authorize: { reason in
+                reasons.append(reason)
+                if outcome == "cancel" { throw NSError(domain: LAError.errorDomain, code: LAError.userCancel.rawValue) }
+            })
+            MockURLProtocol.handler = { request in
+                if request.httpMethod == "POST" {
+                    if outcome == "timeout" { throw URLError(.timedOut) }
+                    if outcome == "networkLost" { throw URLError(.networkConnectionLost) }
+                    return (outcome == "serverFailure" ? 500 : 200, Data(#"{"ok":true}"#.utf8))
+                }
+                return try self.recipientHandler(request)
+            }
+            await api.loadDashboard()
+            await api.loadServices()
+            _ = try await api.loadClasseraRecipients(id: "classera-1")
+            MockURLProtocol.requests = []
+            await api.serviceAction(ServiceCommand(kind: .forceOneClasseraReport, id: "classera-1", name: "Classera 1", recipient: "201000000002"))
+            XCTAssertEqual(reasons.count, 1)
+            XCTAssertTrue(reasons.first?.contains("ONE PERSON ONLY") == true)
+            let posts = MockURLProtocol.requests.filter { $0.httpMethod == "POST" }
+            XCTAssertEqual(posts.count, outcome == "cancel" ? 0 : 1)
+            if let post = posts.first {
+                XCTAssertEqual(post.url?.path, "/api/services/classera/classera-1/force-one")
+                XCTAssertEqual(post.value(forHTTPHeaderField: "Content-Type"), "application/json")
+                let body = try requestJSON(post)
+                XCTAssertEqual(Set(body.keys), ["recipient"])
+                XCTAssertEqual(body["recipient"] as? String, "201000000002")
+            }
+        }
+    }
+
+    func testInvalidRecipientsNeverSendMutations() async throws {
+        let api = makeAPI()
+        MockURLProtocol.handler = recipientHandler
+        await api.loadDashboard()
+        await api.loadServices()
+        _ = try await api.loadClasseraRecipients(id: "classera-1")
+        MockURLProtocol.requests = []
+        for values in [[], [""], [" "], ["+20100"], ["20-100"], ["abc"], ["٢٠١٠٠"], ["20100", "20100"]] {
+            XCTAssertThrowsError(try ClasseraRecipientValidation.list(values))
+            do { try await api.saveClasseraRecipients(id: "classera-1", recipients: values); XCTFail("Invalid list must fail") } catch {}
+        }
+        for number in ["", "abc", "201000000099"] {
+            await api.serviceAction(ServiceCommand(kind: .forceOneClasseraReport, id: "classera-1", name: "Classera 1", recipient: number))
+        }
+        XCTAssertTrue(MockURLProtocol.requests.isEmpty)
+    }
+
+    func testRecipientPUTDoesNotRetryOrSendAfterAuthCancellation() async throws {
+        for outcome in ["timeout", "cancel"] {
+            let api = makeAPI(authorize: { _ in if outcome == "cancel" { throw CancellationError() } })
+            MockURLProtocol.handler = { request in
+                if request.httpMethod == "PUT" { throw URLError(.timedOut) }
+                return try self.recipientHandler(request)
+            }
+            await api.loadDashboard()
+            await api.loadServices()
+            MockURLProtocol.requests = []
+            do { try await api.saveClasseraRecipients(id: "classera-1", recipients: ["201000000001"]); XCTFail("Expected failure") } catch {}
+            XCTAssertEqual(MockURLProtocol.requests.filter { $0.httpMethod == "PUT" }.count, outcome == "cancel" ? 0 : 1)
+        }
+    }
+
     func testForceSendRequiresBackendCapabilityAndAllowlistedID() async {
         let api = makeAPI()
         MockURLProtocol.handler = { request in
@@ -660,3 +787,4 @@ final class ServerControlTests: XCTestCase {
     }
 
 }
+
