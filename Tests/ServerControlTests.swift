@@ -115,7 +115,7 @@ final class ServerControlTests: XCTestCase {
         let statuses = ["Working", "Rate Limited", "Invalid", "High Demand", "Google Issue", "Unknown"]
         return ServiceSnapshot(geminiHealth: "Working",
             gemini: (1...10).map { GeminiKeyStatus(id: "key-\($0)", name: "Gemini \($0)", status: statuses[($0-1) % statuses.count], lastAuthenticationCheck: now, lastGenerationCheck: now, canTest: $0 != 6) },
-            classera: (1...3).map { ClasseraStatus(id: "classera-\($0)", name: "Classera \($0)", status: "Working", schedulerStatus: "Online", webhookStatus: "Working", lastRun: now, lastReport: now, lastReportName: nil, upcomingAssessments: nil, aiCache: nil, canFire: true, canForceFire: nil) },
+            classera: (1...3).map { ClasseraStatus(id: "classera-\($0)", name: "Classera \($0)", status: "Working", schedulerStatus: "Online", webhookStatus: "Working", lastRun: now, lastReport: now, lastReportName: nil, upcomingAssessments: nil, aiCache: nil, canFire: true, canForceFire: nil, whatsappStatus: "No tracked sends", sendingCount: nil, acceptedCount: 0, sentCount: 0, deliveredCount: 0, readCount: 0, failedCount: 0, unknownCount: 0, latestDeliveryAt: nil, latestDeliveryReport: nil) },
             padel: ["watcher", "bot", "dashboard", "whatsapp"].map { PadelComponent(id: $0, name: "Padel \($0.capitalized)", status: "Online", deliveryStatus: "Billing Required", lastNotification: now) })
     }
     func testV4MajorScreensOnIPhone() async throws {
@@ -239,6 +239,36 @@ final class ServerControlTests: XCTestCase {
         XCTAssertFalse(MockURLProtocol.requests.contains { $0.httpMethod == "POST" })
     }
 
+
+
+    func testClasseraDeliveryFieldsAndLegacyResponse() throws {
+        let data = Data("""
+        {"classera":[{"id":"classera-1","name":"Classera 1","status":"Working","whatsappStatus":"Delivered","sendingCount":1,"acceptedCount":2,"sentCount":3,"deliveredCount":4,"readCount":5,"failedCount":6,"unknownCount":7,"latestDeliveryAt":"2026-10-10T18:00:00Z","latestDeliveryReport":"Weekly report"}]}
+        """.utf8)
+        let item = try XCTUnwrap(JSONDecoder().decode(ServiceSnapshot.self, from: data).classera?.first)
+        XCTAssertEqual(item.whatsappStatus, "Delivered")
+        XCTAssertEqual(item.sendingCount, 1)
+        XCTAssertEqual(item.acceptedCount, 2)
+        XCTAssertEqual(item.sentCount, 3)
+        XCTAssertEqual(item.deliveredCount, 4)
+        XCTAssertEqual(item.readCount, 5)
+        XCTAssertEqual(item.failedCount, 6)
+        XCTAssertEqual(item.unknownCount, 7)
+        XCTAssertEqual(item.latestDeliveryAt, "2026-10-10T18:00:00Z")
+        XCTAssertEqual(item.latestDeliveryReport, "Weekly report")
+        let legacy = try JSONDecoder().decode(ClasseraStatus.self, from: Data("""
+        {"id":"classera-1","name":"Classera 1","status":"Working"}
+        """.utf8))
+        XCTAssertNil(legacy.whatsappStatus)
+        XCTAssertNil(legacy.deliveredCount)
+        XCTAssertNil(legacy.latestDeliveryReport)
+        let empty = try JSONDecoder().decode(ClasseraStatus.self, from: Data("""
+        {"id":"classera-1","name":"Classera 1","status":"Working","whatsappStatus":"No tracked sends","acceptedCount":0}
+        """.utf8))
+        XCTAssertEqual(empty.whatsappStatus, "No tracked sends")
+        XCTAssertEqual(empty.acceptedCount, 0)
+        XCTAssertNil(empty.sentCount)
+    }
 
     func testExpandedClasseraResponseAndLegacyCompatibility() throws {
         let data = Data("""
