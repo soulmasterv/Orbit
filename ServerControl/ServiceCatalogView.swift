@@ -10,6 +10,7 @@ struct ServiceDetailView: View {
     @ObservedObject var api: ServerAPI
     let page: ServicePage
     @State private var pending: ServiceCommand?
+    @State private var recipientSheet: ClasseraRecipientSheetTarget?
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 12) {
@@ -32,6 +33,9 @@ struct ServiceDetailView: View {
             ToolbarItem(placement: .topBarTrailing) { RefreshIndicator(loading: api.servicesLoading) { Task { await api.loadServices() } } }
         }
         .task { await api.ensureServicesFresh() }.refreshable { await api.loadServices() }
+        .sheet(item: $recipientSheet) { target in
+            ClasseraRecipientSheet(api: api, target: target)
+        }
         .confirmationDialog(
             pending?.title ?? "Confirm",
             isPresented: Binding(
@@ -57,7 +61,7 @@ struct ServiceDetailView: View {
                     }
                 }
 
-            case .forceFireClasseraReport:
+            case .forceFireClasseraReport, .forceOneClasseraReport:
                 Button(
                     "Force send for \(command.name)",
                     role: .destructive
@@ -305,6 +309,21 @@ struct ServiceDetailView: View {
                                 .frame(minHeight: 44)
                             }
                         }
+                        Button {
+                            recipientSheet = ClasseraRecipientSheetTarget(service: service, forceOne: false)
+                        } label: {
+                            Label("Edit Recipients", systemImage: "person.2").frame(minHeight: 44)
+                        }
+                        .disabled(reason(true) != nil)
+                        Button(role: .destructive) {
+                            recipientSheet = ClasseraRecipientSheetTarget(service: service, forceOne: true)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Label("Force Send to Person", systemImage: "person.crop.circle.badge.exclamationmark")
+                                Text("ONE PERSON ONLY").font(.caption.weight(.semibold))
+                            }.frame(minHeight: 44)
+                        }
+                        .disabled(reason(service.canForceFire) != nil)
                     }
                 }
             }
@@ -382,3 +401,121 @@ struct ServiceDetailView: View {
     private func componentState(_ title: String, _ state: String?) -> some View { VStack(alignment: .leading, spacing: 4) { Text(title).font(.caption).foregroundStyle(.secondary); StatusBadge(status: state ?? "Unknown") } }
     private func timeRow(_ title: String, _ date: String?) -> some View { VStack(alignment: .leading, spacing: 3) { Text(title).font(.caption).foregroundStyle(.secondary); Text(HumanTime.label(date)).font(.caption.weight(.medium)) } }
 }
+
+private struct ClasseraRecipientSheetTarget: Identifiable {
+    let service: ClasseraStatus
+    let forceOne: Bool
+    var id: String { service.id + (forceOne ? "-force-one" : "-edit") }
+}
+
+private struct RecipientDraft: Identifiable {
+    let id = UUID()
+    var number: String
+}
+
+private struct ClasseraRecipientSheet: View {
+    @ObservedObject var api: ServerAPI
+    let target: ClasseraRecipientSheetTarget
+    @Environment(\.dismiss) private var dismiss
+    @State private var drafts: [RecipientDraft] = []
+    @State private var selected = ""
+    @State private var loading = true
+    @State private var saving = false
+    @State private var loaded = false
+    @State private var error: String?
+    @State private var confirmOne = false
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Text(target.service.name).font(.headline)
+                    if target.forceOne {
+                        Text("ONE PERSON ONLY").font(.headline).foregroundStyle(.orange)
+                        Text("Choose one configured recipient. No other recipient will receive this force-send request.")
+                    } else {
+                        Text("Use digits only, including the country code.")
+                    }
+                }
+                if loading { ProgressView("Loading recipients…") }
+                if let error { Text(error).foregroundStyle(.orange) }
+                if !loading && loaded {
+                    if target.forceOne {
+                        Section("Select one recipient") {
+                            if drafts.isEmpty { Text("No recipients configured. Add a number using Edit Recipients first.") }
+                            ForEach(drafts) { draft in
+                                Button { selected = draft.number } label: {
+                                    HStack {
+                                        Text(draft.number).foregroundStyle(.primary)
+                                        Spacer()
+                                        if selected == draft.number { Image(systemName: "checkmark.circle.fill") }
+                                    }
+                                }
+                            }
+                        }
+                        Section {
+                            Button("Force Send to ONE PERSON ONLY", role: .destructive) { confirmOne = true }
+                                .disabled(selected.isEmpty || saving || !api.canControl)
+                        }
+                    } else {
+                        Section("Configured numbers") {
+                            ForEach($drafts) { $draft in
+                                HStack {
+                                    TextField("Phone number", text: $draft.number).keyboardType(.numberPad)
+                                        .accessibilityLabel("Recipient phone number")
+                                    Button(role: .destructive) { drafts.removeAll { $0.id == draft.id } } label: {
+                                        Image(systemName: "minus.circle")
+                                    }.accessibilityLabel("Remove recipient").buttonStyle(.borderless)
+                                }
+                            }
+                            Button("Add number") { drafts.append(RecipientDraft(number: "")) }
+                        }.disabled(saving)
+                        Section {
+                            Button(saving ? "Saving…" : "Save Recipients") { Task { await save() } }
+                                .disabled(saving || !api.canControl)
+                        }
+                    }
+                }
+            }
+            .navigationTitle(target.forceOne ? "Force Send to Person" : "Edit Recipients")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(saving) } }
+            .task {
+                do {
+                    let numbers = try await api.loadClasseraRecipients(id: target.service.id)
+                    drafts = numbers.map { RecipientDraft(number: $0) }
+                    loaded = true
+                } catch { self.error = api.friendly(error) }
+                loading = false
+            }
+            .confirmationDialog("Send to ONE PERSON ONLY?", isPresented: $confirmOne, titleVisibility: .visible) {
+                Button("Force send to \(selected) only", role: .destructive) {
+                    let command = ServiceCommand(kind: .forceOneClasseraReport, id: target.service.id,
+                                                 name: target.service.name, recipient: selected)
+                    Task {
+                        saving = true
+                        api.actionError = nil
+                        await api.serviceAction(command)
+                        saving = false
+                        if let failure = api.actionError { error = failure }
+                        else { dismiss() }
+                    }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This sends a real WhatsApp report to \(selected) ONLY and can resend a previously delivered report. Device authorization is required next.")
+            }
+        }.interactiveDismissDisabled(saving)
+    }
+
+    private func save() async {
+        saving = true
+        error = nil
+        defer { saving = false }
+        do {
+            try await api.saveClasseraRecipients(id: target.service.id, recipients: drafts.map(\.number))
+            dismiss()
+        } catch { error = api.friendly(error) }
+    }
+}
+

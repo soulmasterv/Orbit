@@ -81,11 +81,13 @@ struct ServiceCommand: Identifiable {
         case testGeminiKey
         case fireClasseraReport
         case forceFireClasseraReport
+        case forceOneClasseraReport
     }
 
     let kind: Kind
     let id: String
     let name: String
+    var recipient: String? = nil
 
     var title: String {
         switch kind {
@@ -97,6 +99,8 @@ struct ServiceCommand: Identifiable {
 
         case .forceFireClasseraReport:
             return "Force-send WhatsApp report?"
+        case .forceOneClasseraReport:
+            return "Send to ONE PERSON ONLY?"
         }
     }
 
@@ -110,6 +114,33 @@ struct ServiceCommand: Identifiable {
 
         case .forceFireClasseraReport:
             return "This bypasses the Classera delivery guard for this run and can resend a report that was already delivered. Confirm, then authorize on your iPhone."
+        case .forceOneClasseraReport:
+            return "Force-send the \(name) report to \(recipient ?? "") only. This can resend a previously delivered report. Confirm, then authorize on your iPhone."
         }
     }
 }
+
+struct ClasseraRecipientsResponse: Decodable {
+    let ok: Bool
+    let classera: String
+    let recipients: [String]
+}
+struct ClasseraRecipientsPayload: Encodable { let recipients: [String] }
+struct ClasseraForceOnePayload: Encodable { let recipient: String }
+
+enum ClasseraRecipientValidation {
+    static func number(_ value: String) throws -> String {
+        let clean = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty, clean.utf8.allSatisfy({ (48...57).contains($0) }) else {
+            throw APIError.message("Enter a non-empty phone number using digits only, including the country code.")
+        }
+        return clean
+    }
+    static func list(_ values: [String]) throws -> [String] {
+        guard !values.isEmpty else { throw APIError.message("Add at least one recipient before saving.") }
+        let clean = try values.map(number)
+        guard Set(clean).count == clean.count else { throw APIError.message("Each recipient must appear only once.") }
+        return clean
+    }
+}
+

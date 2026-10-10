@@ -77,6 +77,7 @@ final class ServerAPI: ObservableObject {
     private var logRequests: [LogTarget: Task<LogSnapshot, Error>] = [:]
     private var logSnapshots: [LogTarget: LogSnapshot] = [:]
     private var logGeneration = 0
+    private var classeraRecipients: [String: [String]] = [:]
 
     init(session: URLSession? = nil, defaults: UserDefaults = .standard,
          accessAllowed: Bool = true, snapshotStore: DashboardSnapshotStore? = nil,
@@ -122,6 +123,7 @@ final class ServerAPI: ObservableObject {
         accessAllowed = allowed
         if !allowed {
             needsVerification = true
+            classeraRecipients.removeAll()
             refreshGeneration += 1
             servicesGeneration += 1
             logGeneration += 1
@@ -342,6 +344,7 @@ final class ServerAPI: ObservableObject {
 
     func cachedLogs(_ target: LogTarget) -> LogSnapshot? { logSnapshots[target] }
     private func resetSecondaryRequests() {
+        classeraRecipients.removeAll()
         servicesGeneration += 1
         logGeneration += 1
         servicesRefresh?.cancel()
@@ -395,7 +398,7 @@ final class ServerAPI: ObservableObject {
                     $0.id == action.id && $0.canFire == true
                 } == true
 
-        case .forceFireClasseraReport:
+        case .forceFireClasseraReport, .forceOneClasseraReport:
             permitted =
                 (1...3).map { "classera-\($0)" }.contains(action.id)
                 && serviceSnapshot?.classera?.contains {
@@ -406,6 +409,17 @@ final class ServerAPI: ObservableObject {
         guard permitted && servicesError == nil && !servicesLoading else {
             actionError = "This control is not available from your server."
             return
+        }
+
+        var body: Data?
+        if action.kind == .forceOneClasseraReport {
+            do {
+                let recipient = try ClasseraRecipientValidation.number(action.recipient ?? "")
+                guard classeraRecipients[action.id]?.contains(recipient) == true else {
+                    throw APIError.message("Select a configured recipient. Reopen the picker to check the current list.")
+                }
+                body = try JSONEncoder().encode(ClasseraForceOnePayload(recipient: recipient))
+            } catch { actionError = friendly(error); return }
         }
 
         let id: String
@@ -436,6 +450,10 @@ final class ServerAPI: ObservableObject {
             path = "/api/services/classera/\(id)/force-fire"
             authorizationReason = "Force-send the Classera WhatsApp report for \(action.name), bypassing the delivery guard for this run."
             activityTitle = "Forced report request for \(action.name)"
+        case .forceOneClasseraReport:
+            path = "/api/services/classera/\(id)/force-one"
+            authorizationReason = "Force-send the \(action.name) report to ONE PERSON ONLY: \(action.recipient ?? "")."
+            activityTitle = "One-person report request for \(action.name)"
         }
 
         await performAction(
@@ -444,8 +462,57 @@ final class ServerAPI: ObservableObject {
             action: .start,
             authorizationReason: authorizationReason,
             refreshServices: true,
-            activityTitle: activityTitle
+            activityTitle: activityTitle,
+            body: body
         )
+    }
+
+    private func classeraPath(_ id: String) throws -> String {
+        guard (1...3).map({ "classera-\($0)" }).contains(id),
+              serviceSnapshot?.classera?.contains(where: { $0.id == id }) == true else {
+            throw APIError.message("This Classera instance is not in the verified service snapshot.")
+        }
+        return "/api/services/classera/\(id)"
+    }
+
+    func loadClasseraRecipients(id: String) async throws -> [String] {
+        let path = try classeraPath(id)
+        let generation = refreshGeneration
+        classeraRecipients[id] = nil
+        let (data, response) = try await get(path: path + "/recipients")
+        guard accessAllowed && generation == refreshGeneration && !Task.isCancelled else { throw CancellationError() }
+        try validate(response)
+        let result = try JSONDecoder().decode(ClasseraRecipientsResponse.self, from: data)
+        guard result.ok && result.classera == id else { throw APIError.message("The recipient response did not match this Classera instance.") }
+        let numbers = result.recipients.isEmpty ? [] : try ClasseraRecipientValidation.list(result.recipients)
+        classeraRecipients[id] = numbers
+        return numbers
+    }
+
+    func saveClasseraRecipients(id: String, recipients: [String]) async throws {
+        let path = try classeraPath(id)
+        let numbers = try ClasseraRecipientValidation.list(recipients)
+        guard !previewMode && canControl && servicesError == nil && !servicesLoading else {
+            throw APIError.message("Refresh and reconnect before saving recipients.")
+        }
+        actionBusy = true
+        actionProgress = "Saving recipients…"
+        defer { actionBusy = false; actionProgress = "" }
+        let generation = refreshGeneration
+        try await authorize("Change the WhatsApp recipients for \(id).")
+        guard accessAllowed && generation == refreshGeneration && !Task.isCancelled else { throw CancellationError() }
+        var command = try request(path: path + "/recipients", method: "PUT")
+        command.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        command.httpBody = try JSONEncoder().encode(ClasseraRecipientsPayload(recipients: numbers))
+        // Mutations go directly to URLSession once, without GET failover or retries.
+        let (data, response) = try await session.data(for: command)
+        guard accessAllowed && generation == refreshGeneration else { throw CancellationError() }
+        try validate(response)
+        if let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any], object["ok"] as? Bool == false {
+            throw APIError.message("The server declined the recipient changes.")
+        }
+        classeraRecipients[id] = numbers
+        await loadServices()
     }
 
     static func isRefreshCancellation(_ error: Error) -> Bool {
@@ -482,7 +549,8 @@ final class ServerAPI: ObservableObject {
     }
 
     private func performAction(path: String, name: String, action: ServerAction,
-                               authorizationReason: String? = nil, refreshServices: Bool = false, activityTitle: String? = nil) async {
+                               authorizationReason: String? = nil, refreshServices: Bool = false, activityTitle: String? = nil,
+                               body: Data? = nil) async {
         guard !actionBusy else { return }
         guard !previewMode else { actionError = "Preview mode cannot send server commands."; return }
         guard canControl else { actionError = "Refresh the dashboard and reconnect before sending a command."; return }
@@ -498,7 +566,11 @@ final class ServerAPI: ObservableObject {
         do {
             try await authorize(authorizationReason ?? "\(action.title) \(name) on your server.")
             guard accessAllowed && generation == refreshGeneration else { throw CancellationError() }
-            let command = try request(path: path, method: "POST")
+            var command = try request(path: path, method: "POST")
+            if let body {
+                command.httpBody = body
+                command.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            }
             actionProgress = "Sending request for \(name)…"
             commandStarted = true
             let (data, response) = try await session.data(for: command)
@@ -582,3 +654,4 @@ enum APIError: LocalizedError {
     case message(String)
     var errorDescription: String? { if case .message(let text) = self { return text }; return nil }
 }
+
