@@ -115,7 +115,7 @@ final class ServerControlTests: XCTestCase {
         let statuses = ["Working", "Rate Limited", "Invalid", "High Demand", "Google Issue", "Unknown"]
         return ServiceSnapshot(geminiHealth: "Working",
             gemini: (1...10).map { GeminiKeyStatus(id: "key-\($0)", name: "Gemini \($0)", status: statuses[($0-1) % statuses.count], lastAuthenticationCheck: now, lastGenerationCheck: now, canTest: $0 != 6) },
-            classera: (1...3).map { ClasseraStatus(id: "classera-\($0)", name: "Classera \($0)", status: "Working", schedulerStatus: "Online", webhookStatus: "Working", lastRun: now, lastReport: now, canFire: true) },
+            classera: (1...3).map { ClasseraStatus(id: "classera-\($0)", name: "Classera \($0)", status: "Working", schedulerStatus: "Online", webhookStatus: "Working", lastRun: now, lastReport: now, lastReportName: nil, upcomingAssessments: nil, aiCache: nil, canFire: true, canForceFire: nil) },
             padel: ["watcher", "bot", "dashboard", "whatsapp"].map { PadelComponent(id: $0, name: "Padel \($0.capitalized)", status: "Online", deliveryStatus: "Billing Required", lastNotification: now) })
     }
     func testV4MajorScreensOnIPhone() async throws {
@@ -239,6 +239,73 @@ final class ServerControlTests: XCTestCase {
         XCTAssertFalse(MockURLProtocol.requests.contains { $0.httpMethod == "POST" })
     }
 
+
+    func testExpandedClasseraResponseAndLegacyCompatibility() throws {
+        let data = Data("""
+        {"classera":[{"id":"classera-1","name":"Classera 1","status":"Working","lastReportName":"report.pdf","upcomingAssessments":[{"date":"2026-10-12","label":"FF","week":4,"subjects":["Math"]}],"aiCache":{"count":1,"recent":[{"hash":"cache-id","hasSummary":true}]},"canFire":true,"canForceFire":true}]}
+        """.utf8)
+        let service = try XCTUnwrap(JSONDecoder().decode(ServiceSnapshot.self, from: data).classera?.first)
+        XCTAssertEqual(service.lastReportName, "report.pdf")
+        XCTAssertEqual(service.upcomingAssessments?.first?.week, 4)
+        XCTAssertEqual(service.aiCache?.recent?.first?.hasSummary, true)
+        XCTAssertEqual(service.canForceFire, true)
+        let legacy = try JSONDecoder().decode(ClasseraStatus.self, from: Data("""
+        {"id":"classera-1","name":"Classera 1","status":"Working","canFire":true}
+        """.utf8))
+        XCTAssertNil(legacy.canForceFire)
+        XCTAssertNil(legacy.aiCache)
+    }
+
+    func testForceSendRequiresBackendCapabilityAndAllowlistedID() async {
+        let api = makeAPI()
+        MockURLProtocol.handler = { request in
+            if request.url?.path == "/api/services" {
+                return (200, Data("""
+                {"classera":[{"id":"classera-1","name":"Classera 1","status":"Working","canFire":true},{"id":"unknown","name":"Unknown","status":"Working","canForceFire":true}]}
+                """.utf8))
+            }
+            return (200, try JSONEncoder().encode(PreviewFixtures.dashboard))
+        }
+        await api.loadDashboard()
+        await api.loadServices()
+        for id in ["classera-1", "unknown"] {
+            await api.serviceAction(ServiceCommand(kind: .forceFireClasseraReport, id: id, name: id))
+        }
+        XCTAssertFalse(MockURLProtocol.requests.contains { $0.httpMethod == "POST" })
+    }
+
+    func testForceSendAuthorizationRouteAndNoRetry() async {
+        for outcome in ["success", "cancel", "timeout"] {
+            MockURLProtocol.requests = []
+            var reasons: [String] = []
+            let api = makeAPI(authorize: { reason in
+                reasons.append(reason)
+                if outcome == "cancel" { throw NSError(domain: LAError.errorDomain, code: LAError.userCancel.rawValue) }
+            })
+            MockURLProtocol.handler = { request in
+                if request.httpMethod == "POST" {
+                    if outcome == "timeout" { throw URLError(.timedOut) }
+                    return (200, Data("{\"ok\":true}".utf8))
+                }
+                if request.url?.path == "/api/services" {
+                    return (200, Data("""
+                    {"classera":[{"id":"classera-1","name":"Classera 1","status":"Working","canFire":false,"canForceFire":true}]}
+                    """.utf8))
+                }
+                return (200, try JSONEncoder().encode(PreviewFixtures.dashboard))
+            }
+            await api.loadDashboard()
+            await api.loadServices()
+            await api.serviceAction(ServiceCommand(kind: .forceFireClasseraReport, id: "classera-1", name: "Classera 1"))
+            XCTAssertEqual(reasons.count, 1)
+            XCTAssertTrue(reasons.first?.contains("bypassing the delivery guard") == true)
+            let posts = MockURLProtocol.requests.filter { $0.httpMethod == "POST" }
+            XCTAssertEqual(posts.count, outcome == "cancel" ? 0 : 1)
+            if let post = posts.first { XCTAssertEqual(post.url?.path, "/api/services/classera/classera-1/force-fire") }
+            if outcome == "timeout" { XCTAssertTrue(api.actionError?.contains("may have reached") == true) }
+        }
+    }
+
     func testClasseraRequiresAuthorizationAndUsesAllowlistedRoute() async throws {
         var authorizations = [String]()
         let api = makeAPI(authorize: { reason in authorizations.append(reason) })
@@ -254,7 +321,7 @@ final class ServerControlTests: XCTestCase {
         await api.loadServices()
         await api.serviceAction(ServiceCommand(kind: .fireClasseraReport, id: "classera-1", name: "Classera 1"))
         XCTAssertEqual(authorizations.count, 1)
-        XCTAssertTrue(authorizations.first?.contains("real Classera WhatsApp") == true)
+        XCTAssertTrue(authorizations.first?.contains("current Classera WhatsApp") == true)
         XCTAssertEqual(MockURLProtocol.requests.filter { $0.httpMethod == "POST" }.first?.url?.path, "/api/services/classera/classera-1/fire")
     }
     func testCancelledAuthorizationNeverPosts() async {
