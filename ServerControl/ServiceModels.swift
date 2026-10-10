@@ -57,6 +57,16 @@ struct ClasseraStatus: Codable, Identifiable {
     let aiCache: ClasseraAICacheSummary?
     let canFire: Bool?
     let canForceFire: Bool?
+    let whatsappStatus: String?
+    let sendingCount: Int?
+    let acceptedCount: Int?
+    let sentCount: Int?
+    let deliveredCount: Int?
+    let readCount: Int?
+    let failedCount: Int?
+    let unknownCount: Int?
+    let latestDeliveryAt: String?
+    let latestDeliveryReport: String?
 }
 
 struct PadelComponent: Codable, Identifiable {

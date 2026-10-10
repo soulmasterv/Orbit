@@ -175,6 +175,8 @@ struct ServiceDetailView: View {
                             }
                         }
 
+                        classeraDelivery(service)
+
                         if let assessments = service.upcomingAssessments,
                            !assessments.isEmpty {
 
@@ -326,6 +328,44 @@ struct ServiceDetailView: View {
             }
         }
     }
+
+    private func classeraDelivery(_ service: ClasseraStatus) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Divider()
+            HStack {
+                Label("WhatsApp delivery", systemImage: "message").font(.caption.weight(.semibold))
+                Spacer()
+                StatusBadge(status: service.whatsappStatus ?? "Unknown")
+            }
+            if service.whatsappStatus == "No tracked sends" {
+                Text("No tracked sends yet. Delivery tracking will populate after the next Classera report.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], alignment: .leading, spacing: 6) {
+                deliveryCount("Accepted", service.acceptedCount)
+                deliveryCount("Sent", service.sentCount)
+                deliveryCount("Delivered", service.deliveredCount)
+                deliveryCount("Read", service.readCount)
+                deliveryCount("Failed", service.failedCount)
+                deliveryCount("Unknown", service.unknownCount)
+            }
+            timeRow("Latest delivery", service.latestDeliveryAt)
+            if let report = service.latestDeliveryReport, !report.isEmpty {
+                Label(report, systemImage: "doc.text").font(.caption)
+                    .foregroundStyle(.secondary).lineLimit(2)
+            }
+        }
+    }
+
+    private func deliveryCount(_ title: String, _ count: Int?) -> some View {
+        HStack(spacing: 6) {
+            Text(title).foregroundStyle(.secondary)
+            Spacer(minLength: 4)
+            Text(count.map { String($0) } ?? "—").monospacedDigit()
+        }.font(.caption)
+        .accessibilityElement(children: .combine)
+    }
+
     private func safeGeminiName(_ key: GeminiKeyStatus) -> String {
         // Never render monitor-provided names that could contain an actual key.
         let suffix = key.id.replacingOccurrences(of: "key-", with: "")
