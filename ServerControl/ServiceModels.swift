@@ -15,6 +15,35 @@ struct GeminiKeyStatus: Codable, Identifiable {
     let lastGenerationCheck: String?
     let canTest: Bool?
 }
+struct ClasseraAssessment: Codable, Identifiable {
+    let date: String
+    let label: String
+    let type: String?
+    let week: Int?
+    let subjects: [String]?
+
+    var id: String {
+        "\(date)|\(label)"
+    }
+}
+
+struct ClasseraAICacheItem: Codable, Identifiable {
+    let hash: String
+    let updatedAt: String?
+    let hasSummary: Bool?
+    let hasShortSummary: Bool?
+    let hasExamMaterial: Bool?
+
+    var id: String {
+        hash
+    }
+}
+
+struct ClasseraAICacheSummary: Codable {
+    let count: Int?
+    let recent: [ClasseraAICacheItem]?
+}
+
 struct ClasseraStatus: Codable, Identifiable {
     let id: String
     let name: String
@@ -23,8 +52,13 @@ struct ClasseraStatus: Codable, Identifiable {
     let webhookStatus: String?
     let lastRun: String?
     let lastReport: String?
+    let lastReportName: String?
+    let upcomingAssessments: [ClasseraAssessment]?
+    let aiCache: ClasseraAICacheSummary?
     let canFire: Bool?
+    let canForceFire: Bool?
 }
+
 struct PadelComponent: Codable, Identifiable {
     let id: String
     let name: String
@@ -33,14 +67,39 @@ struct PadelComponent: Codable, Identifiable {
     let lastNotification: String?
 }
 struct ServiceCommand: Identifiable {
-    enum Kind { case testGeminiKey, fireClasseraReport }
+    enum Kind {
+        case testGeminiKey
+        case fireClasseraReport
+        case forceFireClasseraReport
+    }
+
     let kind: Kind
     let id: String
     let name: String
-    var title: String { kind == .fireClasseraReport ? "Send a real WhatsApp report?" : "Test \(name)?" }
+
+    var title: String {
+        switch kind {
+        case .testGeminiKey:
+            return "Test \(name)?"
+
+        case .fireClasseraReport:
+            return "Send WhatsApp report?"
+
+        case .forceFireClasseraReport:
+            return "Force-send WhatsApp report?"
+        }
+    }
+
     var explanation: String {
-        kind == .fireClasseraReport
-            ? "This sends real WhatsApp messages for \(name). Confirm, then authorize on your iPhone."
-            : "Your server will test \(name). Its credentials stay on the server."
+        switch kind {
+        case .testGeminiKey:
+            return "Your server will test \(name). Its credentials stay on the server."
+
+        case .fireClasseraReport:
+            return "This asks \(name) to send the current report normally. Existing delivery protection remains enabled."
+
+        case .forceFireClasseraReport:
+            return "This bypasses the Classera delivery guard for this run and can resend a report that was already delivered. Confirm, then authorize on your iPhone."
+        }
     }
 }

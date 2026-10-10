@@ -377,19 +377,75 @@ final class ServerAPI: ObservableObject {
 
     func serviceAction(_ action: ServiceCommand) async {
         guard !actionBusy else { return }
+
         let permitted: Bool
+
         switch action.kind {
-        case .testGeminiKey: permitted = (1...10).map { "key-\($0)" }.contains(action.id) && serviceSnapshot?.gemini?.contains { $0.id == action.id && $0.canTest == true } == true
-        case .fireClasseraReport: permitted = (1...3).map { "classera-\($0)" }.contains(action.id) && serviceSnapshot?.classera?.contains { $0.id == action.id && $0.canFire == true } == true
+        case .testGeminiKey:
+            permitted =
+                (1...10).map { "key-\($0)" }.contains(action.id)
+                && serviceSnapshot?.gemini?.contains {
+                    $0.id == action.id && $0.canTest == true
+                } == true
+
+        case .fireClasseraReport:
+            permitted =
+                (1...3).map { "classera-\($0)" }.contains(action.id)
+                && serviceSnapshot?.classera?.contains {
+                    $0.id == action.id && $0.canFire == true
+                } == true
+
+        case .forceFireClasseraReport:
+            permitted =
+                (1...3).map { "classera-\($0)" }.contains(action.id)
+                && serviceSnapshot?.classera?.contains {
+                    $0.id == action.id && $0.canForceFire == true
+                } == true
         }
-        guard permitted && servicesError == nil && !servicesLoading else { actionError = "This control is not available from your server."; return }
+
+        guard permitted && servicesError == nil && !servicesLoading else {
+            actionError = "This control is not available from your server."
+            return
+        }
+
         let id: String
-        do { id = try Self.encodedContainerName(action.id) }
-        catch { actionError = friendly(error); return }
-        let path = action.kind == .testGeminiKey ? "/api/services/gemini/\(id)/test" : "/api/services/classera/\(id)/fire"
-        await performAction(path: path, name: action.name, action: .start,
-            authorizationReason: action.kind == .fireClasseraReport ? "Send the real Classera WhatsApp report for \(action.name)." : "Test \(action.name) through your server.",
-            refreshServices: true, activityTitle: action.kind == .fireClasseraReport ? "Report request for \(action.name)" : "Key test for \(action.name)")
+
+        do {
+            id = try Self.encodedContainerName(action.id)
+        } catch {
+            actionError = friendly(error)
+            return
+        }
+
+        let path: String
+        let authorizationReason: String
+        let activityTitle: String
+
+        switch action.kind {
+        case .testGeminiKey:
+            path = "/api/services/gemini/\(id)/test"
+            authorizationReason = "Test \(action.name) through your server."
+            activityTitle = "Key test for \(action.name)"
+
+        case .fireClasseraReport:
+            path = "/api/services/classera/\(id)/fire"
+            authorizationReason = "Send the current Classera WhatsApp report for \(action.name)."
+            activityTitle = "Report request for \(action.name)"
+
+        case .forceFireClasseraReport:
+            path = "/api/services/classera/\(id)/force-fire"
+            authorizationReason = "Force-send the Classera WhatsApp report for \(action.name), bypassing the delivery guard for this run."
+            activityTitle = "Forced report request for \(action.name)"
+        }
+
+        await performAction(
+            path: path,
+            name: action.name,
+            action: .start,
+            authorizationReason: authorizationReason,
+            refreshServices: true,
+            activityTitle: activityTitle
+        )
     }
 
     static func isRefreshCancellation(_ error: Error) -> Bool {

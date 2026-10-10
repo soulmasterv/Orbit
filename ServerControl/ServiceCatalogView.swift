@@ -32,10 +32,47 @@ struct ServiceDetailView: View {
             ToolbarItem(placement: .topBarTrailing) { RefreshIndicator(loading: api.servicesLoading) { Task { await api.loadServices() } } }
         }
         .task { await api.ensureServicesFresh() }.refreshable { await api.loadServices() }
-        .confirmationDialog(pending?.title ?? "Confirm", isPresented: Binding(get: { pending != nil }, set: { if !$0 { pending = nil } }), titleVisibility: .visible, presenting: pending) { command in
-            Button(command.kind == .fireClasseraReport ? "Send report for \(command.name)" : "Test \(command.name)", role: command.kind == .fireClasseraReport ? .destructive : nil) { Task { await api.serviceAction(command) } }
+        .confirmationDialog(
+            pending?.title ?? "Confirm",
+            isPresented: Binding(
+                get: { pending != nil },
+                set: { if !$0 { pending = nil } }
+            ),
+            titleVisibility: .visible,
+            presenting: pending
+        ) { command in
+
+            switch command.kind {
+            case .testGeminiKey:
+                Button("Test \(command.name)") {
+                    Task {
+                        await api.serviceAction(command)
+                    }
+                }
+
+            case .fireClasseraReport:
+                Button("Send report for \(command.name)") {
+                    Task {
+                        await api.serviceAction(command)
+                    }
+                }
+
+            case .forceFireClasseraReport:
+                Button(
+                    "Force send for \(command.name)",
+                    role: .destructive
+                ) {
+                    Task {
+                        await api.serviceAction(command)
+                    }
+                }
+            }
+
             Button("Cancel", role: .cancel) {}
-        } message: { Text($0.explanation) }
+
+        } message: {
+            Text($0.explanation)
+        }
     }
     @ViewBuilder private var serviceContent: some View {
         switch page {
@@ -57,16 +94,215 @@ struct ServiceDetailView: View {
             }
         case .classera:
             let instances = api.serviceSnapshot?.classera ?? []
-            if instances.isEmpty { FeatureUnavailable(title: "No Classera status", message: "Scheduler and report information has not been reported.") }
+
+            if instances.isEmpty {
+                FeatureUnavailable(
+                    title: "No Classera status",
+                    message: "Scheduler and report information has not been reported."
+                )
+            }
+
             ForEach(instances) { service in
                 Panel {
                     VStack(alignment: .leading, spacing: 10) {
-                        HStack { Text(service.name).font(.headline); Spacer(); StatusBadge(status: service.status) }
-                        HStack { componentState("Scheduler", service.schedulerStatus); Spacer(); componentState("Webhook", service.webhookStatus) }
-                        HStack { timeRow("Last run", service.lastRun); Spacer(); timeRow("Last report", service.lastReport) }
+
+                        HStack {
+                            Text(service.name)
+                                .font(.headline)
+
+                            Spacer()
+
+                            StatusBadge(status: service.status)
+                        }
+
+                        HStack {
+                            componentState(
+                                "Scheduler",
+                                service.schedulerStatus
+                            )
+
+                            Spacer()
+
+                            componentState(
+                                "Webhook",
+                                service.webhookStatus
+                            )
+                        }
+
+                        HStack {
+                            timeRow(
+                                "Last run",
+                                service.lastRun
+                            )
+
+                            Spacer()
+
+                            timeRow(
+                                "Last report",
+                                service.lastReport
+                            )
+                        }
+
+                        if let reportName = service.lastReportName,
+                           !reportName.isEmpty {
+
+                            Label(
+                                reportName,
+                                systemImage: "doc.text"
+                            )
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                        }
+
+                        if let cache = service.aiCache {
+
+                            HStack {
+                                Label(
+                                    "\(cache.count ?? 0) recent AI caches",
+                                    systemImage: "brain"
+                                )
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+
+                                Spacer()
+
+                                if let latest = cache.recent?.first?.updatedAt {
+                                    Text(HumanTime.label(latest))
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+
+                        if let assessments = service.upcomingAssessments,
+                           !assessments.isEmpty {
+
+                            Divider()
+
+                            Text("Upcoming FFs")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+
+                            ForEach(
+                                Array(assessments.prefix(3))
+                            ) { assessment in
+
+                                HStack(
+                                    alignment: .top,
+                                    spacing: 8
+                                ) {
+
+                                    Image(
+                                        systemName: "calendar"
+                                    )
+                                    .foregroundStyle(
+                                        Brand.accent
+                                    )
+
+                                    VStack(
+                                        alignment: .leading,
+                                        spacing: 2
+                                    ) {
+
+                                        Text(
+                                            assessment.label
+                                        )
+                                        .font(
+                                            .caption.weight(
+                                                .medium
+                                            )
+                                        )
+
+                                        HStack(spacing: 6) {
+                                            Text(
+                                                assessment.date
+                                            )
+
+                                            if let week = assessment.week {
+                                                Text(
+                                                    "Week \(week)"
+                                                )
+                                            }
+                                        }
+                                        .font(.caption2)
+                                        .foregroundStyle(
+                                            .secondary
+                                        )
+                                    }
+
+                                    Spacer()
+                                }
+                            }
+                        }
+
                         Divider()
-                        if let why = reason(service.canFire) { Label("Report unavailable: \(why)", systemImage: "info.circle").font(.caption).foregroundStyle(.secondary) }
-                        else { Button { pending = ServiceCommand(kind: .fireClasseraReport, id: service.id, name: service.name) } label: { Label("Send WhatsApp Report", systemImage: "paperplane").font(.subheadline.weight(.medium)).frame(minHeight: 44) } }
+
+                        if let why = reason(service.canFire) {
+
+                            Label(
+                                "Send unavailable: \(why)",
+                                systemImage: "info.circle"
+                            )
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        } else {
+
+                            Button {
+                                pending = ServiceCommand(
+                                    kind: .fireClasseraReport,
+                                    id: service.id,
+                                    name: service.name
+                                )
+                            } label: {
+                                Label(
+                                    "Send Now",
+                                    systemImage: "paperplane"
+                                )
+                                .font(
+                                    .subheadline.weight(
+                                        .medium
+                                    )
+                                )
+                                .frame(minHeight: 44)
+                            }
+                        }
+
+                        if let why = reason(
+                            service.canForceFire
+                        ) {
+
+                            Text(
+                                "Force send unavailable: \(why)"
+                            )
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        } else {
+
+                            Button(role: .destructive) {
+
+                                pending = ServiceCommand(
+                                    kind: .forceFireClasseraReport,
+                                    id: service.id,
+                                    name: service.name
+                                )
+
+                            } label: {
+
+                                Label(
+                                    "Force Send",
+                                    systemImage: "exclamationmark.arrow.triangle.2.circlepath"
+                                )
+                                .font(
+                                    .subheadline.weight(
+                                        .medium
+                                    )
+                                )
+                                .frame(minHeight: 44)
+                            }
+                        }
                     }
                 }
             }
