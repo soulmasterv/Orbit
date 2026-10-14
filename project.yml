@@ -32,10 +32,10 @@ targets:
     info:
       path: ServerControl/Info.plist
       properties:
-        CFBundleDisplayName: Server Control
+        CFBundleDisplayName: Orbit
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
-        NSFaceIDUsageDescription: Unlock Server Control and authorize sensitive server commands with Face ID.
+        NSFaceIDUsageDescription: Unlock Orbit and authorize sensitive server commands with Face ID.
         UILaunchScreen: {}
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
@@ -61,3 +61,4 @@ schemes:
       config: Debug
       targets:
         - ServerControlTests
+
