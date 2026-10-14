@@ -10,12 +10,11 @@ enum Brand {
 struct BrandMark: View {
     var size: CGFloat = 44
     var body: some View {
-        Image(systemName: "server.rack")
-            .font(.system(size: size * 0.46, weight: .semibold))
-            .foregroundStyle(.white)
+        Image("OrbitLogo")
+            .resizable()
+            .scaledToFill()
             .frame(width: size, height: size)
-            .background(LinearGradient(colors: [Brand.accent, Brand.teal], startPoint: .topLeading, endPoint: .bottomTrailing),
-                        in: RoundedRectangle(cornerRadius: size * 0.28))
+            .clipShape(RoundedRectangle(cornerRadius: size * 0.22))
             .accessibilityHidden(true)
     }
 }
@@ -92,3 +91,4 @@ enum AppAppearance: String, CaseIterable, Identifiable {
         switch self { case .system: return nil; case .light: return .light; case .dark: return .dark }
     }
 }
+
