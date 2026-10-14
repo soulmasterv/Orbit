@@ -20,7 +20,7 @@ struct SettingsView: View {
                 HStack(spacing: 14) {
                     BrandMark(size: 40)
                     VStack(alignment: .leading, spacing: 5) {
-                        Text("Server Control").font(.title3.bold())
+                        Text("Orbit").font(.title3.bold())
                         Text("Homelab Command Center").font(.caption).foregroundStyle(.secondary)
                         Text("Version \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "4.0.0") • Build \(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1")")
                             .font(.caption2).foregroundStyle(.secondary)
@@ -66,7 +66,7 @@ struct SettingsView: View {
                 }.disabled(testing || api.loading || api.actionBusy)
                 if !result.isEmpty { Text(result).font(.caption).foregroundStyle(.secondary) }
             } header: { Text("Server connection") }
-              footer: { Text("Use your HTTPS ServerControl address. Save only an address you trust: your bearer token will be sent there. Automatic Tailscale fallback applies only to the default production server. Leave the token field blank to keep your saved token.") }
+              footer: { Text("Use your HTTPS Orbit address. Save only an address you trust: your bearer token will be sent there. Automatic Tailscale fallback applies only to the default production server. Leave the token field blank to keep your saved token.") }
             Section {
                 Toggle("Face ID app lock", isOn: Binding(get: { appLock }, set: { proposed in
                     if proposed { appLock = true } else { lockChange = true }
@@ -102,7 +102,7 @@ struct SettingsView: View {
             Section {
                 LabeledContent("Distribution", value: "SideStore")
                 LabeledContent("Minimum iOS", value: "17")
-                Text("Service status comes from your authenticated ServerControl backend.")
+                Text("Service status comes from your authenticated Orbit backend.")
                     .font(.caption).foregroundStyle(.secondary)
             } header: { Text("About") }
         }
@@ -120,7 +120,7 @@ struct SettingsView: View {
                 lockChangeBusy = true
                 Task {
                     defer { lockChangeBusy = false }
-                    do { try await DeviceAuthorization.authorize(reason: "Disable the ServerControl app lock on this iPhone."); appLock = false }
+                    do { try await DeviceAuthorization.authorize(reason: "Disable the Orbit app lock on this iPhone."); appLock = false }
                     catch { result = DeviceAuthorization.isCancellation(error) ? "Cancelled. App lock remains enabled." : api.friendly(error) }
                 }
             }
@@ -129,7 +129,7 @@ struct SettingsView: View {
             Button("Remove token", role: .destructive) {
                 Task {
                     do {
-                        try await DeviceAuthorization.authorize(reason: "Remove the saved Server Control token.")
+                        try await DeviceAuthorization.authorize(reason: "Remove the saved Orbit token.")
                         try api.removeToken()
                         token = ""
                         result = "Token removed from this iPhone."
@@ -142,3 +142,4 @@ struct SettingsView: View {
         } message: { Text("This disconnects the app. It does not change or revoke the token on Ubuntu.") }
     }
 }
+

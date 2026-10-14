@@ -13,7 +13,7 @@ final class AppSession: ObservableObject {
     var lockEnabled: Bool { defaults.object(forKey: "appLock.v4") as? Bool ?? true }
 
     init(defaults: UserDefaults = .standard, authenticate: @escaping () async throws -> Void = {
-        try await DeviceAuthorization.authorize(reason: "Unlock Server Control to view and manage your server.")
+        try await DeviceAuthorization.authorize(reason: "Unlock Orbit to view and manage your server.")
     }) {
         self.authenticate = authenticate
         self.defaults = defaults
@@ -115,7 +115,7 @@ struct LockScreen: View {
     var body: some View {
         VStack(spacing: 24) {
             BrandMark(size: 80)
-            Text("Server Control").font(.largeTitle.bold())
+            Text("Orbit").font(.largeTitle.bold())
             Label("Your server stays private", systemImage: "lock.shield")
                 .font(.subheadline).foregroundStyle(.secondary)
             if !privacyOnly {
@@ -135,3 +135,4 @@ struct LockScreen: View {
         }.padding(32)
     }
 }
+
