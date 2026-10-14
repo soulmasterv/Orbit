@@ -96,8 +96,9 @@ final class StudentsTests: XCTestCase {
         MockURLProtocol.onStart = { request in gate.capture(request); started.fulfill() }
         let first = Task { await store.refresh() }
         await fulfillment(of: [started], timeout: 2)
-        let second = Task { await store.refresh() }
-        await Task.yield()
+        let joined = expectation(description: "Second refresh joined")
+        let second = Task { joined.fulfill(); await store.refresh() }
+        await fulfillment(of: [joined], timeout: 2)
         XCTAssertEqual(MockURLProtocol.requests.count, 1)
         gate.complete(with: payload)
         await first.value
