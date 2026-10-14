@@ -69,6 +69,22 @@ struct HomeView: View {
             LazyVStack(alignment: .leading, spacing: 16) {
                 if api.hasNotice { ConnectionNotice(api: api) }
                 if let d = api.dashboard { serverSummary(d.server); systemSummary(d) } else { DashboardPlaceholder(api: api) }
+                NavigationLink {
+                    StudentsView(api: api)
+                } label: {
+                    Panel {
+                        HStack(spacing: 12) {
+                            Image(systemName: "person.3").foregroundStyle(Brand.accent)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Students").font(.headline).foregroundStyle(.primary)
+                                Text("Student directory and messaging windows")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right").foregroundStyle(.secondary)
+                        }
+                    }
+                }.buttonStyle(.plain)
                 if !favorites.isEmpty {
                     SectionHeading(title: "Favorites")
                     LazyVGrid(columns: columns, spacing: 10) { ForEach(favorites) { tile($0) } }
@@ -146,3 +162,4 @@ extension DockerContainer {
     var displayStatus: String { isUnhealthy ? "Unhealthy" : (isRunning ? "Running" : (state?.capitalized ?? "Unknown")) }
 }
 extension PadelComponent { var isWhatsApp: Bool { id.lowercased() == "whatsapp" || name.lowercased().contains("whatsapp") } }
+

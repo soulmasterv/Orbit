@@ -527,6 +527,25 @@ final class ServerAPI: ObservableObject {
         return try JSONDecoder().decode(HealthResponse.self, from: data)
     }
 
+    // Reuse the app's URLSession, HTTPS validation and redirect protection.
+    // Students uses its own Keychain connection and never sends the bearer token.
+    func fetchStudents(connection: StudentsConnection) async throws -> StudentsSnapshot {
+        let connection = try connection.validated()
+        guard accessAllowed && !Task.isCancelled && !previewMode else { throw CancellationError() }
+        var command = try request(path: "/api/students", authenticated: false, endpoint: connection.baseURL)
+        command.setValue(connection.apiKey, forHTTPHeaderField: "X-API-Key")
+        command.timeoutInterval = 10
+        let (data, response) = try await session.data(for: command)
+        guard accessAllowed && !Task.isCancelled else { throw CancellationError() }
+        try validate(response)
+        let receivedAt = Date()
+        let students = try JSONDecoder().decode([Student].self, from: data)
+        guard Set(students.map(\.phone)).count == students.count else {
+            throw APIError.message("The Students response contains duplicate phone numbers.")
+        }
+        return StudentsSnapshot(students: students, receivedAt: receivedAt)
+    }
+
     static func encodedContainerName(_ name: String) throws -> String {
         guard !name.isEmpty, let encoded = name.addingPercentEncoding(withAllowedCharacters:
             CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~")) else {
@@ -654,4 +673,5 @@ enum APIError: LocalizedError {
     case message(String)
     var errorDescription: String? { if case .message(let text) = self { return text }; return nil }
 }
+
 

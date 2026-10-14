@@ -91,6 +91,15 @@ struct SettingsView: View {
                     Label("Local notifications", systemImage: "bell.badge")
                 }
             }
+            Section("Students") {
+                NavigationLink {
+                    StudentsSettingsView(api: api)
+                } label: {
+                    Label("Students connection", systemImage: "person.3")
+                }
+                Text("The Students base URL and API key are stored together in Keychain. This directory is read-only.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             Section("Diagnostics") {
                 LabeledContent("Primary server", value: api.baseURL).font(.caption).textSelection(.enabled)
                 LabeledContent("Active server", value: api.activeBaseURL).font(.caption).textSelection(.enabled)
@@ -142,4 +151,5 @@ struct SettingsView: View {
         } message: { Text("This disconnects the app. It does not change or revoke the token on Ubuntu.") }
     }
 }
+
 

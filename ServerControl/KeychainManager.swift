@@ -36,4 +36,38 @@ enum KeychainManager {
             throw APIError.message("The token could not be removed. Unlock your iPhone and try again.")
         }
     }
+
+    // One Keychain record keeps the Students URL and key together atomically.
+    private static var studentsQuery: [String: Any] {
+        [kSecClass as String: kSecClassGenericPassword,
+         kSecAttrService as String: "ServerControl",
+         kSecAttrAccount as String: "students-connection.v1"]
+    }
+    static func loadStudentsConnection() throws -> StudentsConnection? {
+        var lookup = studentsQuery
+        lookup[kSecReturnData as String] = true
+        lookup[kSecMatchLimit as String] = kSecMatchLimitOne
+        var result: AnyObject?
+        let status = SecItemCopyMatching(lookup as CFDictionary, &result)
+        if status == errSecItemNotFound { return nil }
+        guard status == errSecSuccess, let data = result as? Data else {
+            throw APIError.message("Unlock your iPhone to read the Students connection from Keychain.")
+        }
+        return try JSONDecoder().decode(StudentsConnection.self, from: data)
+    }
+    @MainActor static func saveStudentsConnection(_ connection: StudentsConnection) throws {
+        let valid = try connection.validated()
+        let attributes: [String: Any] = [
+            kSecValueData as String: try JSONEncoder().encode(valid),
+            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+        ]
+        var status = SecItemUpdate(studentsQuery as CFDictionary, attributes as CFDictionary)
+        if status == errSecItemNotFound {
+            status = SecItemAdd(studentsQuery.merging(attributes) { _, new in new } as CFDictionary, nil)
+        }
+        guard status == errSecSuccess else {
+            throw APIError.message("The Students connection could not be saved securely. Unlock your iPhone and try again.")
+        }
+    }
 }
+
