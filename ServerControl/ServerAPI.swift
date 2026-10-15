@@ -531,6 +531,44 @@ final class ServerAPI: ObservableObject {
 
     // Reuse the app's URLSession, HTTPS validation and redirect protection.
     // Students uses its own Keychain connection and never sends the bearer token.
+    // Mobile routes use only the Students credential and the same redirect-refusing
+    // URLSession. Each invocation performs exactly one request, including mutations.
+    func mobileData(connection: StudentsConnection, path: String, method: String = "GET", body: Data? = nil,
+                    requestID: UUID? = nil) async throws -> Data {
+        let connection = try connection.validated()
+        guard accessAllowed && !previewMode && !Task.isCancelled else { throw CancellationError() }
+        let epoch = studentsAccessGeneration
+        var command = try request(path: path, method: method, authenticated: false, endpoint: connection.baseURL)
+        command.setValue(connection.apiKey, forHTTPHeaderField: "X-API-Key")
+        if let body { command.httpBody = body; command.setValue("application/json", forHTTPHeaderField: "Content-Type") }
+        if let requestID { command.setValue(requestID.uuidString, forHTTPHeaderField: "Idempotency-Key") }
+        let (data, response) = try await session.data(for: command)
+        guard accessAllowed && epoch == studentsAccessGeneration && !Task.isCancelled else { throw CancellationError() }
+        try validate(response)
+        return data
+    }
+
+    func authorizeMobileSend(reason: String = "Send this confirmed plain-text message to one student.") async throws {
+        guard accessAllowed && !actionBusy && !previewMode else { throw StudentMutationFailure.notSent }
+        let epoch = studentsAccessGeneration
+        actionBusy = true
+        actionProgress = "Authorize one plain-text message…"
+        defer { actionBusy = false; actionProgress = "" }
+        try await authorize(reason)
+        guard accessAllowed && epoch == studentsAccessGeneration else { throw StudentMutationFailure.notSent }
+    }
+
+    func fetchFeedback(connection: StudentsConnection) async throws -> [FeedbackRecord] {
+        let data = try await mobileData(connection: connection, path: "/api/feedback?unresolved=false")
+        return try FeedbackRecord.decode(data)
+    }
+    func resolveFeedback(connection: StudentsConnection, id: Int, resolved: Bool) async throws {
+        guard id > 0 else { throw APIError.message("Invalid feedback identifier.") }
+        try await authorizeMobileSend(reason: resolved ? "Mark this school feedback report resolved." : "Reopen this school feedback report.")
+        let data = try await mobileData(connection: connection, path: "/api/feedback/\(id)", method: "PUT", body: JSONEncoder().encode(["resolved": resolved]))
+        guard try JSONDecoder().decode(StudentMutationAcknowledgement.self, from: data).ok else { throw APIError.message("Feedback update was not acknowledged. Refresh before another action.") }
+    }
+
     func fetchStudents(connection: StudentsConnection) async throws -> StudentsSnapshot {
         let connection = try connection.validated()
         guard accessAllowed && !Task.isCancelled && !previewMode else { throw CancellationError() }
@@ -715,6 +753,7 @@ enum APIError: LocalizedError {
     case message(String)
     var errorDescription: String? { if case .message(let text) = self { return text }; return nil }
 }
+
 
 
 
