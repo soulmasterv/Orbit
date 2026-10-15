@@ -26,6 +26,7 @@ struct StudentsView: View {
             LazyVStack(alignment: .leading, spacing: 12) {
                 Panel {
                     VStack(alignment: .leading, spacing: 8) {
+                        NavigationLink("Events, feedback & notifications") { MobileHubView(api: api) }
                         Picker("Filter", selection: $filter) {
                             ForEach(StudentsFilter.allCases) { Text($0.rawValue).tag($0) }
                         }.pickerStyle(.menu)
@@ -157,7 +158,7 @@ private struct StudentWindowStatus: View {
     }
 }
 
-private struct StudentDetailView: View {
+struct StudentDetailView: View {
     @ObservedObject var api: ServerAPI
     @ObservedObject var store: StudentsStore
     let phone: String
@@ -204,6 +205,12 @@ private struct StudentDetailView: View {
                             pending = action
                         }.disabled(store.managementUnavailableReason(for: student) != nil)
                     }
+                }
+                Section("Manual message") {
+                    NavigationLink("Compose plain text to this student") {
+                        StudentMessageComposer(api: api, students: store, phone: phone)
+                    }.disabled(!MobileRules.canSend(student, snapshot: snapshot) || store.requiresVerification || store.mutationBusy)
+                    Text("Requires active onboarding, Allowed activity and an open 24-hour window. Server support is checked before sending.").font(.caption).foregroundStyle(.secondary)
                 }
             } else {
                 Text("Student details are unavailable. Return to Students and refresh.")
@@ -274,4 +281,5 @@ private struct StudentActivityBadge: View {
             .accessibilityLabel("Bot reply activity: \(status.title)")
     }
 }
+
 
