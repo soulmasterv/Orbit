@@ -16,10 +16,11 @@ struct PendingCommand: Identifiable {
     }
 }
 enum DetailRoute: Hashable {
-    case process(Int), docker(String), service(ServicePage), logs(LogTarget, String)
+    case process(Int), docker(String), service(ServicePage), logs(LogTarget, String), mobileEvent(UUID)
 }
 
 struct ContentView: View {
+    @EnvironmentObject private var mobile: MobileStore
     @ObservedObject var api: ServerAPI
     @State private var pending: PendingCommand?
     @State private var selectedTab = ContentView.initialTab
@@ -61,6 +62,7 @@ struct ContentView: View {
                         case .docker(let name): ContainerDetailView(api: api, containerName: name, requestCommand: { pending = $0 })
                         case .service(let page): ServiceDetailView(api: api, page: page)
                         case .logs(let target, let name): LogViewer(api: api, target: target, name: name)
+                        case .mobileEvent(let id): MobileEventView(api: api, eventID: id)
                         }
                     }
             }
@@ -80,6 +82,12 @@ struct ContentView: View {
                 .tag(4)
         }
         .environmentObject(api.library)
+        .onChange(of: mobile.destination) { _, id in
+            if let id { selectedTab = 0; homePath = [.mobileEvent(id)]; mobile.destination = nil }
+        }
+        .onAppear {
+            if let id = mobile.destination { selectedTab = 0; homePath = [.mobileEvent(id)]; mobile.destination = nil }
+        }
         .tint(Brand.accent)
         .preferredColorScheme(colorScheme)
         .confirmationDialog(pending?.title ?? "Confirm command",
@@ -113,3 +121,4 @@ struct ContentView: View {
         }
     }
 }
+
