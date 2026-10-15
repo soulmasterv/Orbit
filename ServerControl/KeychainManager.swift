@@ -2,6 +2,26 @@ import Foundation
 import Security
 
 enum KeychainManager {
+    static func loadMobileState() throws -> MobileSecureState {
+        let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: "ServerControl", kSecAttrAccount as String: "mobile-state.v1",
+            kSecReturnData as String: true, kSecMatchLimit as String: kSecMatchLimitOne]
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        if status == errSecItemNotFound { return MobileSecureState() }
+        guard status == errSecSuccess, let data = result as? Data else { throw APIError.message("Unlock iPhone to read the saved mobile state.") }
+        return try JSONDecoder().decode(MobileSecureState.self, from: data)
+    }
+
+    static func saveMobileState(_ state: MobileSecureState) throws {
+        let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: "ServerControl", kSecAttrAccount as String: "mobile-state.v1"]
+        let values: [String: Any] = [kSecValueData as String: try JSONEncoder().encode(state),
+            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly]
+        var status = SecItemUpdate(query as CFDictionary, values as CFDictionary)
+        if status == errSecItemNotFound { status = SecItemAdd(query.merging(values) { _, new in new } as CFDictionary, nil) }
+        guard status == errSecSuccess else { throw APIError.message("Could not securely save mobile state. No new send will be dispatched.") }
+    }
     // Preserve V1's identity so an in-place SideStore update can keep the token.
     private static var query: [String: Any] {
         [kSecClass as String: kSecClassGenericPassword,
@@ -70,4 +90,5 @@ enum KeychainManager {
         }
     }
 }
+
 
