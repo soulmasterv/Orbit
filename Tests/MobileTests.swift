@@ -45,7 +45,12 @@ final class MobileTests: XCTestCase {
         return ServerAPI(session: URLSession(configuration: config), defaults: defaults, tokenProvider: { "forbidden-bearer" }, authorize: authorize)
     }
     private func store(_ api: ServerAPI) -> MobileStore {
-        MobileStore(api: api, load: { self.saved }, save: { self.saved = $0 }, connection: { self.connection })
+        MobileStore(api: api, load: { self.saved }, save: { next in
+            if next.outbox != nil && self.saved.outbox == nil {
+                XCTAssertFalse(MockURLProtocol.requests.contains { $0.httpMethod == "POST" }, "UUID and draft must be durable BEFORE dispatch")
+            }
+            self.saved = next
+        }, connection: { self.connection })
     }
     private func json(_ request: URLRequest) throws -> [String: Any] {
         var data = request.httpBody ?? Data()
@@ -219,6 +224,31 @@ final class MobileTests: XCTestCase {
         MockURLProtocol.handler = { _ in throw URLError(.timedOut) }
         do { try await store.prepareConnectionChange(); XCTFail("Must retain old connection") } catch {}
         XCTAssertEqual(saved.registeredConnection, connection)
+    }
+    func testPendingConnectionRevocationPreventsNewSend() async throws {
+        saved.registeredConnection = connection
+        let store = store(api()); await store.refresh()
+        let entered = expectation(description: "Revoking old destination")
+        let gate = DashboardRequestGate()
+        MockURLProtocol.onStart = { request in gate.capture(request); entered.fulfill() }
+        let change = Task { try await store.prepareConnectionChange() }
+        await fulfillment(of: [entered], timeout: 2)
+        await store.send(phone: phone, text: "Must not race settings")
+        XCTAssertNil(saved.outbox)
+        gate.complete(with: Data(#"{"ok":true}"#.utf8))
+        try await change.value
+        XCTAssertFalse(MockURLProtocol.requests.contains { $0.httpMethod == "POST" })
+    }
+    func testOldStudentsResponseRejectedAfterConnectionInvalidation() async {
+        let api = api()
+        let entered = expectation(description: "Old directory request")
+        let gate = DashboardRequestGate()
+        MockURLProtocol.onStart = { request in gate.capture(request); entered.fulfill() }
+        let old = Task { try await api.fetchStudents(connection: self.connection) }
+        await fulfillment(of: [entered], timeout: 2)
+        api.invalidateStudentsConnection()
+        gate.complete(with: Self.rows())
+        do { _ = try await old.value; XCTFail("Old connection must not publish") } catch {}
     }
     func testGenericPushAndDeduplicatedRoutingWhileUnlockedOnly() async throws {
         let id = UUID()
