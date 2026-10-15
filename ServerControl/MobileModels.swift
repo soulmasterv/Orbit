@@ -124,3 +124,21 @@ enum MobileRules {
     }
 }
 
+struct FeedbackRecord: Decodable, Identifiable {
+    let id: Int
+    let phone: String
+    let note: String
+    let question: String
+    let answer: String
+    let ts: Int
+    let resolved: Int
+    var isResolved: Bool { resolved == 1 }
+    var date: Date { Date(timeIntervalSince1970: TimeInterval(ts)) }
+    static func decode(_ data: Data) throws -> [FeedbackRecord] {
+        let rows = try JSONDecoder().decode([FeedbackRecord].self, from: data)
+        guard rows.allSatisfy({ [0, 1].contains($0.resolved) }), Set(rows.map(\.id)).count == rows.count else {
+            throw APIError.message("Feedback response is incompatible.")
+        }
+        return rows
+    }
+}
