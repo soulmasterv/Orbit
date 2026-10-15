@@ -78,6 +78,7 @@ final class ServerAPI: ObservableObject {
     private var logSnapshots: [LogTarget: LogSnapshot] = [:]
     private var logGeneration = 0
     private var classeraRecipients: [String: [String]] = [:]
+    private var studentsAccessGeneration = 0
 
     init(session: URLSession? = nil, defaults: UserDefaults = .standard,
          accessAllowed: Bool = true, snapshotStore: DashboardSnapshotStore? = nil,
@@ -122,6 +123,7 @@ final class ServerAPI: ObservableObject {
         guard accessAllowed != allowed else { return }
         accessAllowed = allowed
         if !allowed {
+            studentsAccessGeneration += 1
             needsVerification = true
             classeraRecipients.removeAll()
             refreshGeneration += 1
@@ -546,6 +548,46 @@ final class ServerAPI: ObservableObject {
         return StudentsSnapshot(students: students, receivedAt: receivedAt)
     }
 
+    func mutateStudent(connection: StudentsConnection, phone: String, action: StudentManagementAction) async throws {
+        let connection = try connection.validated()
+        guard !phone.isEmpty, phone.utf8.allSatisfy({ (48...57).contains($0) }) else {
+            throw APIError.message("The student identifier is invalid. Refresh the Students list.")
+        }
+        guard accessAllowed && !previewMode && !actionBusy && !Task.isCancelled else { throw StudentMutationFailure.notSent }
+        actionBusy = true
+        actionProgress = "Authorize student management…"
+        defer { actionBusy = false; actionProgress = "" }
+        let epoch = studentsAccessGeneration
+        do {
+            try await authorize("\(action.title) in the Students directory. \(action.explanation)")
+        } catch {
+            if DeviceAuthorization.isCancellation(error) || Self.isRefreshCancellation(error) { throw StudentMutationFailure.notSent }
+            throw StudentMutationFailure.authorizationFailed
+        }
+        guard accessAllowed && epoch == studentsAccessGeneration && !Task.isCancelled else { throw StudentMutationFailure.notSent }
+        let path = "/api/students/\(phone)" + (action == .remove ? "" : "/activity")
+        var command = try request(path: path, method: action == .remove ? "DELETE" : "PUT", authenticated: false, endpoint: connection.baseURL)
+        command.setValue(connection.apiKey, forHTTPHeaderField: "X-API-Key")
+        if let status = action.activityStatus {
+            command.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            command.httpBody = try JSONEncoder().encode(StudentActivityPayload(activityStatus: status.rawValue))
+        }
+        actionProgress = "Updating student…"
+        // Exactly one mutation request. Never use GET failover or retry it.
+        do {
+            let (data, response) = try await session.data(for: command)
+            guard accessAllowed && epoch == studentsAccessGeneration && !Task.isCancelled else { throw StudentMutationFailure.uncertain }
+            try validate(response)
+            guard (response as? HTTPURLResponse)?.statusCode == 200,
+                  let acknowledgement = try? JSONDecoder().decode(StudentMutationAcknowledgement.self, from: data),
+                  acknowledgement.ok else { throw StudentMutationFailure.uncertain }
+        } catch let failure as HTTPFailure {
+            throw failure
+        } catch {
+            throw StudentMutationFailure.uncertain
+        }
+    }
+
     static func encodedContainerName(_ name: String) throws -> String {
         guard !name.isEmpty, let encoded = name.addingPercentEncoding(withAllowedCharacters:
             CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~")) else {
@@ -673,5 +715,6 @@ enum APIError: LocalizedError {
     case message(String)
     var errorDescription: String? { if case .message(let text) = self { return text }; return nil }
 }
+
 
 

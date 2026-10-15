@@ -97,7 +97,7 @@ struct SettingsView: View {
                 } label: {
                     Label("Students connection", systemImage: "person.3")
                 }
-                Text("The Students base URL and API key are stored together in Keychain. This directory is read-only.")
+                Text("The Students base URL and API key are stored together in Keychain. Management requires a compatible backend and device authorization.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("Diagnostics") {
@@ -151,5 +151,6 @@ struct SettingsView: View {
         } message: { Text("This disconnects the app. It does not change or revoke the token on Ubuntu.") }
     }
 }
+
 
 

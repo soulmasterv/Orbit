@@ -24,7 +24,7 @@ struct StudentsSettingsView: View {
                   Text("Enter the base URL only; the app adds /api/students. Both the URL and API key are kept in Keychain on this iPhone. Save only a server you trust. Leave the key blank to keep its current value when the URL is unchanged.")
               }
             Section {
-                Text("V1 is read-only. The app cannot send messages, edit students or delete records.")
+                Text("Management controls require a compatible backend. Blocking and suspension only stop bot replies when the server enforces these restrictions. This app does not send student messages.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
@@ -56,3 +56,4 @@ struct StudentsSettingsView: View {
         } catch { result = StudentsStore.message(for: error) }
     }
 }
+

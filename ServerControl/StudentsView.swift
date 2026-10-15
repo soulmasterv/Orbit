@@ -8,6 +8,7 @@ struct StudentsView: View {
     @State private var search = ""
     @State private var filter: StudentsFilter = .all
     @State private var selectedGrade = ""
+    @State private var refreshOwner = UUID()
 
     init(api: ServerAPI) {
         self.api = api
@@ -49,6 +50,10 @@ struct StudentsView: View {
                         }
                     }
                 }
+                if let actionError = store.actionError {
+                    Label(actionError, systemImage: "exclamationmark.circle").font(.caption).foregroundStyle(.orange)
+                }
+                if let notice = store.actionNotice { Text(notice).font(.caption).foregroundStyle(.secondary) }
                 if store.loading && store.snapshot == nil {
                     ProgressView("Loading students…").frame(maxWidth: .infinity).padding(.vertical, 40)
                 } else if let snapshot = store.snapshot {
@@ -69,13 +74,13 @@ struct StudentsView: View {
                 RefreshIndicator(loading: store.loading) { Task { if refreshEnabled { await store.refresh() } } }
             }
         }
-        .onAppear { visible = true }
+        .onAppear { store.claimVisibility(refreshOwner); visible = true }
         .onChange(of: grades) { _, available in
             if !selectedGrade.isEmpty && !available.contains(selectedGrade) { selectedGrade = "" }
         }
-        .onDisappear { visible = false; store.suspend() }
+        .onDisappear { visible = false; store.suspend(owner: refreshOwner) }
         .task(id: refreshEnabled) {
-            guard refreshEnabled else { store.suspend(clear: !api.accessAllowed); return }
+            guard refreshEnabled else { store.suspend(owner: refreshOwner, clear: !api.accessAllowed); return }
             await store.refresh()
             while !Task.isCancelled {
                 do { try await Task.sleep(for: .seconds(60)) } catch { return }
@@ -97,7 +102,7 @@ struct StudentsView: View {
             Text("\(rows.count) students").font(.caption).foregroundStyle(.secondary)
             ForEach(rows) { student in
                 NavigationLink {
-                    StudentDetailView(store: store, phone: student.phone)
+                    StudentDetailView(api: api, store: store, phone: student.phone)
                 } label: {
                     Panel {
                         VStack(alignment: .leading, spacing: 8) {
@@ -111,6 +116,7 @@ struct StudentsView: View {
                                 Spacer(minLength: 8)
                                 Text(student.maskedPhone).monospacedDigit()
                             }.font(.caption).foregroundStyle(.secondary)
+                            StudentActivityBadge(status: student.activityStatus)
                         }.frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }.buttonStyle(.plain)
@@ -152,8 +158,15 @@ private struct StudentWindowStatus: View {
 }
 
 private struct StudentDetailView: View {
+    @ObservedObject var api: ServerAPI
     @ObservedObject var store: StudentsStore
     let phone: String
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var visible = false
+    @State private var refreshOwner = UUID()
+    @State private var pending: StudentManagementAction?
+    private var refreshEnabled: Bool { visible && scenePhase == .active && api.accessAllowed }
 
     var body: some View {
         Form {
@@ -161,6 +174,7 @@ private struct StudentDetailView: View {
                 Section("Student") {
                     LabeledContent("Name", value: student.displayName)
                     LabeledContent("Phone", value: student.phone).textSelection(.enabled)
+                    LabeledContent("Onboarding", value: student.stateLabel)
                     if student.state == "active" {
                         LabeledContent("Grade", value: student.displayGrade)
                     } else {
@@ -178,14 +192,86 @@ private struct StudentDetailView: View {
                         }
                     }
                 }
+                Section("Bot reply activity") {
+                    StudentActivityBadge(status: student.activityStatus)
+                    Text("Separate from onboarding and the WhatsApp 24-hour messaging window. Server-side enforcement is required.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    if let reason = store.managementUnavailableReason(for: student) {
+                        Text(reason).font(.caption).foregroundStyle(.secondary)
+                    }
+                    ForEach(actions(for: student.activityStatus)) { action in
+                        Button(action.title, role: action == .remove || action == .block ? .destructive : nil) {
+                            pending = action
+                        }.disabled(store.managementUnavailableReason(for: student) != nil)
+                    }
+                }
             } else {
                 Text("Student details are unavailable. Return to Students and refresh.")
             }
+            if store.actionError != nil || store.error != nil || store.actionNotice != nil || store.requiresVerification {
+                Section("Management result") {
+                    if let failure = store.actionError { Text(failure).foregroundStyle(.orange) }
+                    if let failure = store.error { Text(failure).foregroundStyle(.orange) }
+                    if let notice = store.actionNotice { Text(notice).foregroundStyle(.secondary) }
+                    Button("Refresh Students") { Task { await store.refresh() } }
+                        .disabled(store.mutationBusy || store.loading || !api.accessAllowed)
+                }
+            }
         }.navigationTitle("Student Details").navigationBarTitleDisplayMode(.inline)
+        .navigationBarBackButtonHidden(store.mutationBusy)
+        .onAppear { store.claimVisibility(refreshOwner); visible = true }
+        .onDisappear { visible = false; store.suspend(owner: refreshOwner) }
+        .task(id: refreshEnabled) {
+            guard refreshEnabled else { store.suspend(owner: refreshOwner, clear: !api.accessAllowed); return }
+            await store.refresh()
+            while !Task.isCancelled {
+                do { try await Task.sleep(for: .seconds(60)) } catch { return }
+                guard refreshEnabled && !Task.isCancelled else { return }
+                await store.refresh()
+            }
+        }
+        .refreshable { if refreshEnabled { await store.refresh() } }
+        .confirmationDialog(pending.map { "\($0.title)?" } ?? "Confirm student action",
+            isPresented: Binding(get: { pending != nil }, set: { if !$0 { pending = nil } }),
+            titleVisibility: .visible, presenting: pending) { action in
+                Button(action.title, role: action == .remove || action == .block ? .destructive : nil) {
+                    Task {
+                        let succeeded = await store.manage(phone: phone, action: action)
+                        if succeeded && action == .remove { dismiss() }
+                    }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: { action in Text(action.explanation + " Authorize on your iPhone next.") }
     }
 
     private func timestamp(_ value: Date?) -> String {
         guard let value else { return "Unavailable" }
         return value.formatted(date: .abbreviated, time: .shortened)
     }
+    private func actions(for status: StudentActivityStatus) -> [StudentManagementAction] {
+        switch status {
+        case .blocked: return [.unblock, .remove]
+        case .suspended: return [.resume, .block, .remove]
+        case .allowed, .unknown: return [.suspend, .block, .remove]
+        }
+    }
 }
+
+private struct StudentActivityBadge: View {
+    let status: StudentActivityStatus
+    private var color: Color {
+        switch status {
+        case .allowed: return .green
+        case .suspended: return .orange
+        case .blocked: return .red
+        case .unknown: return .gray
+        }
+    }
+    var body: some View {
+        Text("Activity: \(status.title)").font(.caption.weight(.medium))
+            .foregroundStyle(color).padding(.horizontal, 8).padding(.vertical, 4)
+            .background(color.opacity(0.12), in: Capsule())
+            .accessibilityLabel("Bot reply activity: \(status.title)")
+    }
+}
+
