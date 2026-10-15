@@ -79,7 +79,7 @@ final class MobileStore: ObservableObject {
         do { try update { $0.drafts[phone] = text } } catch { self.error = MobileRules.error(error) }
     }
     func send(phone: String, text: String) async {
-        guard !busy && api.accessAllowed else { return }
+        guard !busy && !pushBusy && !api.actionBusy && api.accessAllowed else { return }
         busy = true
         defer { busy = false }
         do {
@@ -228,7 +228,7 @@ final class MobileStore: ObservableObject {
         lastRegisteredToken = nil
     }
     func prepareConnectionChange() async throws {
-        guard !busy && !pushBusy else { throw APIError.message("Wait for the current operation before changing Students settings.") }
+        guard !busy && !pushBusy && !api.actionBusy else { throw APIError.message("Wait for the current operation before changing Students settings.") }
         try ensureLoaded()
         guard state?.outbox == nil else { throw APIError.message("Review the saved message operation before changing Students server/account.") }
         pushBusy = true
@@ -236,5 +236,6 @@ final class MobileStore: ObservableObject {
         try await revoke()
         try update { $0.pushEnabled = false; $0.drafts = [:]; $0.queuedEvents = []; $0.handledEvents = [] }
         generation += 1; capabilities = nil; capabilityConnection = nil; events = []
+        api.invalidateStudentsConnection()
     }
 }
