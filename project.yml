@@ -28,6 +28,16 @@ targets:
         CODE_SIGNING_ALLOWED: "NO"
         CODE_SIGNING_REQUIRED: "NO"
         CODE_SIGN_IDENTITY: ""
+        CODE_SIGN_ENTITLEMENTS: ServerControl/ServerControl.entitlements
+        APNS_ENVIRONMENT: production
+      configs:
+        Debug:
+          APNS_ENVIRONMENT: development
+
+    attributes:
+      SystemCapabilities:
+        com.apple.Push:
+          enabled: 1
 
     info:
       path: ServerControl/Info.plist
@@ -61,4 +71,5 @@ schemes:
       config: Debug
       targets:
         - ServerControlTests
+
 
