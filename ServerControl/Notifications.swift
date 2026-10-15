@@ -130,11 +130,10 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification,
                                            withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
         if notification.request.trigger is UNPushNotificationTrigger {
-            if let content = Self.genericRemoteContent(notification.request.content.userInfo) {
-                let id = MobileRules.pushEvent(content.userInfo)
+            if let content = Self.genericRemoteContent(notification.request.content.userInfo), let id = MobileRules.pushEvent(content.userInfo) {
                 Task { @MainActor in self.incomingEvent = id }
                 // Replace remote foreground text with a known generic local alert.
-                let request = UNNotificationRequest(identifier: "mobile-event-\(id!.uuidString)", content: content, trigger: nil)
+                let request = UNNotificationRequest(identifier: "mobile-event-\(id.uuidString)", content: content, trigger: nil)
                 center.add(request) { _ in }
             }
             completionHandler([])
