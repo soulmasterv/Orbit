@@ -122,6 +122,7 @@ struct StudentMessageComposer: View {
     @Environment(\.scenePhase) private var phase
     @State private var text = ""
     @State private var confirming = false
+    @State private var refreshOwner = UUID()
     private var eligible: Bool {
         guard !students.requiresVerification, !students.mutationBusy, let snapshot = students.snapshot,
               let student = snapshot.students.first(where: { $0.phone == phone }) else { return false }
@@ -132,6 +133,11 @@ struct StudentMessageComposer: View {
             Section("One student only") {
                 LabeledContent("Recipient", value: phone)
                 Text("Manual plain text only. The server makes the final window and restriction check. No template fallback or automatic reminder.").font(.caption)
+                if let snapshot = students.snapshot, let student = snapshot.students.first(where: { $0.phone == phone }) {
+                    TimelineView(.periodic(from: .now, by: 1)) { _ in
+                        Text("Window remaining: \(snapshot.countdown(for: student)) (advisory)").font(.caption).monospacedDigit()
+                    }
+                }
                 TextEditor(text: $text).frame(minHeight: 150).disabled(mobile.busy)
                 Text("\(text.trimmingCharacters(in: .whitespacesAndNewlines).count) / 3500 characters").font(.caption)
                 if !eligible { Text("Refresh required: student must be active, Allowed and inside the open 24-hour window.").foregroundStyle(.orange) }
@@ -143,9 +149,12 @@ struct StudentMessageComposer: View {
             if mobile.state?.outbox != nil { Section { NavigationLink("Saved operation — inspect status") { MessageOutboxView() } } }
             MobileResultSection()
         }.navigationTitle("Compose Message")
-        .onAppear { text = mobile.draft(phone: phone) }
+        .onAppear { students.claimVisibility(refreshOwner); text = mobile.draft(phone: phone) }
+        .onDisappear { students.suspend(owner: refreshOwner) }
         .onChange(of: text) { _, value in mobile.saveDraft(phone: phone, text: value) }
-        .task { await students.refresh(); await mobile.refresh() }
+        .task(id: phase == .active && api.accessAllowed) {
+            if phase == .active && api.accessAllowed { await students.refresh(); await mobile.refresh() }
+        }
         .task(id: "\(phase == .active)-\(mobile.state?.outbox?.requestID.uuidString ?? "none")") {
             if phase == .active && mobile.state?.outbox != nil { await mobile.boundedRecovery() }
         }
@@ -257,4 +266,5 @@ struct MobileFeedbackView: View {
         } catch { if api.accessAllowed { failure = MobileRules.error(error) + " Refresh before another action. No mutation was retried." } }
     }
 }
+
 
