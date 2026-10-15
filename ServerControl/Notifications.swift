@@ -73,6 +73,10 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
     @Published private(set) var permissionAllowed = false
     @Published private(set) var busy = false
     @Published var result: String?
+    @Published var apnsToken: String?
+    @Published var remoteError: String?
+    @Published var tappedEvents: [UUID] = []
+    @Published var incomingEvent: UUID?
     private let center = UNUserNotificationCenter.current()
 
     override init() {
@@ -125,7 +129,36 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification,
                                            withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
-        completionHandler([.banner, .sound])
+        if notification.request.trigger is UNPushNotificationTrigger {
+            if let content = Self.genericRemoteContent(notification.request.content.userInfo) {
+                let id = MobileRules.pushEvent(content.userInfo)
+                Task { @MainActor in self.incomingEvent = id }
+                // Replace remote foreground text with a known generic local alert.
+                let request = UNNotificationRequest(identifier: "mobile-event-\(id!.uuidString)", content: content, trigger: nil)
+                center.add(request) { _ in }
+            }
+            completionHandler([])
+        } else { completionHandler([.banner, .sound]) }
+    }
+
+    nonisolated static func genericRemoteContent(_ payload: [AnyHashable: Any]) -> UNMutableNotificationContent? {
+        guard let id = MobileRules.pushEvent(payload), let kind = payload["kind"] as? String else { return nil }
+        let content = UNMutableNotificationContent()
+        content.title = kind == "answer_flagged" ? "Answer flagged" : "Student onboarded"
+        content.body = kind == "answer_flagged" ? "New feedback is ready to review." : "A student completed onboarding."
+        content.sound = .default
+        content.userInfo = ["event_id": id.uuidString, "kind": kind]
+        return content
+    }
+
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
+                                           withCompletionHandler completionHandler: @escaping () -> Void) {
+        if let id = MobileRules.pushEvent(response.notification.request.content.userInfo) {
+            Task { @MainActor in
+                if !self.tappedEvents.contains(id) { self.tappedEvents.append(id) }
+            }
+        }
+        completionHandler()
     }
 }
 
@@ -154,3 +187,4 @@ struct NotificationSettingsView: View {
             .monospacedDigit()
     }
 }
+
