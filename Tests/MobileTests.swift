@@ -245,6 +245,18 @@ final class MobileTests: XCTestCase {
         XCTAssertNil(SignedPushIdentity.entitlements(in: Data()))
         XCTAssertNil(SignedPushIdentity.entitlements(in: Data(repeating: 0xff, count: 100)))
     }
+    func testSignedExecutableEntitlementBlobIsReadWithBoundsChecks() throws {
+        let xml = try PropertyListSerialization.data(fromPropertyList: ["aps-environment":"production", "com.apple.developer.team-identifier":"TESTTEAM", "application-identifier":"TESTTEAM.com.example.mock"], format: .xml, options: 0)
+        var data = Data(repeating: 0, count: 48)
+        func writeLE(_ value: UInt32, at offset: Int) { for index in 0..<4 { data[offset + index] = UInt8((value >> (index * 8)) & 255) } }
+        func appendBE(_ value: Int) { for shift in [24, 16, 8, 0] { data.append(UInt8((value >> shift) & 255)) } }
+        writeLE(0xfeedfacf, at: 0); writeLE(1, at: 16); writeLE(0x1d, at: 32); writeLE(16, at: 36)
+        writeLE(48, at: 40); writeLE(UInt32(28 + xml.count), at: 44)
+        appendBE(0xfade0cc0); appendBE(28 + xml.count); appendBE(1); appendBE(5); appendBE(20)
+        appendBE(0xfade7171); appendBE(8 + xml.count); data.append(xml)
+        XCTAssertEqual(SignedPushIdentity.entitlements(in: data)?["aps-environment"] as? String, "production")
+        XCTAssertNil(SignedPushIdentity.entitlements(in: data.dropLast(10)))
+    }
     func testFeedbackIntegerStatusFullListAndResolveReopen() async throws {
         let rows = Data(#"[{"id":12,"phone":"201000000001","note":"/wrong incorrect date","question":"Q","answer":"A","ts":1792070000,"resolved":0}]"#.utf8)
         let decoded = try FeedbackRecord.decode(rows)
