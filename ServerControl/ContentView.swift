@@ -20,15 +20,16 @@ enum DetailRoute: Hashable {
 }
 
 struct ContentView: View {
-    @EnvironmentObject private var mobile: MobileStore
+    @ObservedObject private var mobile: MobileStore
     @ObservedObject var api: ServerAPI
     @State private var pending: PendingCommand?
     @State private var selectedTab = ContentView.initialTab
     @State private var homePath: [DetailRoute] = []
     @AppStorage("appearance.v2") private var appearance = AppAppearance.system.rawValue
 
-    init(api: ServerAPI, initialTab: Int? = nil, initialDestination: DetailRoute? = nil) {
+    init(api: ServerAPI, initialTab: Int? = nil, initialDestination: DetailRoute? = nil, mobile: MobileStore? = nil) {
         self.api = api
+        self.mobile = mobile ?? MobileStore(api: api)
         _selectedTab = State(initialValue: initialTab ?? Self.initialTab)
         _homePath = State(initialValue: initialDestination.map { [$0] } ?? [])
     }
@@ -82,6 +83,7 @@ struct ContentView: View {
                 .tag(4)
         }
         .environmentObject(api.library)
+        .environmentObject(mobile)
         .onChange(of: mobile.destination) { _, id in
             if let id { selectedTab = 0; homePath = [.mobileEvent(id)]; mobile.destination = nil }
         }
