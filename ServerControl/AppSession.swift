@@ -74,7 +74,7 @@ struct AppRootView: View {
     var body: some View {
         ZStack {
             if session.isUnlocked {
-                ContentView(api: api)
+                ContentView(api: api, mobile: mobile)
                     .environmentObject(mobile)
                     .disabled(privacyCover)
                     .accessibilityHidden(privacyCover)
