@@ -59,15 +59,23 @@ final class AppSession: ObservableObject {
 }
 
 struct AppRootView: View {
-    @StateObject private var api = ServerAPI(accessAllowed: false, snapshotStore: DashboardSnapshotStore())
+    @StateObject private var api: ServerAPI
+    @StateObject private var mobile: MobileStore
     @StateObject private var session = AppSession()
     @Environment(\.scenePhase) private var phase
     @State private var privacyCover = true
+
+    init() {
+        let api = ServerAPI(accessAllowed: false, snapshotStore: DashboardSnapshotStore())
+        _api = StateObject(wrappedValue: api)
+        _mobile = StateObject(wrappedValue: MobileStore(api: api))
+    }
 
     var body: some View {
         ZStack {
             if session.isUnlocked {
                 ContentView(api: api)
+                    .environmentObject(mobile)
                     .disabled(privacyCover)
                     .accessibilityHidden(privacyCover)
             }
@@ -79,12 +87,38 @@ struct AppRootView: View {
             }
         }
         .task { await activateIfNeeded() }
+        .task(id: phase == .active && api.accessAllowed) {
+            guard phase == .active && api.accessAllowed else { return }
+            await mobile.refresh()
+            await NotificationManager.shared.refreshPermission()
+            if mobile.state?.pushEnabled == true {
+                if NotificationManager.shared.permissionAllowed {
+                    if SignedPushIdentity.current() != nil { UIApplication.shared.registerForRemoteNotifications() }
+                    if let token = NotificationManager.shared.apnsToken { await mobile.syncPush(token: token) }
+                } else { await mobile.setPushEnabled(false) }
+            }
+            for id in NotificationManager.shared.tappedEvents { mobile.queue(eventID: id) }
+            NotificationManager.shared.tappedEvents = []
+            if let id = mobile.state?.queuedEvents.first { mobile.destination = id }
+            await mobile.boundedRecovery()
+        }
+        .onReceive(NotificationManager.shared.$apnsToken) { token in
+            if let token, phase == .active && api.accessAllowed { Task { await mobile.syncPush(token: token) } }
+        }
+        .onReceive(NotificationManager.shared.$incomingEvent) { id in
+            if id != nil && phase == .active && api.accessAllowed { Task { await mobile.refresh() } }
+        }
+        .onReceive(NotificationManager.shared.$tappedEvents) { ids in
+            guard phase == .active && api.accessAllowed else { return }
+            for id in ids { mobile.queue(eventID: id) }
+        }
         .onChange(of: phase) { _, phase in
             privacyCover = phase != .active
             if phase == .background {
                 session.lock()
                 DeviceAuthorization.cancelCurrentAuthentication()
                 api.setAccessAllowed(false)
+                mobile.suspend()
             } else if phase == .active {
                 Task { await activateIfNeeded() }
             }
@@ -135,4 +169,5 @@ struct LockScreen: View {
         }.padding(32)
     }
 }
+
 
