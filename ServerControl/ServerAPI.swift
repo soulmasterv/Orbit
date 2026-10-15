@@ -564,10 +564,16 @@ final class ServerAPI: ObservableObject {
     }
     func resolveFeedback(connection: StudentsConnection, id: Int, resolved: Bool) async throws {
         guard id > 0 else { throw APIError.message("Invalid feedback identifier.") }
+        let epoch = studentsAccessGeneration
         try await authorizeMobileSend(reason: resolved ? "Mark this school feedback report resolved." : "Reopen this school feedback report.")
+        guard epoch == studentsAccessGeneration && accessAllowed else { throw CancellationError() }
+        actionBusy = true
+        defer { actionBusy = false }
         let data = try await mobileData(connection: connection, path: "/api/feedback/\(id)", method: "PUT", body: JSONEncoder().encode(["resolved": resolved]))
         guard try JSONDecoder().decode(StudentMutationAcknowledgement.self, from: data).ok else { throw APIError.message("Feedback update was not acknowledged. Refresh before another action.") }
     }
+
+    func invalidateStudentsConnection() { studentsAccessGeneration += 1 }
 
     func fetchStudents(connection: StudentsConnection) async throws -> StudentsSnapshot {
         let connection = try connection.validated()
@@ -575,8 +581,9 @@ final class ServerAPI: ObservableObject {
         var command = try request(path: "/api/students", authenticated: false, endpoint: connection.baseURL)
         command.setValue(connection.apiKey, forHTTPHeaderField: "X-API-Key")
         command.timeoutInterval = 10
+        let epoch = studentsAccessGeneration
         let (data, response) = try await session.data(for: command)
-        guard accessAllowed && !Task.isCancelled else { throw CancellationError() }
+        guard accessAllowed && epoch == studentsAccessGeneration && !Task.isCancelled else { throw CancellationError() }
         try validate(response)
         let receivedAt = Date()
         let students = try JSONDecoder().decode([Student].self, from: data)
