@@ -1,5 +1,6 @@
 import XCTest
-import UserNotifications
+import SwiftUI
+import UIKit
 @testable import ServerControl
 
 @MainActor
@@ -65,7 +66,6 @@ final class MobileTests: XCTestCase {
     func testCapabilitiesAuthenticatedAndReadinessSeparate() async {
         let store = store(api()); await store.refresh()
         XCTAssertTrue(store.capabilities?.supportsMessages == true)
-        XCTAssertFalse(store.capabilities?.push.configured == true)
         XCTAssertTrue(MockURLProtocol.requests.allSatisfy { $0.value(forHTTPHeaderField: "X-API-Key") == "mock-students-key" && $0.value(forHTTPHeaderField: "Authorization") == nil })
         XCTAssertEqual(MockURLProtocol.requests.last?.url?.query, "limit=50")
     }
@@ -191,33 +191,6 @@ final class MobileTests: XCTestCase {
             XCTAssertNotNil(saved.outbox)
         }
     }
-    func testPushDeniedAndMissingEntitlementDoNotRegister() async {
-        saved.pushEnabled = true
-        let store = store(api()); await store.refresh(); MockURLProtocol.requests = []
-        let identity = SignedPushIdentity(environment: "production", teamID: "TESTTEAM", bundleID: "com.example.mock")
-        await store.syncPush(token: "abcd", identity: identity, permissionAllowed: false)
-        await store.syncPush(token: "abcd", identity: nil, permissionAllowed: true)
-        XCTAssertTrue(MockURLProtocol.requests.isEmpty)
-    }
-    func testPushRotationRevocationAndMismatch() async throws {
-        saved.pushEnabled = true
-        let store = store(api()); await store.refresh(); MockURLProtocol.requests = []
-        let identity = SignedPushIdentity(environment: "production", teamID: "TESTTEAM", bundleID: "com.example.mock")
-        await store.syncPush(token: "abcd", identity: identity, permissionAllowed: true)
-        await store.syncPush(token: "abcd", identity: identity, permissionAllowed: true)
-        await store.syncPush(token: "ef01", identity: identity, permissionAllowed: true)
-        let puts = MockURLProtocol.requests.filter { $0.httpMethod == "PUT" }
-        XCTAssertEqual(puts.count, 2)
-        XCTAssertEqual(puts.first?.url?.path, "/api/push/devices/\(saved.installationID.uuidString)")
-        XCTAssertEqual(try json(puts[1])["token"] as? String, "ef01")
-        XCTAssertEqual(try json(puts[1])["environment"] as? String, "production")
-        XCTAssertEqual(try json(puts[1])["topics"] as? [String], ["onboarding_completed", "answer_flagged"])
-        await store.syncPush(token: "aaaa", identity: SignedPushIdentity(environment: "sandbox", teamID: "TESTTEAM", bundleID: "com.example.mock"), permissionAllowed: true)
-        XCTAssertEqual(MockURLProtocol.requests.filter { $0.httpMethod == "PUT" }.count, 2)
-        try await store.prepareConnectionChange()
-        XCTAssertEqual(MockURLProtocol.requests.last?.httpMethod, "DELETE")
-        XCTAssertNil(saved.registeredConnection); XCTAssertFalse(saved.pushEnabled)
-    }
     func testFailedRevocationBlocksConnectionChange() async {
         saved.registeredConnection = connection
         let store = store(api()); await store.refresh()
@@ -250,42 +223,12 @@ final class MobileTests: XCTestCase {
         gate.complete(with: Self.rows())
         do { _ = try await old.value; XCTFail("Old connection must not publish") } catch {}
     }
-    func testGenericPushAndDeduplicatedRoutingWhileUnlockedOnly() async throws {
-        let id = UUID()
-        let payload: [AnyHashable: Any] = ["event_id":id.uuidString, "kind":"answer_flagged", "phone":"private", "question":"private", "token":"private"]
-        let content = try XCTUnwrap(NotificationManager.genericRemoteContent(payload))
-        XCTAssertEqual(content.userInfo.count, 2)
-        XCTAssertNil(content.userInfo["phone"]); XCTAssertFalse(content.body.contains("private"))
-        let api = api(); let store = store(api); await store.refresh()
-        store.queue(eventID: id); store.queue(eventID: id)
-        XCTAssertEqual(saved.queuedEvents, [id]); store.completed(eventID: id); store.queue(eventID: id)
-        XCTAssertTrue(saved.queuedEvents.isEmpty)
-        api.setAccessAllowed(false); store.suspend(); MockURLProtocol.requests = []
-        do { _ = try await store.event(id); XCTFail("Locked") } catch {}
-        XCTAssertTrue(MockURLProtocol.requests.isEmpty)
-    }
     func testDeletedEventAndFeedbackAreGraceful() async throws {
         let store = store(api()); await store.refresh()
         MockURLProtocol.handler = { _ in (404, Data()) }
         do { _ = try await store.event(UUID()); XCTFail("Missing event") } catch { XCTAssertTrue(MobileRules.error(error).contains("deleted")) }
         XCTAssertTrue(try FeedbackRecord.decode(Data("[]".utf8)).isEmpty)
         XCTAssertThrowsError(try FeedbackRecord.decode(Data(#"{"error":"private"}"#.utf8)))
-    }
-    func testUnsignedExecutableNeverGuessesEnvironment() {
-        XCTAssertNil(SignedPushIdentity.entitlements(in: Data()))
-        XCTAssertNil(SignedPushIdentity.entitlements(in: Data(repeating: 0xff, count: 100)))
-    }
-    func testSignedExecutableEntitlementBlobIsReadWithBoundsChecks() throws {
-        let xml = try PropertyListSerialization.data(fromPropertyList: ["aps-environment":"production", "com.apple.developer.team-identifier":"TESTTEAM", "application-identifier":"TESTTEAM.com.example.mock"], format: .xml, options: 0)
-        var data = Data(repeating: 0, count: 48)
-        func writeLE(_ value: UInt32, at offset: Int) { for index in 0..<4 { data[offset + index] = UInt8((value >> (index * 8)) & 255) } }
-        func appendBE(_ value: Int) { for shift in [24, 16, 8, 0] { data.append(UInt8((value >> shift) & 255)) } }
-        writeLE(0xfeedfacf, at: 0); writeLE(1, at: 16); writeLE(0x1d, at: 32); writeLE(16, at: 36)
-        writeLE(48, at: 40); writeLE(UInt32(28 + xml.count), at: 44)
-        appendBE(0xfade0cc0); appendBE(28 + xml.count); appendBE(1); appendBE(5); appendBE(20)
-        appendBE(0xfade7171); appendBE(8 + xml.count); data.append(xml)
-        XCTAssertEqual(SignedPushIdentity.entitlements(in: data)?["aps-environment"] as? String, "production")
-        XCTAssertNil(SignedPushIdentity.entitlements(in: data.dropLast(10)))
     }
     func testFeedbackIntegerStatusFullListAndResolveReopen() async throws {
         let rows = Data(#"[{"id":12,"phone":"201000000001","note":"/wrong incorrect date","question":"Q","answer":"A","ts":1792070000,"resolved":0}]"#.utf8)
@@ -308,4 +251,76 @@ final class MobileTests: XCTestCase {
         do { try await api.resolveFeedback(connection: connection, id: 12, resolved: true); XCTFail("Uncertain mutation") } catch {}
         XCTAssertEqual(MockURLProtocol.requests.count, 1)
     }
+
+    func testNotificationRetirementOnlyDeletesAndPreservesPendingSend() async throws {
+        saved.pushEnabled = true; saved.registeredConnection = connection
+        let pending = PendingAdminMessage(requestID: UUID(), connection: connection, phone: phone, text: "Keep this draft", attempted: true)
+        saved.outbox = pending; saved.drafts[phone] = pending.text
+        let mobile = store(api())
+        await mobile.retireNotifications()
+        XCTAssertFalse(saved.pushEnabled); XCTAssertNil(saved.registeredConnection)
+        XCTAssertEqual(saved.outbox?.requestID, pending.requestID)
+        XCTAssertEqual(saved.drafts[phone], pending.text)
+        XCTAssertEqual(MockURLProtocol.requests.count, 1)
+        XCTAssertEqual(MockURLProtocol.requests.first?.httpMethod, "DELETE")
+        XCTAssertEqual(MockURLProtocol.requests.first?.value(forHTTPHeaderField: "X-API-Key"), connection.apiKey)
+        await mobile.retireNotifications()
+        XCTAssertEqual(MockURLProtocol.requests.count, 1)
+    }
+
+    func testRetirementFailureKeepsDestinationForCleanupWithoutEnablingPush() async {
+        saved.pushEnabled = true; saved.registeredConnection = connection
+        MockURLProtocol.handler = { _ in throw URLError(.timedOut) }
+        await store(api()).retireNotifications()
+        XCTAssertFalse(saved.pushEnabled)
+        XCTAssertEqual(saved.registeredConnection, connection)
+        XCTAssertEqual(MockURLProtocol.requests.count, 1)
+        XCTAssertEqual(MockURLProtocol.requests.first?.httpMethod, "DELETE")
+    }
+
+    func testDirectoryFiltersPreserveOrderAndSeparateWindowFromReplyPermission() throws {
+        let data = Data(#"[{"phone":"201000000003","name":"Sam Example","grade":"12","state":"active","activity_status":"suspended","window_open":true,"seconds_left":30},{"phone":"201000000002","name":"Lina Example","grade":"10","state":"active","activity_status":"allowed","window_open":false,"seconds_left":0},{"phone":"201000000001","name":null,"grade":null,"state":"awaiting_name","window_open":true,"seconds_left":120}]"#.utf8)
+        let students = try JSONDecoder().decode([Student].self, from: data)
+        let instant = ContinuousClock.now
+        let snapshot = StudentsSnapshot(students: students, receivedAt: Date(), receivedInstant: instant)
+        XCTAssertEqual(StudentsDirectory.filtered(snapshot, search: "", filter: .all, grade: "", at: instant).map(\.phone), students.map(\.phone))
+        XCTAssertEqual(StudentsDirectory.filtered(snapshot, search: " sam ", filter: .open, grade: "", at: instant).map(\.phone), [students[0].phone])
+        XCTAssertEqual(StudentsDirectory.filtered(snapshot, search: "0002", filter: .closed, grade: "", at: instant).count, 1)
+        XCTAssertEqual(StudentsDirectory.filtered(snapshot, search: "", filter: .grade, grade: "12", at: instant).map(\.phone), [students[0].phone])
+        XCTAssertEqual(StudentsDirectory.grades(in: students), ["10", "12"])
+        XCTAssertEqual(StudentsDirectory.filtered(snapshot, search: "", filter: .open, grade: "", at: instant.advanced(by: .seconds(31))).map(\.phone), [students[2].phone])
+        XCTAssertEqual(StudentsDirectory.countLabel(1), "1 student")
+        XCTAssertEqual(StudentsDirectory.countLabel(0), "0 students")
+    }
+
+    func testStudentsLayoutSearchVisibleKeyboardDismissedAndDynamicType() async throws {
+        let api = api()
+        let students = try JSONDecoder().decode([Student].self, from: Data(#"[{"phone":"201000000001","name":"Sam Example","grade":"12","state":"active","activity_status":"allowed","window_open":true,"seconds_left":5400},{"phone":"201000000002","name":"Lina Example With A Longer Name","grade":"10","state":"active","activity_status":"suspended","window_open":false,"seconds_left":0}]"#.utf8))
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        func fields(in view: UIView) -> [UITextField] { (view as? UITextField).map { [$0] } ?? view.subviews.flatMap { fields(in: $0) } }
+        for (name, size) in [("standard", DynamicTypeSize.large), ("large-text", .accessibility1)] {
+            for mode in [ColorScheme.dark, .light] {
+                let studentsStore = StudentsStore(api: api, connectionProvider: { self.connection }, fetchSnapshot: { _ in StudentsSnapshot(students: students, receivedAt: Date()) })
+                let window = UIWindow(windowScene: scene); window.frame = scene.coordinateSpace.bounds
+                let root = NavigationStack { StudentsView(api: api, store: studentsStore) }
+                    .environmentObject(store(api)).environment(\.dynamicTypeSize, size).preferredColorScheme(mode).tint(Brand.accent)
+                window.rootViewController = UIHostingController(rootView: root)
+                window.makeKeyAndVisible(); window.endEditing(true)
+                let ready = expectation(description: "Students layout ready")
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { ready.fulfill() }
+                await fulfillment(of: [ready], timeout: 5)
+                window.layoutIfNeeded()
+                let searchField = try XCTUnwrap(fields(in: window).first { $0.placeholder == "Search name or phone" })
+                XCTAssertFalse(searchField.isFirstResponder)
+                let frame = searchField.convert(searchField.bounds, to: window)
+                XCTAssertGreaterThan(frame.width, window.bounds.width * 0.65)
+                XCTAssertLessThan(frame.minY, window.bounds.height * 0.45)
+                XCTAssertGreaterThanOrEqual(frame.minX, 0); XCTAssertLessThanOrEqual(frame.maxX, window.bounds.width)
+                let image = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in window.drawHierarchy(in: window.bounds, afterScreenUpdates: true) }
+                let attachment = XCTAttachment(image: image); attachment.name = "students-\(name)-\(mode == .dark ? "dark" : "light")"; attachment.lifetime = .keepAlways; add(attachment)
+                window.isHidden = true
+            }
+        }
+    }
 }
+
