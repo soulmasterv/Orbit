@@ -16,7 +16,7 @@ struct PendingCommand: Identifiable {
     }
 }
 enum DetailRoute: Hashable {
-    case process(Int), docker(String), service(ServicePage), logs(LogTarget, String), mobileEvent(UUID)
+    case process(Int), docker(String), service(ServicePage), logs(LogTarget, String)
 }
 
 struct ContentView: View {
@@ -40,7 +40,7 @@ struct ContentView: View {
         if arguments.contains("--preview-pm2") { return 1 }
         if arguments.contains("--preview-services") { return 3 }
         if arguments.contains("--preview-docker") { return 2 }
-        if arguments.contains("--preview-settings") || arguments.contains("--preview-notifications") { return 4 }
+        if arguments.contains("--preview-settings") { return 4 }
         #endif
         return 0
     }
@@ -63,7 +63,6 @@ struct ContentView: View {
                         case .docker(let name): ContainerDetailView(api: api, containerName: name, requestCommand: { pending = $0 })
                         case .service(let page): ServiceDetailView(api: api, page: page)
                         case .logs(let target, let name): LogViewer(api: api, target: target, name: name)
-                        case .mobileEvent(let id): MobileEventView(api: api, eventID: id)
                         }
                     }
             }
@@ -84,12 +83,6 @@ struct ContentView: View {
         }
         .environmentObject(api.library)
         .environmentObject(mobile)
-        .onChange(of: mobile.destination) { _, id in
-            if let id { selectedTab = 0; homePath = [.mobileEvent(id)]; mobile.destination = nil }
-        }
-        .onAppear {
-            if let id = mobile.destination { selectedTab = 0; homePath = [.mobileEvent(id)]; mobile.destination = nil }
-        }
         .tint(Brand.accent)
         .preferredColorScheme(colorScheme)
         .confirmationDialog(pending?.title ?? "Confirm command",
@@ -123,4 +116,5 @@ struct ContentView: View {
         }
     }
 }
+
 
