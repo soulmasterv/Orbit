@@ -3,6 +3,7 @@ import SwiftUI
 struct StudentsView: View {
     @ObservedObject var api: ServerAPI
     @StateObject private var store: StudentsStore
+    @EnvironmentObject private var mobile: MobileStore
     @Environment(\.scenePhase) private var scenePhase
     @State private var visible = false
     @State private var search = ""
@@ -10,45 +11,28 @@ struct StudentsView: View {
     @State private var selectedGrade = ""
     @State private var refreshOwner = UUID()
 
-    init(api: ServerAPI) {
+    init(api: ServerAPI, store: StudentsStore? = nil) {
         self.api = api
-        _store = StateObject(wrappedValue: StudentsStore(api: api))
+        _store = StateObject(wrappedValue: store ?? StudentsStore(api: api))
     }
 
     private var refreshEnabled: Bool { visible && scenePhase == .active && api.accessAllowed }
     private var grades: [String] {
-        Array(Set((store.snapshot?.students ?? []).filter { $0.state == "active" }.compactMap(\.grade).filter { !$0.isEmpty }))
-            .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+        StudentsDirectory.grades(in: store.snapshot?.students ?? [])
     }
 
     var body: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 12) {
-                Panel {
-                    VStack(alignment: .leading, spacing: 8) {
-                        NavigationLink("Events, feedback & notifications") { MobileHubView(api: api) }
-                        Picker("Filter", selection: $filter) {
-                            ForEach(StudentsFilter.allCases) { Text($0.rawValue).tag($0) }
-                        }.pickerStyle(.menu)
-                        if filter == .grade {
-                            Picker("Grade", selection: $selectedGrade) {
-                                Text("All grades").tag("")
-                                ForEach(grades, id: \.self) { Text("Grade \($0)").tag($0) }
-                            }.pickerStyle(.menu)
-                        }
-                        SnapshotStamp(date: store.snapshot?.receivedAt, failed: store.error != nil)
-                    }
-                }
+            LazyVStack(alignment: .leading, spacing: 16) {
+                directoryHeader
                 if let error = store.error {
                     Panel {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Label(error, systemImage: "exclamationmark.circle").font(.subheadline).foregroundStyle(.orange)
-                            if store.snapshot != nil {
-                                Text("Showing the last successful list.").font(.caption).foregroundStyle(.secondary)
-                            }
-                            NavigationLink("Students connection settings") { StudentsSettingsView(api: api) }
-                                .font(.subheadline)
-                        }
+                        VStack(alignment: .leading, spacing: 10) {
+                            Label(error, systemImage: "exclamationmark.circle")
+                                .font(.subheadline).foregroundStyle(.orange)
+                            if store.snapshot != nil { Text("Showing the last successful list.").font(.caption).foregroundStyle(.secondary) }
+                            NavigationLink("Connection settings") { StudentsSettingsView(api: api) }
+                        }.frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
                 if let actionError = store.actionError {
@@ -56,20 +40,17 @@ struct StudentsView: View {
                 }
                 if let notice = store.actionNotice { Text(notice).font(.caption).foregroundStyle(.secondary) }
                 if store.loading && store.snapshot == nil {
-                    ProgressView("Loading students…").frame(maxWidth: .infinity).padding(.vertical, 40)
+                    ProgressView("Loading students…").frame(maxWidth: .infinity).padding(.vertical, 32)
                 } else if let snapshot = store.snapshot {
-                    // This only redraws the local clock; network refresh lives below.
                     TimelineView(.periodic(from: .now, by: 1)) { _ in
-                        LazyVStack(alignment: .leading, spacing: 12) {
-                            studentList(snapshot, at: ContinuousClock.now)
-                        }
+                        directory(snapshot, at: .now)
                     }
                 }
-            }.padding(16)
+            }.frame(maxWidth: .infinity, alignment: .leading).padding(16)
         }
         .background(Brand.background)
         .navigationTitle("Students").navigationBarTitleDisplayMode(.inline)
-        .searchable(text: $search, prompt: "Search name or phone")
+        .scrollDismissesKeyboard(.interactively)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 RefreshIndicator(loading: store.loading) { Task { if refreshEnabled { await store.refresh() } } }
@@ -92,52 +73,134 @@ struct StudentsView: View {
         .refreshable { if refreshEnabled { await store.refresh() } }
     }
 
-    @ViewBuilder private func studentList(_ snapshot: StudentsSnapshot, at now: ContinuousClock.Instant) -> some View {
-        let rows = filtered(snapshot, at: now)
-        if rows.isEmpty {
-            ContentUnavailableView(snapshot.students.isEmpty ? "No students yet" : "No matching students",
-                                   systemImage: "person.3",
-                                   description: Text(snapshot.students.isEmpty ? "Students will appear when the server reports them." : "Try another search or filter."))
-                .frame(maxWidth: .infinity).padding(.vertical, 20)
-        } else {
-            Text("\(rows.count) students").font(.caption).foregroundStyle(.secondary)
-            ForEach(rows) { student in
-                NavigationLink {
-                    StudentDetailView(api: api, store: store, phone: student.phone)
-                } label: {
-                    Panel {
-                        VStack(alignment: .leading, spacing: 8) {
-                            HStack(alignment: .top) {
-                                Text(student.displayName).font(.headline).foregroundStyle(.primary)
-                                Spacer(minLength: 8)
-                                StudentWindowStatus(snapshot: snapshot, student: student, now: now)
-                            }
-                            HStack {
-                                Text(student.state == "active" ? student.gradeLabel : student.stateLabel)
-                                Spacer(minLength: 8)
-                                Text(student.maskedPhone).monospacedDigit()
-                            }.font(.caption).foregroundStyle(.secondary)
-                            StudentActivityBadge(status: student.activityStatus)
-                        }.frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                }.buttonStyle(.plain)
+    private var directoryHeader: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Your students").font(.title2.bold())
+                    Text("Profiles, reply access and messaging windows").font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 8)
+                NavigationLink { MobileHubView(api: api) } label: {
+                    Image(systemName: "slider.horizontal.3").font(.headline)
+                        .frame(width: 44, height: 44).background(Brand.accent.opacity(0.12), in: Circle())
+                }.accessibilityLabel("Student tools and connection settings")
             }
+            HStack(spacing: 10) {
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                TextField("Search name or phone", text: $search)
+                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    .accessibilityIdentifier("students.search")
+                if !search.isEmpty {
+                    Button { search = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
+                        .accessibilityLabel("Clear search")
+                }
+            }.padding(12).background(Brand.surface, in: RoundedRectangle(cornerRadius: 12))
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(StudentsFilter.allCases) { item in
+                        Button { filter = item } label: {
+                            Text(item == .open ? "Window open" : item == .closed ? "Window closed" : item.rawValue)
+                                .font(.subheadline.weight(.medium)).padding(.horizontal, 14).padding(.vertical, 10)
+                                .foregroundStyle(filter == item ? Color.white : Color.primary)
+                                .background(filter == item ? Brand.accent : Brand.surface, in: Capsule())
+                        }.buttonStyle(.plain)
+                         .accessibilityAddTraits(filter == item ? .isSelected : [])
+                    }
+                }
+            }
+            if filter == .grade {
+                Menu {
+                    Button("All grades") { selectedGrade = "" }
+                    ForEach(grades, id: \.self) { grade in Button("Grade \(grade)") { selectedGrade = grade } }
+                } label: {
+                    HStack {
+                        Label(selectedGrade.isEmpty ? "All grades" : "Grade \(selectedGrade)", systemImage: "graduationcap")
+                        Spacer()
+                        Image(systemName: "chevron.up.chevron.down").font(.caption)
+                    }.font(.subheadline).padding(12).background(Brand.surface, in: RoundedRectangle(cornerRadius: 12))
+                }
+            }
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 12) { feedbackLink; eventsLink }
+                VStack(alignment: .leading, spacing: 10) { feedbackLink; eventsLink }
+            }
+            if mobile.state?.outbox != nil {
+                NavigationLink { MessageOutboxView() } label: { Label("Review saved message", systemImage: "tray") }
+                    .font(.subheadline.weight(.medium))
+            }
+            SnapshotStamp(date: store.snapshot?.receivedAt, failed: store.error != nil)
+        }.frame(maxWidth: .infinity, alignment: .leading)
+         .accessibilityIdentifier("students.header")
+    }
+
+    private var feedbackLink: some View {
+        NavigationLink { MobileFeedbackView(api: api, selectedID: nil) } label: {
+            Label("Feedback", systemImage: "bubble.left.and.text.bubble.right").font(.subheadline.weight(.medium))
+                .frame(maxWidth: .infinity).padding(12).background(Brand.accent.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
+        }
+    }
+    private var eventsLink: some View {
+        NavigationLink { MobileEventsView(api: api) } label: {
+            Label("Recent events", systemImage: "clock").font(.subheadline.weight(.medium))
+                .frame(maxWidth: .infinity).padding(12).background(Brand.surface, in: RoundedRectangle(cornerRadius: 12))
         }
     }
 
-    private func filtered(_ snapshot: StudentsSnapshot, at now: ContinuousClock.Instant) -> [Student] {
-        let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
-        // Filtering preserves the most-recent-first order returned by the API.
-        return snapshot.students.filter { student in
-            let matchesSearch = query.isEmpty || (student.name?.localizedCaseInsensitiveContains(query) ?? false) || student.phone.contains(query)
-            guard matchesSearch else { return false }
-            switch filter {
-            case .all: return true
-            case .open: return snapshot.isWindowOpen(for: student, at: now)
-            case .closed: return !snapshot.isWindowOpen(for: student, at: now)
-            case .grade: return student.state == "active" && (selectedGrade.isEmpty || student.grade == selectedGrade)
+    private func directory(_ snapshot: StudentsSnapshot, at now: ContinuousClock.Instant) -> some View {
+        let rows = StudentsDirectory.filtered(snapshot, search: search, filter: filter, grade: selectedGrade, at: now)
+        let open = snapshot.students.filter { snapshot.isWindowOpen(for: $0, at: now) }.count
+        return VStack(alignment: .leading, spacing: 12) {
+            ViewThatFits(in: .horizontal) {
+                HStack { resultCount(rows.count, total: snapshot.students.count); Spacer(); Text("\(open) window open").font(.caption).foregroundStyle(.secondary) }
+                VStack(alignment: .leading, spacing: 4) { resultCount(rows.count, total: snapshot.students.count); Text("\(open) window open").font(.caption).foregroundStyle(.secondary) }
             }
-        }
+            if rows.isEmpty {
+                ContentUnavailableView(snapshot.students.isEmpty ? "No students yet" : "No matching students",
+                    systemImage: "person.3",
+                    description: Text(snapshot.students.isEmpty ? "Profiles appear after students contact the bot." : "Try another search, window filter or grade."))
+                    .frame(maxWidth: .infinity).padding(.vertical, 20)
+            }
+            ForEach(rows) { student in
+                NavigationLink { StudentDetailView(api: api, store: store, phone: student.phone) } label: {
+                    StudentDirectoryCard(snapshot: snapshot, student: student, now: now)
+                }.buttonStyle(.plain)
+            }
+        }.frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func resultCount(_ count: Int, total: Int) -> some View {
+        Text(count == total ? StudentsDirectory.countLabel(count) : "\(count) of \(StudentsDirectory.countLabel(total))")
+            .font(.subheadline.weight(.semibold))
+    }
+}
+
+struct StudentDirectoryCard: View {
+    let snapshot: StudentsSnapshot
+    let student: Student
+    let now: ContinuousClock.Instant
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "person.fill").font(.title3)
+                    .foregroundStyle(Brand.accent).frame(width: 42, height: 42)
+                    .background(Brand.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 13))
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(student.displayName).font(.headline).foregroundStyle(.primary).fixedSize(horizontal: false, vertical: true)
+                    Text(student.state == "active" ? student.gradeLabel : student.stateLabel).font(.subheadline).foregroundStyle(.secondary)
+                    Text(student.maskedPhone).font(.caption).monospacedDigit().foregroundStyle(.secondary)
+                }.frame(maxWidth: .infinity, alignment: .leading)
+                Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary).padding(.top, 4)
+            }
+            Divider()
+            ViewThatFits(in: .horizontal) {
+                HStack { StudentActivityBadge(status: student.activityStatus); Spacer(minLength: 10); StudentWindowStatus(snapshot: snapshot, student: student, now: now) }
+                VStack(alignment: .leading, spacing: 10) { StudentActivityBadge(status: student.activityStatus); StudentWindowStatus(snapshot: snapshot, student: student, now: now) }
+            }
+        }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
+         .background(Brand.surface, in: RoundedRectangle(cornerRadius: 18))
+         .accessibilityElement(children: .combine)
     }
 }
 
@@ -150,7 +213,7 @@ private struct StudentWindowStatus: View {
     var body: some View {
         HStack(spacing: 5) {
             Circle().fill(open ? Color.green : Color.gray).frame(width: 7, height: 7)
-            Text(open ? snapshot.countdown(for: student, at: now) : "Closed")
+            Text(open ? "Window open · \(snapshot.countdown(for: student, at: now))" : "Window closed")
                 .font(.caption.weight(.semibold)).monospacedDigit().foregroundStyle(.secondary)
         }
         .accessibilityElement(children: .ignore)
@@ -275,11 +338,12 @@ private struct StudentActivityBadge: View {
         }
     }
     var body: some View {
-        Text("Activity: \(status.title)").font(.caption.weight(.medium))
+        Text("Replies: \(status.title)").font(.caption.weight(.medium))
             .foregroundStyle(color).padding(.horizontal, 8).padding(.vertical, 4)
             .background(color.opacity(0.12), in: Capsule())
             .accessibilityLabel("Bot reply activity: \(status.title)")
     }
 }
+
 
 
