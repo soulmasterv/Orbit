@@ -1,6 +1,5 @@
 import Foundation
 import Combine
-import UIKit
 
 @MainActor
 final class MobileStore: ObservableObject {
@@ -11,14 +10,12 @@ final class MobileStore: ObservableObject {
     @Published private(set) var pushBusy = false
     @Published private(set) var error: String?
     @Published var notice: String?
-    @Published var destination: UUID?
     private let api: ServerAPI
     private let load: () throws -> MobileSecureState
     private let save: (MobileSecureState) throws -> Void
     private let connection: () throws -> StudentsConnection?
     private var generation = 0
     private var foregroundBusy = false
-    private var lastRegisteredToken: String?
     private var capabilityConnection: StudentsConnection?
 
     init(api: ServerAPI, load: @escaping () throws -> MobileSecureState = KeychainManager.loadMobileState,
@@ -39,7 +36,7 @@ final class MobileStore: ObservableObject {
         state = next
     }
     func suspend() {
-        generation += 1; capabilities = nil; events = []; destination = nil
+        generation += 1; capabilities = nil; events = []
         capabilityConnection = nil
         // In-flight sends retain their durable operation; never replay on unlock.
         state = nil
@@ -148,22 +145,6 @@ final class MobileStore: ObservableObject {
         catch { self.error = MobileRules.error(error) }
     }
 
-    func queue(eventID: UUID) {
-        do {
-            try update {
-                if !$0.handledEvents.contains(eventID) && !$0.queuedEvents.contains(eventID) { $0.queuedEvents.append(eventID) }
-                $0.queuedEvents = Array($0.queuedEvents.suffix(100))
-            }
-            if destination == nil { destination = state?.queuedEvents.first }
-        } catch { self.error = MobileRules.error(error) }
-    }
-    func completed(eventID: UUID) {
-        do { try update {
-            $0.queuedEvents.removeAll { $0 == eventID }
-            if !$0.handledEvents.contains(eventID) { $0.handledEvents.append(eventID) }
-            $0.handledEvents = Array($0.handledEvents.suffix(500))
-        } } catch { self.error = MobileRules.error(error) }
-    }
     func event(_ id: UUID) async throws -> MobileEvent {
         guard capabilities?.supportsEvents == true else { throw APIError.message("Refresh to confirm event support first.") }
         let data = try await api.mobileData(connection: configured(), path: "/api/events/\(id.uuidString)")
@@ -172,60 +153,25 @@ final class MobileStore: ObservableObject {
         return value
     }
 
-    func setPushEnabled(_ enabled: Bool) async {
-        guard !pushBusy && api.accessAllowed else { return }
+    // Upgrade cleanup only: no permission prompts, token registration or alerts.
+    func retireNotifications() async {
+        guard api.accessAllowed && !pushBusy else { return }
         pushBusy = true
         defer { pushBusy = false }
         do {
             try ensureLoaded()
-            if !enabled {
-                try await revoke()
-                try update { $0.pushEnabled = false }
-                UIApplication.shared.unregisterForRemoteNotifications()
-                notice = "Device registration removed. The event feed remains available."
-                return
-            }
-            await refresh()
-            guard capabilities?.supportsEvents == true else { throw APIError.message("Mobile push support is not deployed.") }
-            await NotificationManager.shared.requestLocalPermission()
-            guard NotificationManager.shared.permissionAllowed else { throw APIError.message("Notifications are denied. Enable them in iPhone Settings; the event feed still works.") }
-            guard SignedPushIdentity.current() != nil else { throw APIError.message("This build has no readable signed APNs entitlement. A push-enabled Apple provisioning profile is required; SideStore signing may not support it.") }
-            try update { $0.pushEnabled = true }
-            UIApplication.shared.registerForRemoteNotifications()
-            notice = "Requested an APNs token. Registration is complete only after the server acknowledges it."
-        } catch { self.error = MobileRules.error(error) }
-    }
-    func syncPush(token: String, identity: SignedPushIdentity? = SignedPushIdentity.current(), permissionAllowed: Bool? = nil) async {
-        guard !pushBusy && api.accessAllowed && !token.isEmpty else { return }
-        pushBusy = true
-        defer { pushBusy = false }
-        do {
-            try ensureLoaded()
-            guard state?.pushEnabled == true, let identity,
-                  permissionAllowed ?? NotificationManager.shared.permissionAllowed else { return }
-            let configured = try configured()
-            guard capabilityConnection == configured, let capabilities, capabilities.version == 1, capabilities.supportsEvents else { return }
-            guard capabilities.push.environment == identity.environment else { throw APIError.message("APNs environment mismatch. Server and signed app must agree; registration was not sent.") }
-            if state?.registeredConnection == configured && lastRegisteredToken == token { return }
-            if state?.registeredConnection != nil && state?.registeredConnection != configured { try await revoke() }
-            // Persist destination before PUT: a timeout must still be revocable.
-            try update { $0.registeredConnection = configured }
-            let topics = [(capabilities.onboarding_push ? "onboarding_completed" : nil), (capabilities.feedback_push ? "answer_flagged" : nil)].compactMap { $0 }
-            let payload = PushDevicePayload(token: token, environment: identity.environment, topics: topics, enabled: true)
-            guard let installation = state?.installationID else { throw CancellationError() }
-            let data = try await api.mobileData(connection: configured, path: "/api/push/devices/\(installation.uuidString)",
-                method: "PUT", body: JSONEncoder().encode(payload))
-            guard try JSONDecoder().decode(StudentMutationAcknowledgement.self, from: data).ok else { throw APIError.message("Device registration was not acknowledged.") }
-            lastRegisteredToken = token
-            notice = capabilities.push.configured ? "Device registered. Delivery still requires valid Apple credentials and a running server worker; it is best effort." : "Device registered, but the server reports push signing settings missing. Delivery is not ready."
-        } catch { self.error = MobileRules.error(error) }
+            try update { $0.pushEnabled = false; $0.queuedEvents = []; $0.handledEvents = [] }
+            try await revoke()
+        } catch {
+            // Retain the old destination for a later authenticated cleanup attempt.
+            // Never discard a pending message or replace connection credentials.
+        }
     }
     private func revoke() async throws {
         guard let current = state, let old = current.registeredConnection else { return }
         let data = try await api.mobileData(connection: old, path: "/api/push/devices/\(current.installationID.uuidString)", method: "DELETE")
         guard try JSONDecoder().decode(StudentMutationAcknowledgement.self, from: data).ok else { throw APIError.message("Could not confirm device revocation. Connection settings were retained.") }
         try update { $0.registeredConnection = nil }
-        lastRegisteredToken = nil
     }
     func prepareConnectionChange() async throws {
         guard !busy && !pushBusy && !api.actionBusy else { throw APIError.message("Wait for the current operation before changing Students settings.") }
@@ -239,3 +185,4 @@ final class MobileStore: ObservableObject {
         api.invalidateStudentsConnection()
     }
 }
+
