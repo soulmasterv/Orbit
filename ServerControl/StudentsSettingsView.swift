@@ -26,8 +26,8 @@ struct StudentsSettingsView: View {
                   Text("Enter the base URL only; the app adds /api/students. Both the URL and API key are kept in Keychain on this iPhone. Save only a server you trust. Leave the key blank to keep its current value when the URL is unchanged.")
               }
             Section {
-                NavigationLink("Students notifications & saved messages") { MobileHubView(api: api) }
-                Text("Management and manual messages require a compatible backend. Existing push registration must be revoked before changing the Students server or account. Review any saved message operation first.")
+                NavigationLink("Student tools & saved messages") { MobileHubView(api: api) }
+                Text("Management and manual messages require a compatible backend. Review any saved message before changing server or account.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
@@ -65,5 +65,6 @@ struct StudentsSettingsView: View {
         } catch { result = StudentsStore.message(for: error) }
     }
 }
+
 
 
