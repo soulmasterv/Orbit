@@ -8,7 +8,6 @@ struct SettingsView: View {
     @State private var result = ""
     @State private var testing = false
     @State private var removeConfirmation = false
-    @State private var notificationPreview = false
     @AppStorage("appLock.v4") private var appLock = true
     @State private var lockChange = false
     @State private var lockChangeBusy = false
@@ -87,9 +86,6 @@ struct SettingsView: View {
                 Picker("Appearance", selection: $appearance) {
                     ForEach(AppAppearance.allCases) { option in Text(option.title).tag(option.rawValue) }
                 }
-                NavigationLink { NotificationSettingsView() } label: {
-                    Label("Local notifications", systemImage: "bell.badge")
-                }
             }
             Section("Students") {
                 NavigationLink {
@@ -118,11 +114,7 @@ struct SettingsView: View {
         .navigationTitle("Settings").navigationBarTitleDisplayMode(.inline)
         .onAppear {
             serverURL = api.baseURL
-            #if DEBUG
-            notificationPreview = ProcessInfo.processInfo.arguments.contains("--preview-notifications")
-            #endif
         }
-        .navigationDestination(isPresented: $notificationPreview) { NotificationSettingsView() }
         .onDisappear { token = "" }
         .confirmationDialog("Disable app lock on this iPhone?", isPresented: $lockChange, titleVisibility: .visible) {
             Button("Disable app lock", role: .destructive) {
@@ -151,6 +143,7 @@ struct SettingsView: View {
         } message: { Text("This disconnects the app. It does not change or revoke the token on Ubuntu.") }
     }
 }
+
 
 
 
