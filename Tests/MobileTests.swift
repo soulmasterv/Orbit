@@ -301,6 +301,11 @@ final class MobileTests: XCTestCase {
         for (name, size) in [("standard", DynamicTypeSize.large), ("large-text", .accessibility1)] {
             for mode in [ColorScheme.dark, .light] {
                 let studentsStore = StudentsStore(api: api, connectionProvider: { self.connection }, fetchSnapshot: { _ in StudentsSnapshot(students: students, receivedAt: Date()) })
+                // A UIHostingController outside the app's Scene can inherit an
+                // inactive phase. Seed the mocked snapshot before rendering so
+                // these previews verify actual student cards, not an empty header.
+                await studentsStore.refresh()
+                XCTAssertEqual(studentsStore.snapshot?.students.count, 2)
                 let window = UIWindow(windowScene: scene); window.frame = scene.coordinateSpace.bounds
                 let root = NavigationStack { StudentsView(api: api, store: studentsStore) }
                     .environmentObject(store(api)).environment(\.dynamicTypeSize, size).preferredColorScheme(mode).tint(Brand.accent)
@@ -310,6 +315,7 @@ final class MobileTests: XCTestCase {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { ready.fulfill() }
                 await fulfillment(of: [ready], timeout: 5)
                 window.layoutIfNeeded()
+                XCTAssertEqual(studentsStore.snapshot?.students.count, 2)
                 let searchField = try XCTUnwrap(fields(in: window).first { $0.placeholder == "Search name or phone" })
                 XCTAssertFalse(searchField.isFirstResponder)
                 let frame = searchField.convert(searchField.bounds, to: window)
