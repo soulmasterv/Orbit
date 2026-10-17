@@ -90,27 +90,8 @@ struct AppRootView: View {
         .task(id: phase == .active && api.accessAllowed) {
             guard phase == .active && api.accessAllowed else { return }
             await mobile.refresh()
-            await NotificationManager.shared.refreshPermission()
-            if mobile.state?.pushEnabled == true {
-                if NotificationManager.shared.permissionAllowed {
-                    if SignedPushIdentity.current() != nil { UIApplication.shared.registerForRemoteNotifications() }
-                    if let token = NotificationManager.shared.apnsToken { await mobile.syncPush(token: token) }
-                } else { await mobile.setPushEnabled(false) }
-            }
-            for id in NotificationManager.shared.tappedEvents { mobile.queue(eventID: id) }
-            NotificationManager.shared.tappedEvents = []
-            if let id = mobile.state?.queuedEvents.first { mobile.destination = id }
+            await mobile.retireNotifications()
             await mobile.boundedRecovery()
-        }
-        .onReceive(NotificationManager.shared.$apnsToken) { token in
-            if let token, phase == .active && api.accessAllowed { Task { await mobile.syncPush(token: token) } }
-        }
-        .onReceive(NotificationManager.shared.$incomingEvent) { id in
-            if id != nil && phase == .active && api.accessAllowed { Task { await mobile.refresh() } }
-        }
-        .onReceive(NotificationManager.shared.$tappedEvents) { ids in
-            guard phase == .active && api.accessAllowed else { return }
-            for id in ids { mobile.queue(eventID: id) }
         }
         .onChange(of: phase) { _, phase in
             privacyCover = phase != .active
@@ -169,5 +150,6 @@ struct LockScreen: View {
         }.padding(32)
     }
 }
+
 
 
