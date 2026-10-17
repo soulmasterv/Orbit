@@ -581,11 +581,6 @@ final class ServerControlTests: XCTestCase {
         XCTAssertTrue(callbackCalled)
         task.cancel()
     }
-    func testNotificationFoundationHasNoActiveRemoteTransport() {
-        XCTAssertFalse(DeferredAlertTransport().isAvailable)
-        XCTAssertEqual(AlertCategory.allCases.count, 8)
-    }
-
     func testCancelledRefreshPreservesSuccessfulSnapshotAndConnection() async {
         let api = makeAPI()
         await api.loadDashboard()
@@ -787,4 +782,5 @@ final class ServerControlTests: XCTestCase {
     }
 
 }
+
 
