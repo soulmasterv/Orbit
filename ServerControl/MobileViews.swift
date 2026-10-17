@@ -3,38 +3,23 @@ import SwiftUI
 struct MobileHubView: View {
     @ObservedObject var api: ServerAPI
     @EnvironmentObject private var mobile: MobileStore
-    @ObservedObject private var notifications = NotificationManager.shared
     var body: some View {
         List {
-            Section("School bot") {
-                NavigationLink("Recent onboarding & feedback") { MobileEventsView(api: api) }
-                NavigationLink("Feedback") { MobileFeedbackView(api: api, selectedID: nil) }
-                if mobile.state?.outbox != nil { NavigationLink("Saved message operation") { MessageOutboxView() } }
-                LabeledContent("Mobile API", value: mobile.capabilities?.version == 1 ? "Version 1 confirmed" : "Not confirmed")
-                Button("Refresh capabilities and feed") { Task { await mobile.refresh() } }
-            }
-            Section("Push notifications") {
-                LabeledContent("Permission", value: notifications.permission)
-                LabeledContent("Subscribed", value: mobile.state?.pushEnabled == true ? "Yes" : "No")
-                Button(mobile.state?.pushEnabled == true ? "Disable and remove registration" : "Enable onboarding & feedback notifications") {
-                    Task { await mobile.setPushEnabled(mobile.state?.pushEnabled != true) }
-                }.disabled(mobile.pushBusy || !api.accessAllowed)
-                if let identity = SignedPushIdentity.current() {
-                    LabeledContent("Signed bundle ID", value: identity.bundleID).textSelection(.enabled)
-                    LabeledContent("Signed Apple team", value: identity.teamID).textSelection(.enabled)
-                    LabeledContent("Signed APNs environment", value: identity.environment)
-                } else {
-                    LabeledContent("Installed bundle ID", value: Bundle.main.bundleIdentifier ?? "Unavailable")
-                    Text("Signed team/environment unavailable. This build cannot register push until signed with a valid push-enabled profile. No environment is guessed.").font(.caption)
+            Section("Student tools") {
+                NavigationLink { MobileFeedbackView(api: api, selectedID: nil) } label: {
+                    Label("Feedback", systemImage: "bubble.left.and.text.bubble.right")
                 }
-                LabeledContent("Server push settings", value: mobile.capabilities?.push.configured == true ? "Present; not delivery proof" : "Missing or unconfirmed")
-                Text("Generic alerts only. Delivery is best effort and expires after one hour. The feed retains up to 30 days. Enabling push does not backfill historical events.").font(.caption)
-                Text("The Apple .p8 signing key belongs only on the server. Never enter it in this app.").font(.caption)
-                if let registrationError = notifications.remoteError { Text(registrationError).foregroundStyle(.orange) }
+                NavigationLink { MobileEventsView(api: api) } label: {
+                    Label("Recent events", systemImage: "clock")
+                }
+                if mobile.state?.outbox != nil {
+                    NavigationLink { MessageOutboxView() } label: { Label("Saved message", systemImage: "tray") }
+                }
+                NavigationLink { StudentsSettingsView(api: api) } label: { Label("Connection settings", systemImage: "gearshape") }
             }
             MobileResultSection()
-        }.navigationTitle("Students Notifications")
-        .task { await notifications.refreshPermission(); await mobile.refresh() }
+        }.navigationTitle("Student Tools")
+        .task { await mobile.refresh() }
     }
 }
 
@@ -94,11 +79,10 @@ struct MobileEventView: View {
             await mobile.refresh()
             let value = try await mobile.event(eventID)
             guard api.accessAllowed else { return }
-            event = value; failure = nil; mobile.completed(eventID: eventID)
+            event = value; failure = nil
         } catch {
             guard api.accessAllowed else { return }
             failure = MobileRules.error(error)
-            if (error as? HTTPFailure)?.status == 404 { mobile.completed(eventID: eventID) }
         }
     }
 }
@@ -248,7 +232,7 @@ struct MobileFeedbackView: View {
             guard let connection = try KeychainManager.loadStudentsConnection() else { throw APIError.message("Configure Students connection first.") }
             await mobile.refresh()
             guard mobile.capabilities?.version == 1 else { throw APIError.message("Mobile API version 1 is not confirmed.") }
-            // There is no GET-by-ID endpoint. Include resolved reports on push lookup.
+            // There is no GET-by-ID endpoint. Include resolved reports on event lookup.
             let rows = try await api.fetchFeedback(connection: connection)
             guard api.accessAllowed && epoch == generation else { return }
             reports = rows.filter { selectedID == nil || $0.id == selectedID }; failure = nil; uncertain = false
@@ -266,5 +250,6 @@ struct MobileFeedbackView: View {
         } catch { if api.accessAllowed { failure = MobileRules.error(error) + " Refresh before another action. No mutation was retried." } }
     }
 }
+
 
 
