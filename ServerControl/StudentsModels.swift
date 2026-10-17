@@ -86,6 +86,27 @@ enum StudentsFilter: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+enum StudentsDirectory {
+    static func countLabel(_ count: Int) -> String { "\(count) \(count == 1 ? "student" : "students")" }
+    static func grades(in students: [Student]) -> [String] {
+        Array(Set(students.filter { $0.state == "active" }.compactMap(\.grade).filter { !$0.isEmpty }))
+            .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+    }
+    static func filtered(_ snapshot: StudentsSnapshot, search: String, filter: StudentsFilter,
+                         grade: String, at now: ContinuousClock.Instant = .now) -> [Student] {
+        let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
+        return snapshot.students.filter { student in
+            guard query.isEmpty || (student.name?.localizedCaseInsensitiveContains(query) ?? false) || student.phone.contains(query) else { return false }
+            switch filter {
+            case .all: return true
+            case .open: return snapshot.isWindowOpen(for: student, at: now)
+            case .closed: return !snapshot.isWindowOpen(for: student, at: now)
+            case .grade: return student.state == "active" && (grade.isEmpty || student.grade == grade)
+            }
+        }
+    }
+}
+
 enum StudentActivityStatus: String {
     case allowed, suspended, blocked, unknown
     var title: String { rawValue.capitalized }
@@ -137,4 +158,5 @@ struct StudentActivityPayload: Encodable {
 }
 struct StudentMutationAcknowledgement: Decodable { let ok: Bool }
 enum StudentMutationFailure: Error { case notSent, authorizationFailed, uncertain }
+
 
