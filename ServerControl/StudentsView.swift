@@ -100,11 +100,12 @@ struct StudentsView: View {
                 HStack(spacing: 8) {
                     ForEach(StudentsFilter.allCases) { item in
                         Button { filter = item } label: {
-                            Text(item == .open ? "Window open" : item == .closed ? "Window closed" : item.rawValue)
+                            Text(item == .open ? "Open" : item == .closed ? "Closed" : item.rawValue)
                                 .font(.subheadline.weight(.medium)).padding(.horizontal, 14).padding(.vertical, 10)
                                 .foregroundStyle(filter == item ? Color.white : Color.primary)
                                 .background(filter == item ? Brand.accent : Brand.surface, in: Capsule())
                         }.buttonStyle(.plain)
+                         .accessibilityLabel(item.rawValue)
                          .accessibilityAddTraits(filter == item ? .isSelected : [])
                     }
                 }
