@@ -61,18 +61,18 @@ jobs:
             ServerControl.ipa.sha256
           if-no-files-found: error
           retention-days: 30
-      - name: Capture V4 previews
-        if: github.event_name == 'workflow_dispatch' && inputs.capture_previews
+      - name: Export simulator layout previews
+        if: success()
         timeout-minutes: 8
         run: |
           set -euo pipefail
           mkdir -p screenshots
           xcrun xcresulttool export attachments --path TestResults.xcresult --output-path screenshots
       - name: Upload simulator previews
-        if: github.event_name == 'workflow_dispatch' && inputs.capture_previews
+        if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: ServerControl-V4-Previews
+          name: ServerControl-Previews
           path: screenshots/
           if-no-files-found: error
           retention-days: 30
