@@ -2,10 +2,10 @@ import SwiftUI
 
 @main
 struct ServerControlApp: App {
-    @UIApplicationDelegateAdaptor(PushAppDelegate.self) private var appDelegate
-    init() { _ = NotificationManager.shared }
+    init() { NotificationCleanup.removeLocalRegistration() }
     var body: some Scene {
         WindowGroup { AppRootView() }
     }
 }
+
 
