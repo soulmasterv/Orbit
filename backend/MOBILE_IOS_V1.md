@@ -1,3 +1,7 @@
+> **Update (18 October 2026): Notifications retired.** Orbit no longer includes notification settings, permission prompts, local tests, APNs registration/delegates, Push Notifications capability or APNs entitlements. Existing local alerts are cleared on upgrade. After unlock the app attempts an authenticated DELETE for any saved legacy server device registration, retaining it for cleanup if the request fails. It never registers a new token. Legacy Keychain fields are retained solely to decode existing installations and perform revocation without losing drafts, pending sends or connection credentials.
+>
+> Feedback, recent events (when the app is open), manual messages and saved-operation recovery remain available. The APNs implementation/setup sections below describe the previous release and are historical, not features of the current app.
+
 # Orbit / Students mobile API v1
 
 Client additions only. The bot and server have not been changed or deployed by this work. Existing server-control bearer authentication, Students Keychain connection, moderation controls and app lock remain in place.
@@ -40,3 +44,4 @@ Apple documentation: [Registering with APNs](https://developer.apple.com/documen
 ## Verification limits
 
 Automated tests use mocked transports and fake credentials; no real WhatsApp message or push is sent. CI compiles the device app and runs the simulator test suite. A properly provisioned real iPhone test is still required for APNs permission/token/rotation and cold/warm notification delivery and taps. Backend deployment/enforcement, Meta delivery, Apple signing and UI behavior on an actual device must not be inferred from CI success.
+
