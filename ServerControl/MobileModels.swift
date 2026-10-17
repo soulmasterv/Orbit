@@ -25,13 +25,6 @@ struct MobileEvent: Decodable, Identifiable, Hashable {
     var title: String { kind == "onboarding_completed" ? "Student onboarded" : "Answer flagged" }
 }
 
-struct PushDevicePayload: Encodable {
-    let token: String
-    let environment: String
-    let topics: [String]
-    let enabled: Bool
-}
-
 struct AdminMessage: Codable {
     let request_id: UUID
     let phone: String
@@ -79,6 +72,8 @@ struct PendingAdminMessage: Codable {
 
 struct MobileSecureState: Codable {
     var installationID = UUID()
+    // Legacy notification fields are decoded only for upgrade revocation. The
+    // app never enables, registers or schedules notifications in this release.
     var pushEnabled = false
     // Keep the old destination until revocation succeeds, even after a crash.
     var registeredConnection: StudentsConnection?
@@ -100,18 +95,13 @@ enum MobileRules {
     static func canSend(_ student: Student, snapshot: StudentsSnapshot) -> Bool {
         student.state == "active" && student.activityStatus == .allowed && snapshot.isWindowOpen(for: student, at: .now)
     }
-    static func pushEvent(_ payload: [AnyHashable: Any]) -> UUID? {
-        guard let id = payload["event_id"] as? String, let uuid = UUID(uuidString: id),
-              let kind = payload["kind"] as? String, ["onboarding_completed", "answer_flagged"].contains(kind) else { return nil }
-        return uuid
-    }
     static func error(_ error: Error) -> String {
         if let http = error as? HTTPFailure {
             switch http.status {
             case 401: return "Students API key rejected. Update Students connection settings."
             case 403: return "Access restricted. The student may be blocked or suspended."
             case 404: return "This record is missing, deleted or expired, or the feature is not deployed."
-            case 409: return "Conflict: check the messaging window, onboarding, request identity or APNs environment."
+            case 409: return "Conflict: check the messaging window, onboarding or request identity."
             case 422: return "The server rejected the supplied values. Review your input."
             case 429: return "Server rate limit reached. No action was retried."
             case 300...399: return "Redirect refused. Check the configured HTTPS Students address."
@@ -142,3 +132,4 @@ struct FeedbackRecord: Decodable, Identifiable {
         return rows
     }
 }
+
