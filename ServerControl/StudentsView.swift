@@ -270,6 +270,12 @@ struct StudentDetailView: View {
                         }.disabled(store.managementUnavailableReason(for: student) != nil)
                     }
                 }
+                Section("Subjects") {
+                    NavigationLink { SubjectEditorView(api: api, phone: phone) } label: {
+                        Label("Edit optional subjects", systemImage: "checklist")
+                    }.disabled(store.mutationBusy || !api.accessAllowed)
+                    Text("Review required and optional subjects. Changes are saved together and do not send a message.").font(.caption).foregroundStyle(.secondary)
+                }
                 Section("Manual message") {
                     NavigationLink("Compose plain text to this student") {
                         StudentMessageComposer(api: api, students: store, phone: phone)
@@ -345,6 +351,7 @@ private struct StudentActivityBadge: View {
             .accessibilityLabel("Bot reply activity: \(status.title)")
     }
 }
+
 
 
 
