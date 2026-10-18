@@ -548,11 +548,11 @@ final class ServerAPI: ObservableObject {
         return data
     }
 
-    func authorizeMobileSend(reason: String = "Send this confirmed plain-text message to one student.") async throws {
+    func authorizeMobileSend(reason: String = "Send this confirmed plain-text message to one student.", progress: String = "Authorize one plain-text message…") async throws {
         guard accessAllowed && !actionBusy && !previewMode else { throw StudentMutationFailure.notSent }
         let epoch = studentsAccessGeneration
         actionBusy = true
-        actionProgress = "Authorize one plain-text message…"
+        actionProgress = progress
         defer { actionBusy = false; actionProgress = "" }
         try await authorize(reason)
         guard accessAllowed && epoch == studentsAccessGeneration else { throw StudentMutationFailure.notSent }
@@ -574,6 +574,41 @@ final class ServerAPI: ObservableObject {
     }
 
     func invalidateStudentsConnection() { studentsAccessGeneration += 1 }
+
+    func fetchSubjectCatalog(connection: StudentsConnection) async throws -> SubjectCatalog {
+        do {
+            let data = try await mobileData(connection: connection, path: "/api/subjects/catalog")
+            return try JSONDecoder().decode(SubjectCatalog.self, from: data).validated()
+        } catch let http as HTTPFailure where http.status == 404 { throw SubjectEditorError.catalogUnavailable }
+    }
+
+    func fetchStudentSubjects(connection: StudentsConnection, phone: String) async throws -> StudentSubjectSelection {
+        guard MobileRules.validPhone(phone) else { throw SubjectEditorError.incompatibleSelection }
+        let data = try await mobileData(connection: connection, path: "/api/students/\(phone)/subjects")
+        return try JSONDecoder().decode(StudentSubjectSelection.self, from: data)
+    }
+
+    func saveStudentSubjects(connection: StudentsConnection, phone: String, payload: SubjectSavePayload) async throws -> StudentSubjectSelection {
+        guard MobileRules.validPhone(phone), payload.expectedRevision.count == 64,
+              Set(payload.optionalSubjects).count == payload.optionalSubjects.count,
+              Set(payload.optionalSubjects).isSubset(of: SubjectCatalog.optionalIDs),
+              payload.removeLegacySubjectIDs.isEmpty || payload.removeLegacySubjectIDs == ["computer_science"] else {
+            throw SubjectEditorError.incompatibleSelection
+        }
+        let epoch = studentsAccessGeneration
+        do { try await authorizeMobileSend(reason: "Save this student's optional subjects. This does not send a WhatsApp message.", progress: "Authorize subject changes…") }
+        catch {
+            if DeviceAuthorization.isCancellation(error) || Self.isRefreshCancellation(error) { throw StudentMutationFailure.notSent }
+            throw StudentMutationFailure.authorizationFailed
+        }
+        guard epoch == studentsAccessGeneration && accessAllowed && !Task.isCancelled else { throw StudentMutationFailure.notSent }
+        actionBusy = true
+        actionProgress = "Saving optional subjects…"
+        defer { actionBusy = false; actionProgress = "" }
+        // Exactly one PUT. Recovery is performed only with authenticated GET.
+        let data = try await mobileData(connection: connection, path: "/api/students/\(phone)/subjects", method: "PUT", body: JSONEncoder().encode(payload))
+        return try JSONDecoder().decode(StudentSubjectSelection.self, from: data)
+    }
 
     func fetchStudents(connection: StudentsConnection) async throws -> StudentsSnapshot {
         let connection = try connection.validated()
@@ -760,6 +795,7 @@ enum APIError: LocalizedError {
     case message(String)
     var errorDescription: String? { if case .message(let text) = self { return text }; return nil }
 }
+
 
 
 
