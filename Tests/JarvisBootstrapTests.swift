@@ -65,7 +65,10 @@ final class JarvisBootstrapTests: XCTestCase {
     func testValidatedCookiesAreHostOnlySecureHTTPOnlyAndRedacted() throws {
         let value = try ValidatedJarvisAppSession.decode(Self.response(nonce: nonce), expectedNonce: nonce, now: Self.instant)
         XCTAssertEqual(value.entryURL, JarvisPolicy.home); XCTAssertEqual(value.cookies.count,2)
-        for cookie in value.cookies { XCTAssertEqual(cookie.domain,"jarvis.labbing.space"); XCTAssertEqual(cookie.path,"/"); XCTAssertTrue(cookie.isSecure); XCTAssertTrue(cookie.isHTTPOnly) }
+        for cookie in value.cookies {
+            XCTAssertEqual(cookie.domain,"jarvis.labbing.space"); XCTAssertEqual(cookie.path,"/"); XCTAssertTrue(cookie.isSecure); XCTAssertTrue(cookie.isHTTPOnly)
+            XCTAssertEqual(cookie.sameSitePolicy?.rawValue.lowercased(),"strict")
+        }
         XCTAssertFalse(String(describing: value).contains("fixture-only-session"))
     }
     func testRejectsEveryMalformedCookieFieldAndCompleteResponseBeforeInstallation() throws {
@@ -158,4 +161,22 @@ final class JarvisBootstrapTests: XCTestCase {
         do { _=try await b.issue(installationID:installation);XCTFail() } catch {}
         XCTAssertTrue(MockURLProtocol.requests.isEmpty)
     }
+    func testPendingIssuanceSuppressesDuplicateIssueAndRevoke() async throws {
+        let entered=expectation(description:"Issuance pending"),gate=JarvisBootstrapRequestGate()
+        MockURLProtocol.onStart={p in gate.capture(p);entered.fulfill()}
+        let b=broker(),first=Task { try await b.issue(installationID:installation) }
+        await fulfillment(of:[entered],timeout:2)
+        do { _=try await b.issue(installationID:installation);XCTFail() } catch {}
+        do { try await b.revoke(installationID:installation);XCTFail() } catch {}
+        XCTAssertEqual(MockURLProtocol.requests.count,1)
+        reply(try XCTUnwrap(gate.take()),data:Self.response(nonce:nonce));_=try await first.value
+        XCTAssertFalse(b.pending)
+    }
+}
+
+private final class JarvisBootstrapRequestGate {
+    private let lock=NSLock()
+    private var request:MockURLProtocol?
+    func capture(_ value:MockURLProtocol){lock.lock();request=value;lock.unlock()}
+    func take()->MockURLProtocol?{lock.lock();defer{lock.unlock()};return request}
 }

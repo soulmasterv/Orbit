@@ -108,7 +108,9 @@ struct ValidatedJarvisAppSession: CustomStringConvertible, CustomDebugStringConv
                 let header = "\(c.name)=\(c.value); Path=/; Secure; HttpOnly; SameSite=Strict; Expires=\(formatter.string(from: Date(timeIntervalSince1970: Double(c.expires_at))))"
                 let parsed = HTTPCookie.cookies(withResponseHeaderFields: ["Set-Cookie": header], for: JarvisPolicy.home)
                 guard parsed.count == 1, let cookie = parsed.first, cookie.domain == "jarvis.labbing.space",
-                      cookie.path == "/", cookie.isSecure, cookie.isHTTPOnly, cookie.value == c.value else { throw JarvisBootstrapError.invalidResponse }
+                      cookie.path == "/", cookie.isSecure, cookie.isHTTPOnly, cookie.value == c.value,
+                      cookie.sameSitePolicy?.rawValue.lowercased() == "strict",
+                      cookie.expiresDate?.timeIntervalSince1970 == Double(c.expires_at) else { throw JarvisBootstrapError.invalidResponse }
                 return cookie
             }
             let earliest = min(result.expires_at, result.cookies.map(\.expires_at).min()!)
