@@ -11,11 +11,11 @@ async function fixture(){
   let media=()=>Promise.resolve(makeStream());let worklet=()=>Promise.resolve();
   function makeStream(){const track={stopped:false,stop(){this.stopped=true;}};const stream={track,getTracks:()=>[track]};streams.push(stream);return stream;}
   class Context {
-    state='running';currentTime=0;closed=false;audioWorklet={addModule:()=>worklet()};
+    state='running';currentTime=0;closed=false;sources=[];audioWorklet={addModule:()=>worklet()};
     constructor(){contexts.push(this);}
     resume(){return Promise.resolve();}close(){this.closed=true;return Promise.resolve();}
     createMediaStreamSource(){return {connect(){},disconnect(){}};}
-    createBufferSource(){return {connect(){},start(){},stop(){this.stopped=true;}};}
+    createBufferSource(){const node={connect(){},start(){},stop(){this.stopped=true;}};this.sources.push(node);return node;}
     createBuffer(_,size){return {getChannelData:()=>new Float32Array(size),duration:size/24000};}
   }
   class Socket {
@@ -78,4 +78,20 @@ test('sign out makes exactly one mutation, stops capture and clears authenticate
   const f=await fixture();await f.start();let count=0;
   f.setFetch(async(path,options)=>{assert.equal(path,'/logout');assert.equal(options.method,'POST');count++;return {ok:true,status:200};});
   await f.elements.logout.onclick();assert.equal(count,1);assert.equal(f.streams[0].track.stopped,true);assert.equal(f.window.orbitJarvis.snapshot().authenticated,false);
+});
+test('synthetic clicks and hidden pages cannot start capture',async()=>{
+  const f=await fixture();await f.elements.start.onclick({isTrusted:false});f.document.hidden=true;await f.start();
+  assert.equal(f.streams.length,0);assert.equal(f.sockets.length,0);
+});
+test('Stop halts queued reply playback as well as capture',async()=>{
+  const f=await fixture();await f.start();const socket=f.sockets[0];
+  socket.onmessage({data:'{"type":"ready"}'});socket.onmessage({data:'{"type":"audio","data":"AAA="}'});
+  const node=f.contexts[0].sources[0];assert.ok(node);f.window.orbitJarvis.stop();
+  assert.equal(node.stopped,true);assert.equal(f.contexts[0].closed,true);assert.equal(f.streams[0].track.stopped,true);
+});
+test('socket closure checks login expiry with GET only and does not reconnect',async()=>{
+  const f=await fixture();await f.start();let requests=0;
+  f.setFetch(async(path,options)=>{assert.equal(path,'/session');assert.equal(options,undefined);requests++;return {ok:false,status:401};});
+  f.sockets[0].onclose();await flush();assert.equal(requests,1);assert.equal(f.sockets.length,1);
+  assert.equal(f.window.orbitJarvis.snapshot().authenticated,false);assert.match(f.elements.status.textContent,/Session expired/);
 });
