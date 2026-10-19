@@ -43,8 +43,11 @@ final class JarvisPolicyTests: XCTestCase {
         let attempt = gate.consume()!; gate.resetDocument()
         XCTAssertFalse(gate.permits(attempt)); XCTAssertFalse(gate.ready)
         gate.arm(); XCTAssertNil(gate.consume())
-        gate.update(version: 1, authenticated: true); gate.arm(); gate.update(version: 1, authenticated: false)
+        gate.update(version: 1, authenticated: true); gate.arm(); let priorLoginAttempt = gate.consume()!
+        gate.update(version: 1, authenticated: false)
         XCTAssertNil(gate.consume())
+        gate.update(version: 1, authenticated: true)
+        XCTAssertFalse(gate.permits(priorLoginAttempt), "Signing in again must not revive a previous permission request")
     }
 }
 
