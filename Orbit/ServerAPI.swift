@@ -336,7 +336,7 @@ final class ServerAPI: ObservableObject {
             } catch {
                 guard self.accessAllowed && generation == self.servicesGeneration && !Self.isRefreshCancellation(error) else { return }
                 if let http = error as? HTTPFailure, http.status == 404 || http.status == 501 {
-                    self.servicesError = "Service integrations are not connected yet. A compatible Server Control backend update is needed."
+                    self.servicesError = "Service integrations are not connected yet. A compatible Orbit backend update is needed."
                 } else { self.servicesError = self.friendly(error) }
             }
         }

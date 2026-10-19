@@ -1,7 +1,7 @@
 import XCTest
 import SwiftUI
 import UIKit
-@testable import ServerControl
+@testable import Orbit
 
 @MainActor
 final class MobileTests: XCTestCase {

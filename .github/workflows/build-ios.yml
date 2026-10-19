@@ -1,4 +1,4 @@
-name: Build ServerControl IPA
+name: Build Orbit IPA
 
 on:
   workflow_dispatch:
@@ -30,37 +30,37 @@ jobs:
         run: xcodegen generate
       - name: Show Xcode version
         run: xcodebuild -version
-      - name: Build ServerControl for iPhone
+      - name: Build Orbit for iPhone
         run: |
           set -euo pipefail
-          xcodebuild -project ServerControl.xcodeproj -scheme ServerControl -configuration Release -sdk iphoneos -destination "generic/platform=iOS" -derivedDataPath build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" CURRENT_PROJECT_VERSION=${{ github.run_number }} build
+          xcodebuild -project Orbit.xcodeproj -scheme Orbit -configuration Release -sdk iphoneos -destination "generic/platform=iOS" -derivedDataPath build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" CURRENT_PROJECT_VERSION=${{ github.run_number }} build
       - name: Select iPhone simulator
         run: |
           DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin); print(next(v["udid"] for devices in d["devices"].values() for v in devices if v["name"].startswith("iPhone")))')
           echo "SIMULATOR_ID=$DEVICE" >> "$GITHUB_ENV"
       - name: Test API compatibility and command safety
         run: |
-          xcodebuild test -project ServerControl.xcodeproj -scheme ServerControl -configuration Debug -sdk iphonesimulator -destination "platform=iOS Simulator,id=$SIMULATOR_ID" -derivedDataPath build-test -resultBundlePath TestResults.xcresult -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""
+          xcodebuild test -project Orbit.xcodeproj -scheme Orbit -configuration Debug -sdk iphonesimulator -destination "platform=iOS Simulator,id=$SIMULATOR_ID" -derivedDataPath build-test -resultBundlePath TestResults.xcresult -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""
       - name: Package and validate IPA
         run: |
           set -euo pipefail
-          APP=build/Build/Products/Release-iphoneos/ServerControl.app
-          test -f "$APP/ServerControl"
+          APP=build/Build/Products/Release-iphoneos/Orbit.app
+          test -f "$APP/Orbit"
           plutil -lint "$APP/Info.plist"
-          lipo "$APP/ServerControl" -verify_arch arm64
+          lipo "$APP/Orbit" -verify_arch arm64
           python3 tools/validate_bundle.py "$APP"
           mkdir -p Payload
           cp -R "$APP" Payload/
-          zip -qry ServerControl.ipa Payload
-          unzip -t ServerControl.ipa
-          shasum -a 256 ServerControl.ipa > ServerControl.ipa.sha256
+          zip -qry Orbit.ipa Payload
+          unzip -t Orbit.ipa
+          shasum -a 256 Orbit.ipa > Orbit.ipa.sha256
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
-          name: ServerControl-IPA
+          name: Orbit-IPA
           path: |
-            ServerControl.ipa
-            ServerControl.ipa.sha256
+            Orbit.ipa
+            Orbit.ipa.sha256
           if-no-files-found: error
           retention-days: 30
       - name: Export simulator layout previews
@@ -74,7 +74,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: ServerControl-Previews
+          name: Orbit-Previews
           path: screenshots/
           if-no-files-found: error
           retention-days: 30
@@ -82,7 +82,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ServerControl-TestResults
+          name: Orbit-TestResults
           path: TestResults.xcresult
           if-no-files-found: ignore
           retention-days: 7

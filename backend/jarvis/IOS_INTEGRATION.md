@@ -42,12 +42,12 @@ Memory proposals remain unsaved drafts. Existing create/edit/delete behavior sta
 
 ## Build, signing and installation
 
-1. Push these files to the existing repository main branch. The existing Build ServerControl IPA GitHub Actions workflow runs the backend adapter tests, JARVIS Node lifecycle tests, XcodeGen, unsigned arm64 iPhone Release build and complete iOS simulator tests, then packages `ServerControl.ipa`.
-2. Download `ServerControl-IPA` from that successful run's Artifacts and extract the ZIP on Windows.
-3. Transfer `ServerControl.ipa` to the iPhone, open SideStore and use its normal Add/Install IPA flow to sign and install over the current Orbit app. Keep the same Apple account/signing identity and app bundle identifier to preserve Keychain access. Product filename and bundle ID remain ServerControl/com.servercontrol.app; the display name stays Orbit.
+1. Push these files to the existing repository main branch. The existing Build Orbit IPA GitHub Actions workflow runs the backend adapter tests, JARVIS Node lifecycle tests, XcodeGen, unsigned arm64 iPhone Release build and complete iOS simulator tests, then packages `Orbit.ipa`.
+2. Download `Orbit-IPA` from that successful run's Artifacts and extract the ZIP on Windows.
+3. Transfer `Orbit.ipa` to the iPhone, open SideStore and use its normal Add/Install IPA flow to sign and install over the current Orbit app. Keep the same Apple account/signing identity and app bundle identifier to preserve Keychain access. The product filename is Orbit.ipa. The existing bundle ID is retained for upgrade compatibility; the display name is Orbit.
 4. Unlock Orbit, open Home → JARVIS, sign in to JARVIS inside the app, and tap Start voice to request microphone permission. Existing desktop browser sign-in is not transferred.
 
-No Mac, provisioning profile, signing key or server secret is required in GitHub. SideStore performs personal signing on the user's device. If building on a Mac instead: generate with `xcodegen generate`, open ServerControl.xcodeproj, select the existing ServerControl scheme; the workflow contains the exact unsigned build/test commands. This change does not alter the existing signing setup.
+No Mac, provisioning profile, signing key or server secret is required in GitHub. SideStore performs personal signing on the user's device. If building on a Mac instead: generate with `xcodegen generate`, open Orbit.xcodeproj, select the existing Orbit scheme; the workflow contains the exact unsigned build/test commands. This change does not alter the existing signing setup.
 
 ## Verification boundaries
 

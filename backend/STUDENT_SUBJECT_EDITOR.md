@@ -1,6 +1,6 @@
 # Student subject editor v1 — Orbit client
 
-Uses the existing Students HTTPS URL and dedicated `X-API-Key` Keychain record. It never sends the server-control bearer token, changes schedules, or calls a WhatsApp send route.
+Uses the existing Students HTTPS URL and dedicated `X-API-Key` Keychain record. It never sends the Orbit API bearer token, changes schedules, or calls a WhatsApp send route.
 
 ## Availability verification
 

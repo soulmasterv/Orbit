@@ -4,9 +4,9 @@ Payload/
 *.ipa
 *.ipa.sha256
 *.xcresult/
-ServerControl.xcodeproj/
-ServerControl/Info.plist
-ServerControlTests/Info.plist
+Orbit.xcodeproj/
+Orbit/Info.plist
+OrbitTests/Info.plist
 screenshots/
 .env
 .env.*

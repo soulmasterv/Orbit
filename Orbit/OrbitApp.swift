@@ -1,7 +1,7 @@
 import SwiftUI
 
 @main
-struct ServerControlApp: App {
+struct OrbitApp: App {
     init() { NotificationCleanup.removeLocalRegistration() }
     var body: some Scene {
         WindowGroup { AppRootView() }

@@ -105,12 +105,12 @@ or a claim that the live backend was inspected/deployed.
    subsequent GETs. A command is never automatically retried by iOS.
 6. Test unauthenticated requests, unknown IDs, secret redaction, backend errors and
    command deduplication using stubs. Do not fire real WhatsApp reports during tests.
-   Deploy/restart only the existing ServerControl process using its normal method.
+   Deploy/restart only the existing API process using its normal method.
    Verify the public domain health and authenticated dashboard/Services afterwards.
 
 ## Routes
 
-- GET `/api/services`: JSON schema in `ServerControl/ServiceModels.swift`; timestamps
+- GET `/api/services`: JSON schema in `Orbit/ServiceModels.swift`; timestamps
   are ISO 8601 strings. Missing provider returns 501 and the app shows a service-only
   availability message. Missing data reports Unknown rather than invented health.
 - POST `/api/services/gemini/{key-1…key-10}/test`: bearer-authenticated predefined test.

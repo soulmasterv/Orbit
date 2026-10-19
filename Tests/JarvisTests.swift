@@ -1,6 +1,6 @@
 import XCTest
 import WebKit
-@testable import ServerControl
+@testable import Orbit
 
 final class JarvisPolicyTests: XCTestCase {
     func testOnlyExactHTTPSOriginIsEmbedded() {

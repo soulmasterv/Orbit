@@ -12,7 +12,7 @@ enum DeviceAuthorization {
         context.localizedCancelTitle = "Cancel"
         var error: NSError?
         guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) else {
-            throw APIError.message("Set a device passcode in iPhone Settings to unlock Server Control. Face ID or Touch ID is optional.")
+            throw APIError.message("Set a device passcode in iPhone Settings to unlock Orbit. Face ID or Touch ID is optional.")
         }
         let success = try await context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: reason)
         guard success else { throw APIError.message("Device authentication failed. No command was sent.") }

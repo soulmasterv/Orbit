@@ -2,7 +2,7 @@ import XCTest
 import LocalAuthentication
 import SwiftUI
 import UIKit
-@testable import ServerControl
+@testable import Orbit
 
 final class MockURLProtocol: URLProtocol {
     static var handler: ((URLRequest) throws -> (Int, Data))?
@@ -50,11 +50,11 @@ final class DashboardRequestGate {
 }
 
 @MainActor
-final class ServerControlTests: XCTestCase {
+final class OrbitTests: XCTestCase {
     private var defaults: UserDefaults!
     private var suite: String!
     override func setUp() async throws {
-        suite = "ServerControlTests.\(UUID())"
+        suite = "OrbitTests.\(UUID())"
         defaults = UserDefaults(suiteName: suite)
         MockURLProtocol.requests = []
         MockURLProtocol.onStart = nil

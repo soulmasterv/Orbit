@@ -1,4 +1,4 @@
-# ServerControl V4 — Homelab Command Center
+# Orbit V4 — Homelab Command Center
 
 Native SwiftUI for iPhone (iOS 17+), built on Windows through the existing macOS
 GitHub Actions pipeline. The unsigned arm64 IPA is intended for SideStore re-signing.
@@ -50,12 +50,12 @@ See [backend/INTEGRATION.md](backend/INTEGRATION.md) for integration and future 
 ## Build and review
 
 Actions builds Release for arm64 iOS, runs backend safety and offline iOS tests,
-validates version/icon/privacy/unsigned packaging, and uploads **ServerControl-IPA**.
-Manual runs can export **ServerControl-V4-Previews** with all major iPhone screens
+validates version/icon/privacy/unsigned packaging, and uploads **Orbit-IPA**.
+Manual runs can export **Orbit-V4-Previews** with all major iPhone screens
 in light/dark themes. Previews use test/DEBUG data only; production never substitutes
 sample service/log data. Release bundle validation excludes the DEBUG preview entry.
 
 Download the successful run's IPA artifact, extract its ZIP and import
-`ServerControl.ipa` into SideStore. Retain your Apple account and bundle identity
+`Orbit.ipa` into SideStore. Retain your Apple account and bundle identity
 for in-place updates. Real-device biometric presentation and live integration health
 still require verification on your iPhone.

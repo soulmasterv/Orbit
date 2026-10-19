@@ -7,7 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 source = Image.open(ROOT / 'tools/orbit-logo.png').convert('RGB')
 assert source.width == source.height, 'Use the approved square logo'
 image = source.resize((1024, 1024), Image.Resampling.LANCZOS)
-catalog = ROOT / 'ServerControl/Assets.xcassets'
+catalog = ROOT / 'Orbit/Assets.xcassets'
 icon = catalog / 'AppIcon.appiconset/AppIcon.png'
 logo = catalog / 'OrbitLogo.imageset'
 icon.parent.mkdir(parents=True, exist_ok=True)

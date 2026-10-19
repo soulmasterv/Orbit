@@ -4,13 +4,13 @@
 
 # Orbit / Students mobile API v1
 
-Client additions only. The bot and server have not been changed or deployed by this work. Existing server-control bearer authentication, Students Keychain connection, moderation controls and app lock remain in place.
+Client additions only. The bot and server have not been changed or deployed by this work. Existing Orbit API bearer authentication, Students Keychain connection, moderation controls and app lock remain in place.
 
 ## Deployment gates and authentication
 
 Authenticated `GET /api/mobile/capabilities` must decode as version 1. Message composition additionally requires `plain_text_messages` and `message_idempotency`. Events/push require the matching onboarding/feedback support flags. No assumption of deployment is made from an installed app update.
 
-Every mobile, Students, feedback, event and push request uses only the configured Students HTTPS base URL and dedicated `X-API-Key`. Redirects are refused. No server-control bearer token is sent. Credentials and private local state are in device-only, when-unlocked Keychain records; private data is never logged.
+Every mobile, Students, feedback, event and push request uses only the configured Students HTTPS base URL and dedicated `X-API-Key`. Redirects are refused. No Orbit API bearer token is sent. Credentials and private local state are in device-only, when-unlocked Keychain records; private data is never logged.
 
 ## Routes
 

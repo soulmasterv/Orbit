@@ -1,5 +1,5 @@
 import XCTest
-@testable import ServerControl
+@testable import Orbit
 
 @MainActor
 final class StudentsManagementTests: XCTestCase {

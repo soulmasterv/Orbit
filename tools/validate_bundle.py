@@ -17,6 +17,6 @@ assert list(app.glob('AppIcon*.png')), 'Missing compiled iPhone icon'
 assert (app / 'Assets.car').is_file(), 'Missing compiled asset catalog'
 assert 'remote-notification' not in info.get('UIBackgroundModes', [])
 assert not list(app.glob('*.entitlements')), 'Unexpected entitlements'
-assert b'--ui-preview' not in (app / 'ServerControl').read_bytes(), 'Debug preview entry leaked into Release'
+assert b'--ui-preview' not in (app / 'Orbit').read_bytes(), 'Debug preview entry leaked into Release'
 print('Validated V4 version, compiled AppIcon, Face ID description and unsigned bundle.')
 

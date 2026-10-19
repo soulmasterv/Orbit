@@ -7,7 +7,7 @@ Do not advertise management support until all enforcement described below works.
 ## Connection and authentication
 
 All routes use the existing Students HTTPS base URL and `X-API-Key` credential
-stored together in iOS Keychain. They never receive the server-control bearer
+stored together in iOS Keychain. They never receive the Orbit API bearer
 token. HTTP is rejected and redirects are not followed. No tunnel, API origin,
 TLS exception, or existing connection setting is changed by this app update.
 
