@@ -3,16 +3,16 @@ import XCTest
 
 @MainActor
 final class JarvisBootstrapTests: XCTestCase {
-    private static let instant = Date(timeIntervalSince1970: 2_000_000_000)
+    nonisolated private static let instant = Date(timeIntervalSince1970: Double(Int(Date().timeIntervalSince1970)))
     private let installation = UUID(uuidString: "87E88911-A38B-4CEB-A471-BA636182952B")!
     private let nonce = String(repeating: "a", count: 43)
     nonisolated private static func response(nonce: String, edit: ((inout [String: Any]) -> Void)? = nil) -> Data {
         func cookie(_ name: String) -> [String: Any] {
             ["name":name,"value":"fixture-only-session","domain":"jarvis.labbing.space","path":"/",
-             "secure":true,"http_only":true,"same_site":"Strict","expires_at":2_000_000_600]
+             "secure":true,"http_only":true,"same_site":"Strict","expires_at":Int(Self.instant.timeIntervalSince1970) + 600]
         }
         var payload: [String: Any] = ["version":1,"nonce":nonce,"entry_url":"https://jarvis.labbing.space/",
-                                     "expires_at":2_000_000_600,"cookies":[cookie("jarvis"),cookie("CF_Authorization")]]
+                                     "expires_at":Int(Self.instant.timeIntervalSince1970) + 600,"cookies":[cookie("jarvis"),cookie("CF_Authorization")]]
         edit?(&payload); return try! JSONSerialization.data(withJSONObject: payload)
     }
     private func payload(_ request: URLRequest) throws -> [String: Any] {
@@ -74,7 +74,7 @@ final class JarvisBootstrapTests: XCTestCase {
     func testRejectsEveryMalformedCookieFieldAndCompleteResponseBeforeInstallation() throws {
         let badFields: [(String, Any)] = [("name","other"),("value","a; injected=x"),("value","a\r\nb"),("value",""),("domain",".jarvis.labbing.space"),
             ("domain","control.admin-ai.site"),("path","/voice"),("secure",false),("http_only",false),("same_site","Lax"),
-            ("expires_at",2_000_001_000),("expires_at",1_999_999_999)]
+            ("expires_at",Int(Self.instant.timeIntervalSince1970) + 1000),("expires_at",Int(Self.instant.timeIntervalSince1970) - 1)]
         for (key,bad) in badFields {
             let data = Self.response(nonce: nonce) { root in
                 var cookies = root["cookies"] as! [[String:Any]]; cookies[1][key] = bad; root["cookies"] = cookies
@@ -82,7 +82,7 @@ final class JarvisBootstrapTests: XCTestCase {
             XCTAssertThrowsError(try ValidatedJarvisAppSession.decode(data, expectedNonce: nonce, now: Self.instant), key)
         }
         for (key,bad) in [("version",2 as Any),("nonce","wrong"),("entry_url","https://jarvis.labbing.space:443/"),
-                          ("entry_url","https://evil.example/"),("expires_at",2_000_000_059),("expires_at",2_000_000_901)] {
+                          ("entry_url","https://evil.example/"),("expires_at",Int(Self.instant.timeIntervalSince1970) + 59),("expires_at",Int(Self.instant.timeIntervalSince1970) + 901)] {
             XCTAssertThrowsError(try ValidatedJarvisAppSession.decode(Self.response(nonce: nonce) { $0[key]=bad }, expectedNonce: nonce, now: Self.instant))
         }
         XCTAssertThrowsError(try ValidatedJarvisAppSession.decode(Data("{}".utf8),expectedNonce:nonce,now:Self.instant))
