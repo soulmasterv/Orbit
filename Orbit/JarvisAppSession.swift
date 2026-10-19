@@ -107,7 +107,13 @@ struct ValidatedJarvisAppSession: CustomStringConvertible, CustomDebugStringConv
                 // Omit Domain in Set-Cookie to preserve host-only scope.
                 let header = "\(c.name)=\(c.value); Path=/; Secure; HttpOnly; SameSite=Strict; Expires=\(formatter.string(from: Date(timeIntervalSince1970: Double(c.expires_at))))"
                 let parsed = HTTPCookie.cookies(withResponseHeaderFields: ["Set-Cookie": header], for: JarvisPolicy.home)
-                guard parsed.count == 1, let cookie = parsed.first, cookie.domain == "jarvis.labbing.space",
+                guard parsed.count == 1, var properties = parsed.first?.properties else { throw JarvisBootstrapError.invalidResponse }
+                // Do not rely on HTTP header parsing to retain SameSite or the exact timestamp.
+                // These values were validated above; retain the parser's non-dotted host scope.
+                properties[.sameSitePolicy] = HTTPCookieStringPolicy.sameSiteStrict.rawValue
+                properties[.expires] = Date(timeIntervalSince1970: Double(c.expires_at))
+                properties[.discard] = "FALSE"
+                guard let cookie = HTTPCookie(properties: properties), cookie.domain == "jarvis.labbing.space",
                       cookie.path == "/", cookie.isSecure, cookie.isHTTPOnly, cookie.value == c.value,
                       cookie.sameSitePolicy?.rawValue.lowercased() == "strict",
                       cookie.expiresDate?.timeIntervalSince1970 == Double(c.expires_at) else { throw JarvisBootstrapError.invalidResponse }

@@ -163,14 +163,32 @@ final class JarvisBootstrapTests: XCTestCase {
     }
     func testPendingIssuanceSuppressesDuplicateIssueAndRevoke() async throws {
         let entered=expectation(description:"Issuance pending"),gate=JarvisBootstrapRequestGate()
-        MockURLProtocol.onStart={p in gate.capture(p);entered.fulfill()}
+        MockURLProtocol.onStart={p in
+            if p.request.url?.path.hasSuffix("/revoke") == true {
+                // A failed issuance may compensate; never fulfill the issuance expectation twice.
+                self.reply(p,data:Data("{\"version\":1,\"nonce\":\"\(String(repeating:"b",count:43))\",\"revoked\":true}".utf8))
+            } else { gate.capture(p);entered.fulfill() }
+        }
         let b=broker(),first=Task { try await b.issue(installationID:installation) }
         await fulfillment(of:[entered],timeout:2)
         do { _=try await b.issue(installationID:installation);XCTFail() } catch {}
         do { try await b.revoke(installationID:installation);XCTFail() } catch {}
         XCTAssertEqual(MockURLProtocol.requests.count,1)
         reply(try XCTUnwrap(gate.take()),data:Self.response(nonce:nonce));_=try await first.value
+        XCTAssertEqual(MockURLProtocol.requests.count,1)
         XCTAssertFalse(b.pending)
+    }
+    func testFoundationCookieHeaderParsingDoesNotDefineContractSecurity() throws {
+        // Characterize the OS parser with synthetic data, never live credentials.
+        let header="fixture=synthetic; Path=/; Secure; HttpOnly; SameSite=Strict; Expires=Wed, 18 May 2033 03:43:20 GMT"
+        let parsed=try XCTUnwrap(HTTPCookie.cookies(withResponseHeaderFields:["Set-Cookie":header],for:JarvisPolicy.home).first)
+        print("Synthetic cookie parser: SameSite=\(parsed.sameSitePolicy?.rawValue ?? "missing"), expiry=\(parsed.expiresDate?.timeIntervalSince1970 ?? -1)")
+        let session=try ValidatedJarvisAppSession.decode(Self.response(nonce:nonce),expectedNonce:nonce,now:Self.instant)
+        for cookie in session.cookies {
+            XCTAssertEqual(cookie.sameSitePolicy,.sameSiteStrict)
+            XCTAssertEqual(cookie.expiresDate,Self.instant.addingTimeInterval(600))
+            XCTAssertFalse(cookie.isSessionOnly)
+        }
     }
 }
 
