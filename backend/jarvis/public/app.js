@@ -27,6 +27,14 @@ function stop(message='Stopped. Microphone released.'){
 }
 function current(s){return session===s&&s.id===generation;}
 function fail(s,message){if(current(s))stop(message);else dispose(s);}
+async function checkExpiredSession(stoppedAt,authAt){
+  try{
+    const r=await fetch('/session');
+    if(generation===stoppedAt&&authGeneration===authAt&&r.status===401){
+      csrf=null;signed(false);publish('idle','Session expired. Sign in again.');
+    }
+  }catch{} // This read never redials voice or replays a mutation.
+}
 window.orbitJarvis=Object.freeze({version:1,stop,snapshot:()=>({...state})});
 initMemory(()=>csrf);
 $('login').onsubmit=async e=>{
@@ -87,7 +95,11 @@ $('start').onclick=async e=>{
       }catch{fail(s,'Audio connection failed. Start a new conversation.');}
     };
     socket.onerror=()=>fail(s,'Connection refused. Check login, shared limits, and server status.');
-    socket.onclose=()=>fail(s,'Disconnected. Check your session, then tap Start voice.');
+    socket.onclose=()=>{
+      if(!current(s)){dispose(s);return;}
+      stop('Disconnected. Check your session, then tap Start voice.');
+      void checkExpiredSession(generation,authGeneration);
+    };
   }catch(e){
     fail(s,e.name==='NotAllowedError'?'Microphone denied. Allow access in Settings, then tap Start voice.':'Voice could not start. Check microphone, network, and audio support.');
   }
