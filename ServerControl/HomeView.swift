@@ -85,6 +85,21 @@ struct HomeView: View {
                         }
                     }
                 }.buttonStyle(.plain)
+                NavigationLink {
+                    JarvisView()
+                } label: {
+                    Panel {
+                        HStack(spacing: 12) {
+                            Image(systemName: "waveform").foregroundStyle(Brand.accent)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("JARVIS").font(.headline).foregroundStyle(.primary)
+                                Text("Private voice chat and reviewed memory").font(.caption).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right").foregroundStyle(.secondary)
+                        }
+                    }
+                }.buttonStyle(.plain)
                 if !favorites.isEmpty {
                     SectionHeading(title: "Favorites")
                     LazyVGrid(columns: columns, spacing: 10) { ForEach(favorites) { tile($0) } }
@@ -162,4 +177,5 @@ extension DockerContainer {
     var displayStatus: String { isUnhealthy ? "Unhealthy" : (isRunning ? "Running" : (state?.capitalized ?? "Unknown")) }
 }
 extension PadelComponent { var isWhatsApp: Bool { id.lowercased() == "whatsapp" || name.lowercased().contains("whatsapp") } }
+
 
