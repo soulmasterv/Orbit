@@ -68,8 +68,7 @@ final class JarvisSession: NSObject, ObservableObject, WKNavigationDelegate, WKU
 
     func activate() {
         gate.activate()
-        webView?.setAllMediaPlaybackSuspended(false, completionHandler: nil)
-        // Activation never starts recording or replays a voice session.
+        // Keep background-suspended playback blocked until a fresh explicit Start tap.
     }
 
     func stop(_ message: String? = nil, background: Bool = false) {
@@ -115,7 +114,10 @@ final class JarvisSession: NSObject, ObservableObject, WKNavigationDelegate, WKU
               JarvisPolicy.isOrigin(webView?.url), let body = message.body as? [String: Any] else { return }
         if body["kind"] as? String == "startTap" {
             gate.arm()
-            if gate.armed { notice = nil }
+            if gate.armed {
+                notice = nil
+                webView?.setAllMediaPlaybackSuspended(false, completionHandler: nil)
+            }
             return
         }
         guard body["kind"] as? String == "state", let version = body["version"] as? Int else { return }
