@@ -51,7 +51,7 @@ See [backend/INTEGRATION.md](backend/INTEGRATION.md) for integration and future 
 
 Actions builds Release for arm64 iOS, runs backend safety and offline iOS tests,
 validates version/icon/privacy/unsigned packaging, and uploads **Orbit-IPA**.
-Manual runs can export **Orbit-V4-Previews** with all major iPhone screens
+Successful runs also export **Orbit-Previews** with all major iPhone screens
 in light/dark themes. Previews use test/DEBUG data only; production never substitutes
 sample service/log data. Release bundle validation excludes the DEBUG preview entry.
 
