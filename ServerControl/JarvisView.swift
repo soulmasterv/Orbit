@@ -123,6 +123,12 @@ final class JarvisSession: NSObject, ObservableObject, WKNavigationDelegate, WKU
         gate.update(version: version, authenticated: authenticated)
         ready = gate.ready; signedIn = authenticated
         memoryAvailable = ready && body["memoryAvailable"] as? Bool == true
+        if body["phase"] as? String == "idle" {
+            // Web Stop/sign-out must invalidate an OS permission prompt that is still pending too.
+            gate.stop()
+            webView?.setMicrophoneCaptureState(.none, completionHandler: nil)
+            webView?.pauseAllMediaPlayback(completionHandler: nil)
+        }
         if !ready {
             notice = "JARVIS needs the supplied frontend update before voice can run safely in Orbit."
             webView?.setMicrophoneCaptureState(.none, completionHandler: nil)
@@ -202,7 +208,7 @@ final class JarvisSession: NSObject, ObservableObject, WKNavigationDelegate, WKU
         const s = ready ? api.snapshot() : {};
         const start = document.getElementById('start');
         if (!ready && start) start.disabled = true;
-        bridge.postMessage({kind:'state',version:ready?1:0,authenticated:s.authenticated===true,memoryAvailable:s.memoryAvailable===true});
+        bridge.postMessage({kind:'state',version:ready?1:0,authenticated:s.authenticated===true,memoryAvailable:s.memoryAvailable===true,phase:s.phase==='starting'?'starting':s.phase==='listening'?'listening':'idle'});
       }
       document.addEventListener('click', e => {
         if (e.isTrusted && e.target.closest?.('#start') && window.orbitJarvis?.version === 1) bridge.postMessage({kind:'startTap'});
@@ -230,11 +236,11 @@ private final class WeakJarvisHandler: NSObject, WKScriptMessageHandler {
 
 private struct JarvisWebView: UIViewRepresentable {
     @ObservedObject var session: JarvisSession
+    func makeCoordinator() -> JarvisSession { session }
     func makeUIView(context: Context) -> WKWebView { session.makeWebView() }
     func updateUIView(_ uiView: WKWebView, context: Context) {}
-    static func dismantleUIView(_ uiView: WKWebView, coordinator: ()) {
-        uiView.setMicrophoneCaptureState(.none, completionHandler: nil)
-        uiView.setAllMediaPlaybackSuspended(true, completionHandler: nil)
+    static func dismantleUIView(_ uiView: WKWebView, coordinator: JarvisSession) {
+        coordinator.detach()
     }
 }
 
