@@ -800,3 +800,27 @@ enum APIError: LocalizedError {
 
 
 
+
+// Staged only. No UI, scene lifecycle or web view calls this until live verification.
+extension ServerAPI {
+    func makeVerifiedJarvisBroker() throws -> JarvisAppSessionBroker {
+        guard JarvisAppSessionRollout.enabled else { throw JarvisBootstrapError.notVerified }
+        let originalURL = try Self.validatedBaseURL(baseURL)
+        guard originalURL.absoluteString == "https://control.admin-ai.site" || originalURL.absoluteString == "https://control.admin-ai.site/" else {
+            throw JarvisBootstrapError.invalidResponse
+        }
+        guard accessAllowed else { throw JarvisBootstrapError.locked }
+        let originalToken = tokenProvider()
+        guard !originalToken.isEmpty else { throw JarvisBootstrapError.locked }
+        return JarvisAppSessionBroker(requestBuilder: { [weak self] path, body in
+            guard let self, self.accessAllowed else { throw JarvisBootstrapError.locked }
+            var command = try self.request(path: path, method: "POST", endpoint: originalURL.absoluteString)
+            command.httpBody = body
+            return command
+        }, isAllowed: { [weak self] in
+            guard let self else { return false }
+            return self.accessAllowed && self.baseURL == originalURL.absoluteString && self.tokenProvider() == originalToken
+        })
+    }
+}
+
