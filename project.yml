@@ -36,6 +36,7 @@ targets:
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         NSFaceIDUsageDescription: Unlock Orbit and authorize sensitive server commands with Face ID.
+        NSMicrophoneUsageDescription: Talk to JARVIS after tapping Start voice. Audio is streamed through your homelab for an internet voice conversation.
         UILaunchScreen: {}
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
@@ -61,6 +62,7 @@ schemes:
       config: Debug
       targets:
         - ServerControlTests
+
 
 
 
