@@ -180,9 +180,13 @@ final class JarvisBootstrapTests: XCTestCase {
     }
     func testFoundationCookieHeaderParsingDoesNotDefineContractSecurity() throws {
         // Characterize the OS parser with synthetic data, never live credentials.
-        let header="fixture=synthetic; Path=/; Secure; HttpOnly; SameSite=Strict; Expires=Wed, 18 May 2033 03:43:20 GMT"
+        let formatter=DateFormatter();formatter.locale=Locale(identifier:"en_US_POSIX");formatter.timeZone=TimeZone(secondsFromGMT:0)
+        formatter.dateFormat="EEE, dd MMM yyyy HH:mm:ss 'GMT'"
+        let header="fixture=synthetic; Path=/; Secure; HttpOnly; SameSite=Strict; Expires=\(formatter.string(from:Self.instant.addingTimeInterval(600)))"
         let parsed=try XCTUnwrap(HTTPCookie.cookies(withResponseHeaderFields:["Set-Cookie":header],for:JarvisPolicy.home).first)
-        print("Synthetic cookie parser: SameSite=\(parsed.sameSitePolicy?.rawValue ?? "missing"), expiry=\(parsed.expiresDate?.timeIntervalSince1970 ?? -1)")
+        XCTAssertEqual(parsed.sameSitePolicy,.sameSiteStrict)
+        XCTAssertEqual(parsed.expiresDate,Self.instant.addingTimeInterval(600))
+        XCTAssertEqual(parsed.domain,"jarvis.labbing.space");XCTAssertTrue(parsed.isSecure);XCTAssertTrue(parsed.isHTTPOnly)
         let session=try ValidatedJarvisAppSession.decode(Self.response(nonce:nonce),expectedNonce:nonce,now:Self.instant)
         for cookie in session.cookies {
             XCTAssertEqual(cookie.sameSitePolicy,.sameSiteStrict)
