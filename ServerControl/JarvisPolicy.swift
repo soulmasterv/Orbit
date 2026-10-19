@@ -21,7 +21,7 @@ struct JarvisCaptureGate {
     private(set) var armed = false
     mutating func update(version: Int, authenticated: Bool) {
         ready = version == 1; self.authenticated = authenticated
-        if !ready || !authenticated { armed = false }
+        if !ready || !authenticated { stop() }
     }
     mutating func activate() { foreground = true }
     mutating func arm() { armed = ready && authenticated && foreground }
