@@ -17,6 +17,7 @@ final class JarvisSession: NSObject, ObservableObject, WKNavigationDelegate, WKU
     private var observers: [NSObjectProtocol] = []
     private let monitor = NWPathMonitor()
     private var alertCompletion: ((Bool) -> Void)?
+    weak var appConnection: JarvisAppConnection?
     @Published var confirmation: String?
 
     override init() {
@@ -46,8 +47,9 @@ final class JarvisSession: NSObject, ObservableObject, WKNavigationDelegate, WKU
     }
 
     func makeWebView(loadInitialPage: Bool = true) -> WKWebView {
+        if let webView { return webView }
         let config = WKWebViewConfiguration()
-        config.websiteDataStore = .default() // HttpOnly login cookies remain in WebKit, never copied into Swift.
+        config.websiteDataStore = .default() // Persistent, HttpOnly cookies never enter page JS or the bridge.
         config.allowsInlineMediaPlayback = true
         config.mediaTypesRequiringUserActionForPlayback = .all
         config.applicationNameForUserAgent = "OrbitJARVIS/1"
@@ -103,6 +105,20 @@ final class JarvisSession: NSObject, ObservableObject, WKNavigationDelegate, WKU
         webView?.load(URLRequest(url: JarvisPolicy.home, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 20))
     }
 
+    func loadAppSession(_ url: URL) {
+        guard url == JarvisPolicy.home else { return }
+        stop(); gate.resetDocument(); ready = false; signedIn = false; memoryAvailable = false
+        notice = nil; loading = true
+        webView?.isHidden = false
+        webView?.load(URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 20))
+    }
+
+    func hideAppContent() {
+        stop(background: true); ready = false; signedIn = false; memoryAvailable = false; loading = false
+        webView?.stopLoading()
+        webView?.isHidden = true
+    }
+
     func showMemory() {
         guard ready, signedIn, memoryAvailable, let web = webView, JarvisPolicy.isOrigin(web.url) else { return }
         stop()
@@ -110,6 +126,7 @@ final class JarvisSession: NSObject, ObservableObject, WKNavigationDelegate, WKU
     }
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        if let appConnection, !appConnection.connected { return }
         guard message.frameInfo.isMainFrame, JarvisPolicy.isOrigin(message.frameInfo.request.url),
               JarvisPolicy.isOrigin(webView?.url), let body = message.body as? [String: Any] else { return }
         if body["kind"] as? String == "startTap" {
@@ -122,9 +139,11 @@ final class JarvisSession: NSObject, ObservableObject, WKNavigationDelegate, WKU
         }
         guard body["kind"] as? String == "state", let version = body["version"] as? Int else { return }
         let authenticated = body["authenticated"] as? Bool ?? false
+        let lostSession = signedIn && !authenticated
         gate.update(version: version, authenticated: authenticated)
         ready = gate.ready; signedIn = authenticated
         memoryAvailable = ready && body["memoryAvailable"] as? Bool == true
+        if lostSession, let appConnection { Task { await appConnection.signOut() }; return }
         if body["phase"] as? String == "idle" {
             // Web Stop/sign-out must invalidate an OS permission prompt that is still pending too.
             gate.stop()
@@ -170,6 +189,7 @@ final class JarvisSession: NSObject, ObservableObject, WKNavigationDelegate, WKU
             decisionHandler(.allow); return
         }
         decisionHandler(.cancel)
+        if let appConnection, action.navigationType != .linkActivated { appConnection.rejectedPage(); return }
         stop("Navigation outside JARVIS was blocked. Open external links in your browser.")
         if action.navigationType == .linkActivated, let url = action.request.url, ["https", "http"].contains(url.scheme?.lowercased() ?? "") {
             UIApplication.shared.open(url)
@@ -178,10 +198,21 @@ final class JarvisSession: NSObject, ObservableObject, WKNavigationDelegate, WKU
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { loading = false }
+    func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse,
+                 decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
+        guard navigationResponse.isForMainFrame, let appConnection else { decisionHandler(.allow); return }
+        guard JarvisPolicy.isOrigin(navigationResponse.response.url),
+              (navigationResponse.response as? HTTPURLResponse)?.statusCode == 200,
+              navigationResponse.response.mimeType == "text/html" else {
+            decisionHandler(.cancel); appConnection.rejectedPage(); return
+        }
+        decisionHandler(.allow)
+    }
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { failed(error) }
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { failed(error) }
     private func failed(_ error: Error) {
         guard (error as? URLError)?.code != .cancelled else { return }
+        if let appConnection { appConnection.rejectedPage(); return }
         loading = false; stop("JARVIS could not load. Check your network or server, then Reload.")
     }
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
@@ -239,7 +270,7 @@ private final class WeakJarvisHandler: NSObject, WKScriptMessageHandler {
 private struct JarvisWebView: UIViewRepresentable {
     @ObservedObject var session: JarvisSession
     func makeCoordinator() -> JarvisSession { session }
-    func makeUIView(context: Context) -> WKWebView { session.makeWebView() }
+    func makeUIView(context: Context) -> WKWebView { session.makeWebView(loadInitialPage: false) }
     func updateUIView(_ uiView: WKWebView, context: Context) {}
     static func dismantleUIView(_ uiView: WKWebView, coordinator: JarvisSession) {
         coordinator.detach()
@@ -247,7 +278,10 @@ private struct JarvisWebView: UIViewRepresentable {
 }
 
 struct JarvisView: View {
+    @ObservedObject var api: ServerAPI
+    @EnvironmentObject private var mobile: MobileStore
     @StateObject private var session = JarvisSession()
+    @State private var connection: JarvisAppConnection?
     @Environment(\.scenePhase) private var phase
     var body: some View {
         VStack(spacing: 0) {
@@ -263,6 +297,7 @@ struct JarvisView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }.padding(12)
             if session.loading { ProgressView().padding(6) }
+            if let connection { JarvisConnectionControls(connection: connection) }
             JarvisWebView(session: session)
         }
         .background(Brand.background).navigationTitle("JARVIS").navigationBarTitleDisplayMode(.inline)
@@ -270,7 +305,7 @@ struct JarvisView: View {
             ToolbarItemGroup(placement: .topBarTrailing) {
                 Button { session.showMemory() } label: { Image(systemName: "brain") }.accessibilityLabel("Memory")
                     .disabled(!session.signedIn || !session.memoryAvailable)
-                Button { session.reload() } label: { Image(systemName: "arrow.clockwise") }.accessibilityLabel("Reload JARVIS")
+                Button { Task { await connection?.connect() } } label: { Image(systemName: "arrow.clockwise") }.accessibilityLabel("Reconnect JARVIS")
             }
         }
         .alert("Confirm memory deletion", isPresented: Binding(get: { session.confirmation != nil }, set: { if !$0 { session.finishConfirmation(false) } })) {
@@ -278,10 +313,38 @@ struct JarvisView: View {
             Button("Delete", role: .destructive) { session.finishConfirmation(true) }
         } message: { Text(session.confirmation ?? "") }
         .onAppear { if phase == .active { session.activate() } }
-        .onDisappear { session.detach() }
+        .task {
+            guard connection == nil else { return }
+            let web = session.makeWebView(loadInitialPage: false)
+            let next = JarvisAppConnection(cookies: JarvisWebKitCookies(web.configuration.websiteDataStore.httpCookieStore),
+                makeBroker: { try api.makeVerifiedJarvisBroker() },
+                installation: { try mobile.jarvisInstallationID() },
+                allowed: { api.accessAllowed && phase == .active },
+                stop: { [weak session] in session?.hideAppContent() },
+                navigate: { [weak session] url in session?.activate(); session?.loadAppSession(url) })
+            connection = next; session.appConnection = next
+            await next.connect()
+        }
+        .onDisappear { connection?.suspend(); session.detach() }
+        .onChange(of: api.accessAllowed) { _, allowed in if !allowed { connection?.suspend() } }
         .onChange(of: phase) { _, value in
-            if value == .background { session.stop("Paused in background. Tap Start voice when ready.", background: true) }
+            if value == .background { connection?.suspend(); session.stop("Paused in background. Tap Start voice when ready.", background: true) }
             else if value == .active { session.activate() }
         }
     }
 }
+
+private struct JarvisConnectionControls: View {
+    @ObservedObject var connection: JarvisAppConnection
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if let message = connection.message { Text(message).font(.callout).foregroundStyle(.secondary) }
+            if connection.busy { ProgressView("Connecting securely…") }
+            HStack {
+                Button("Reconnect") { Task { await connection.connect() } }
+                Button("Sign out", role: .destructive) { Task { await connection.signOut() } }
+            }.buttonStyle(.bordered).disabled(connection.busy)
+        }.frame(maxWidth: .infinity, alignment: .leading).padding(12)
+    }
+}
+

@@ -86,7 +86,7 @@ struct HomeView: View {
                     }
                 }.buttonStyle(.plain)
                 NavigationLink {
-                    JarvisView()
+                    JarvisView(api: api)
                 } label: {
                     Panel {
                         HStack(spacing: 12) {
@@ -177,5 +177,6 @@ extension DockerContainer {
     var displayStatus: String { isUnhealthy ? "Unhealthy" : (isRunning ? "Running" : (state?.capitalized ?? "Unknown")) }
 }
 extension PadelComponent { var isWhatsApp: Bool { id.lowercased() == "whatsapp" || name.lowercased().contains("whatsapp") } }
+
 
 

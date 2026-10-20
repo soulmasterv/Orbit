@@ -28,6 +28,11 @@ final class MobileStore: ObservableObject {
         guard api.accessAllowed else { throw CancellationError() }
         if state == nil { let restored = try load(); try save(restored); state = restored }
     }
+    func jarvisInstallationID() throws -> UUID {
+        try ensureLoaded()
+        guard let state else { throw JarvisBootstrapError.locked }
+        return state.installationID
+    }
     private func update(_ change: (inout MobileSecureState) -> Void) throws {
         try ensureLoaded()
         guard var next = state else { throw CancellationError() }
@@ -185,4 +190,5 @@ final class MobileStore: ObservableObject {
         api.invalidateStudentsConnection()
     }
 }
+
 
