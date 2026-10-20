@@ -142,7 +142,7 @@ final class JarvisSession: NSObject, ObservableObject, WKNavigationDelegate, WKU
         let lostSession = signedIn && !authenticated
         gate.update(version: version, authenticated: authenticated)
         ready = gate.ready; signedIn = authenticated
-        memoryAvailable = ready && body["memoryAvailable"] as? Bool == true
+        memoryAvailable = ready && body["memoryAvailable"] as? Bool == true && (appConnection?.supportsMemory ?? true)
         if lostSession, let appConnection { Task { await appConnection.signOut() }; return }
         if body["phase"] as? String == "idle" {
             // Web Stop/sign-out must invalidate an OS permission prompt that is still pending too.

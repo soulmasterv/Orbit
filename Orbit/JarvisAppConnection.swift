@@ -32,6 +32,7 @@ extension JarvisAppSessionBroker: JarvisSessionServing {}
 @MainActor final class JarvisAppConnection: ObservableObject {
     @Published private(set) var busy = false
     @Published private(set) var connected = false
+    @Published private(set) var supportsMemory = false
     @Published private(set) var message: String?
     private let makeBroker: () throws -> JarvisSessionServing
     private let installation: () throws -> UUID
@@ -63,7 +64,7 @@ extension JarvisAppSessionBroker: JarvisSessionServing {}
         await cleanup?.value; cleanup = nil
         guard allowed(), !Task.isCancelled else { message = JarvisBootstrapError.locked.localizedDescription; return }
         generation += 1; let attempt = generation
-        stop(); connected = false; expiresAt = nil; expiryTask?.cancel()
+        stop(); connected = false; supportsMemory = false; expiresAt = nil; expiryTask?.cancel()
         message = "Establishing a private JARVIS session…"
         var issued = false
         var activeBroker: JarvisSessionServing?
@@ -83,7 +84,8 @@ extension JarvisAppSessionBroker: JarvisSessionServing {}
             try check(attempt, expiry: result.expiresAt)
             guard Self.matches(result.cookies, installed) else { throw JarvisBootstrapError.invalidResponse }
             broker = client; device = id; expiresAt = result.expiresAt
-            connected = true; message = nil
+            connected = true; supportsMemory = result.memoryAvailable
+            message = result.memoryAvailable ? nil : "Connected. Memory is unavailable on the current JARVIS server."
             navigate(result.entryURL)
             let delay = max(0, result.expiresAt.timeIntervalSince(now()))
             expiryTask = Task { [weak self] in
@@ -108,7 +110,7 @@ extension JarvisAppSessionBroker: JarvisSessionServing {}
     func signOut() async {
         guard !busy else { return }
         busy = true; defer { busy = false }
-        generation += 1; expiryTask?.cancel(); stop(); connected = false; expiresAt = nil
+        generation += 1; expiryTask?.cancel(); stop(); connected = false; supportsMemory = false; expiresAt = nil
         await cleanup?.value; cleanup = nil
         let client = broker; let id = device; broker = nil; device = nil
         var revoked = false
@@ -121,7 +123,7 @@ extension JarvisAppSessionBroker: JarvisSessionServing {}
 
     /// Background/lock/navigation invalidate every pending install before any await.
     func suspend() {
-        generation += 1; expiryTask?.cancel(); connected = false; expiresAt = nil; stop()
+        generation += 1; expiryTask?.cancel(); connected = false; supportsMemory = false; expiresAt = nil; stop()
         message = "JARVIS paused. Unlock Orbit, then Reconnect."
         let previous = cleanup
         cleanup = Task { [weak self] in
@@ -135,7 +137,7 @@ extension JarvisAppSessionBroker: JarvisSessionServing {}
     func expire() async {
         guard !busy else { return }
         busy = true; defer { busy = false }
-        generation += 1; expiryTask?.cancel(); connected = false; expiresAt = nil; stop()
+        generation += 1; expiryTask?.cancel(); connected = false; supportsMemory = false; expiresAt = nil; stop()
         await clearCookies()
         message = "JARVIS session expired. Reconnect to continue; voice will stay stopped."
     }

@@ -55,11 +55,10 @@ import WebKit
         XCTAssertEqual(broker.issues, 1); XCTAssertEqual(broker.revokes, 0)
         c.suspend()
     }
-    func testLockedAppNeverIssuesAndDisabledFactoryFailsClosed() async throws {
+    func testLockedAppNeverIssues() async throws {
         let jar = TestJarvisCookies(), broker = TestJarvisBroker(try result())
         let c = connection(jar, broker, allowed: { false })
         await c.connect(); XCTAssertEqual(broker.issues, 0); XCTAssertTrue(jar.values.isEmpty); XCTAssertFalse(c.connected)
-        XCTAssertFalse(JarvisAppSessionRollout.enabled)
     }
     func testReadBackFailureRollsBackAndRevokesWithoutReissuing() async throws {
         let jar = TestJarvisCookies(), broker = TestJarvisBroker(try result()); jar.dropWrites = true
@@ -106,5 +105,22 @@ import WebKit
         await c.connect(); await c.expire()
         XCTAssertFalse(c.connected); XCTAssertTrue(jar.values.isEmpty); XCTAssertEqual(broker.issues, 1)
         XCTAssertEqual(stops, 2); XCTAssertTrue(c.message?.contains("expired") == true)
+    }
+    func testActualWebKitCookieStorePreservesValidatedScopeAndSecurity() async throws {
+        let dataStore = WKWebsiteDataStore.nonPersistent()
+        let jar = JarvisWebKitCookies(dataStore.httpCookieStore)
+        let broker = TestJarvisBroker(try result())
+        var navigated = false
+        let c = JarvisAppConnection(cookies: jar, makeBroker: { broker }, installation: { UUID() },
+            allowed: { true }, stop: {}, navigate: { _ in navigated = true })
+        await c.connect()
+        XCTAssertTrue(c.connected); XCTAssertTrue(navigated)
+        let installed = await jar.all()
+        XCTAssertTrue(JarvisAppConnection.matches(broker.result.cookies, installed))
+        XCTAssertFalse(c.supportsMemory, "Missing capability is not confirmed Memory support")
+        await c.signOut()
+        let remaining = await jar.all()
+        XCTAssertFalse(remaining.contains(where: JarvisAppConnection.scoped))
+        XCTAssertEqual(broker.revokes, 1)
     }
 }

@@ -3,7 +3,8 @@ import Security
 
 /// Deliberately not controlled by remote JSON or a user default.
 enum JarvisAppSessionRollout {
-    static let enabled = false
+    // Enabled only after the 2026-10-20 live Ubuntu cookie-only verifier passed.
+    static let enabled = true
     // Add optional cookie names only after successful live Ubuntu proof.
     static let verifiedOptionalCookies: Set<String> = []
 }
@@ -58,6 +59,7 @@ private struct JarvisSessionEnvelope: Decodable {
     let entry_url: String
     let expires_at: Int
     let cookies: [JarvisCookieEnvelope]
+    let memory_available: Bool?
 }
 private struct JarvisCookieEnvelope: Decodable {
     let name: String
@@ -74,10 +76,12 @@ struct ValidatedJarvisAppSession: CustomStringConvertible, CustomDebugStringConv
     let expiresAt: Date
     let entryURL: URL
     let cookies: [HTTPCookie]
+    let memoryAvailable: Bool
     var description: String { "Validated JARVIS session (cookies redacted)" }
     var debugDescription: String { description }
-    private init(expiresAt: Date, cookies: [HTTPCookie]) {
+    private init(expiresAt: Date, cookies: [HTTPCookie], memoryAvailable: Bool) {
         self.expiresAt = expiresAt; self.cookies = cookies; entryURL = JarvisPolicy.home
+        self.memoryAvailable = memoryAvailable
     }
     static func decode(_ data: Data, expectedNonce: String, now: Date,
                        verifiedOptionalNames: Set<String> = JarvisAppSessionRollout.verifiedOptionalCookies) throws -> Self {
@@ -115,7 +119,8 @@ struct ValidatedJarvisAppSession: CustomStringConvertible, CustomDebugStringConv
                 return cookie
             }
             let earliest = min(result.expires_at, result.cookies.map(\.expires_at).min()!)
-            return Self(expiresAt: Date(timeIntervalSince1970: Double(earliest)), cookies: cookies)
+            return Self(expiresAt: Date(timeIntervalSince1970: Double(earliest)), cookies: cookies,
+                        memoryAvailable: result.memory_available ?? false)
         } catch { throw JarvisBootstrapError.invalidResponse }
     }
 }
@@ -180,6 +185,7 @@ final class JarvisAppSessionBroker {
         command.httpShouldHandleCookies = false
         command.setValue("application/json", forHTTPHeaderField: "Content-Type")
         command.setValue("application/json", forHTTPHeaderField: "Accept")
+        command.setValue("Orbit-JARVIS/1.0", forHTTPHeaderField: "User-Agent")
         do {
             let (data, response) = try await session.data(for: command)
             guard isAllowed(), !Task.isCancelled else { throw JarvisBootstrapError.locked }
@@ -194,3 +200,4 @@ final class JarvisAppSessionBroker {
         catch { throw JarvisBootstrapError.transport }
     }
 }
+

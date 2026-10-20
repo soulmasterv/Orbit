@@ -801,7 +801,7 @@ enum APIError: LocalizedError {
 
 
 
-// Staged only. No UI, scene lifecycle or web view calls this until live verification.
+// The JARVIS screen uses this factory after live verification; owner credentials remain native-only.
 extension ServerAPI {
     func makeVerifiedJarvisBroker() throws -> JarvisAppSessionBroker {
         guard JarvisAppSessionRollout.enabled else { throw JarvisBootstrapError.notVerified }

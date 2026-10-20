@@ -46,10 +46,10 @@ final class JarvisBootstrapTests: XCTestCase {
         protocolInstance.client?.urlProtocolDidFinishLoading(protocolInstance)
     }
 
-    func testReleaseGateMakesNoRequestsAndOptionalCookiesRemainUnconfirmed() throws {
-        XCTAssertFalse(JarvisAppSessionRollout.enabled); XCTAssertTrue(JarvisAppSessionRollout.verifiedOptionalCookies.isEmpty)
+    func testUnauthenticatedFactoryMakesNoRequestsAndOptionalCookiesRemainUnconfirmed() throws {
+        XCTAssertTrue(JarvisAppSessionRollout.verifiedOptionalCookies.isEmpty)
         let config = URLSessionConfiguration.ephemeral; config.protocolClasses = [MockURLProtocol.self]
-        let api = ServerAPI(session: URLSession(configuration: config), tokenProvider: { "fixture-only" })
+        let api = ServerAPI(session: URLSession(configuration: config), accessAllowed: false, tokenProvider: { "fixture-only" })
         XCTAssertThrowsError(try api.makeVerifiedJarvisBroker())
         XCTAssertTrue(MockURLProtocol.requests.isEmpty)
     }
@@ -202,3 +202,4 @@ private final class JarvisBootstrapRequestGate {
     func capture(_ value:MockURLProtocol){lock.lock();request=value;lock.unlock()}
     func take()->MockURLProtocol?{lock.lock();defer{lock.unlock()};return request}
 }
+
