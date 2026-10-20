@@ -3,6 +3,22 @@ import WebKit
 @testable import Orbit
 
 final class JarvisPolicyTests: XCTestCase {
+    func testKnownAccessLoginNeverBecomesContentOrCaptureOrigin() {
+        let login = URL(string: "https://quiet-sky-4b47.cloudflareaccess.com/cdn-cgi/access/login/jarvis.labbing.space?token=private")!
+        XCTAssertTrue(JarvisPolicy.isAccessLogin(login))
+        XCTAssertFalse(JarvisPolicy.isOrigin(login))
+        XCTAssertFalse(JarvisPolicy.isCaptureOrigin(protocol: "https", host: JarvisPolicy.accessHost, port: 443))
+        for value in ["http://quiet-sky-4b47.cloudflareaccess.com/cdn-cgi/access/login/", "https://quiet-sky-4b47.cloudflareaccess.com.evil.example/cdn-cgi/access/login/", "https://quiet-sky-4b47.cloudflareaccess.com:8443/cdn-cgi/access/login/", "https://user:pass@quiet-sky-4b47.cloudflareaccess.com/cdn-cgi/access/login/", "https://quiet-sky-4b47.cloudflareaccess.com/other", "https://another.cloudflareaccess.com/cdn-cgi/access/login/"] {
+            XCTAssertFalse(JarvisPolicy.isAccessLogin(URL(string: value)), value)
+        }
+    }
+    func testErrorMessagesNeverIncludePrivateURLValues() {
+        let e = NSError(domain: NSURLErrorDomain, code: URLError.Code.timedOut.rawValue,
+                        userInfo: [NSLocalizedDescriptionKey: "private-token", NSURLErrorFailingURLStringErrorKey: "https://example.test/?secret=private-token"])
+        XCTAssertTrue(JarvisPolicy.loadFailure(e)?.contains("timed out") == true)
+        XCTAssertFalse(JarvisPolicy.loadFailure(e)?.contains("private-token") == true)
+        XCTAssertNil(JarvisPolicy.loadFailure(URLError(.cancelled)))
+    }
     func testOnlyExactHTTPSOriginIsEmbedded() {
         for value in ["https://jarvis.labbing.space/", "https://jarvis.labbing.space:443/memory?view=1"] {
             XCTAssertTrue(JarvisPolicy.isOrigin(URL(string: value)))
@@ -70,3 +86,4 @@ final class JarvisConfigurationTests: XCTestCase {
         XCTAssertNil(info["NSCameraUsageDescription"])
     }
 }
+

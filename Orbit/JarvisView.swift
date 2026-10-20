@@ -169,20 +169,47 @@ final class JarvisSession: NSObject, ObservableObject, WKNavigationDelegate, WKU
             if action.targetFrame?.isMainFrame != false { stop(); gate.resetDocument() }
             decisionHandler(.allow); return
         }
+        if action.targetFrame?.isMainFrame != false, JarvisPolicy.isAccessLogin(action.request.url) {
+            stop("Complete the Cloudflare sign-in below. Microphone stays off during sign-in.")
+            gate.resetDocument(); ready = false; signedIn = false
+            decisionHandler(.allow); return
+        }
+        if JarvisPolicy.isGoogleLogin(action.request.url) {
+            decisionHandler(.cancel); loading = false
+            stop("Google sign-in cannot run inside this app view. If Cloudflare offers an email code, use that option. Otherwise native sign-in integration is required; Safari login does not transfer to Orbit.")
+            return
+        }
         decisionHandler(.cancel)
+        loading = false
         stop("Navigation outside JARVIS was blocked. Open external links in your browser.")
         if action.navigationType == .linkActivated, let url = action.request.url, ["https", "http"].contains(url.scheme?.lowercased() ?? "") {
             UIApplication.shared.open(url)
         }
-        // No Cloudflare/Google destinations are allowed implicitly. Add only a verified login flow.
+        // Only the known Cloudflare team login is embedded. It never gains capture trust.
+    }
+
+    func webView(_ webView: WKWebView, decidePolicyFor response: WKNavigationResponse,
+                 decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
+        guard response.isForMainFrame, let http = response.response as? HTTPURLResponse else {
+            decisionHandler(.allow); return
+        }
+        if http.statusCode >= 400 {
+            loading = false; stop("JARVIS page returned HTTP \(http.statusCode). Check Cloudflare access or server status, then Reload.")
+            decisionHandler(.cancel); return
+        }
+        if JarvisPolicy.isOrigin(http.url), http.url?.path == "/", http.mimeType == "application/json" {
+            loading = false; stop("JARVIS returned JSON instead of its web page. The server's root route needs correction.")
+            decisionHandler(.cancel); return
+        }
+        decisionHandler(.allow)
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { loading = false }
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { failed(error) }
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { failed(error) }
     private func failed(_ error: Error) {
-        guard (error as? URLError)?.code != .cancelled else { return }
-        loading = false; stop("JARVIS could not load. Check your network or server, then Reload.")
+        guard let message = JarvisPolicy.loadFailure(error) else { return }
+        loading = false; stop(message)
     }
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
         ready = false; gate.resetDocument(); stop("JARVIS was interrupted. Reload and start a new conversation.")
@@ -285,3 +312,4 @@ struct JarvisView: View {
         }
     }
 }
+
