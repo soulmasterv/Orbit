@@ -87,6 +87,17 @@ class Tests(unittest.TestCase):
             return result
         t.fetch=fetch;b=Broker('fixture-owner',cfg,t,lambda:clock[0])
         self.assertEqual(b.handle('Bearer fixture-owner',REQ)['expires_at'],NOW+800)
+    def test_independent_session_proofs_do_not_serialize_network_waits(self):
+        import threading
+        barrier=threading.Barrier(3);t=Fake();original=t.fetch
+        def fetch(url,method='GET',headers=None,body=None):
+            if url in (ORIGIN+'/session',ORIGIN+'/memory'):barrier.wait(timeout=2)
+            return original(url,method,headers,body)
+        def websocket(cookie):
+            barrier.wait(timeout=2)
+            self.assertIn('jarvis=',cookie)
+        t.fetch=fetch;t.websocket=websocket
+        self.assertEqual(self.broker(t).handle('Bearer fixture-owner',REQ)['version'],1)
     def test_redirects_are_not_followed(self):
         self.assertIsNone(NoRedirect().redirect_request(None,None,302,'',{},'https://evil.example/'))
 if __name__=='__main__':unittest.main()

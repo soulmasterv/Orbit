@@ -92,7 +92,9 @@ class Transport:
             # Never send audio or first-CSRF message. Closing releases the test lease.
         except Failure: raise
         except Exception: raise Failure() from None
-        finally: conn.close()
+        finally:
+            if 'res' in locals(): res.close()
+            conn.close()
 
 def cookie_contract(name, value, expiry):
     return dict(name=name,value=value,domain='jarvis.labbing.space',path='/',secure=True,http_only=True,same_site='Strict',expires_at=expiry)
@@ -165,14 +167,17 @@ class Broker:
                 issuer_now=int(self.clock())
                 if type(jarvis_exp)!=int or not issuer_now+60<jarvis_exp<=issuer_now+900: raise Failure()
                 expiry=min(expiry,jarvis_exp,cfg['cf_token_expires_at']);cookie+='; jarvis='+jarvis['value']
-                status,h,raw=self.transport.fetch(ORIGIN+'/session',headers={'Cookie':cookie})
-                if status!=200 or not isinstance(json.loads(raw).get('csrf'),str): raise Failure()
-                status,_,_=self.transport.fetch(ORIGIN+'/memory',headers={'Cookie':cookie})
-                # Current server has no memory handler: explicitly report that capability gap.
-                # Authentication failures and all other unexpected statuses still fail closed.
-                if status not in (200,404): raise Failure()
-                memory_available=status==200
-                self.transport.websocket(cookie)
+                with ThreadPoolExecutor(max_workers=3) as proofs:
+                    session_proof=proofs.submit(self.transport.fetch,ORIGIN+'/session',headers={'Cookie':cookie})
+                    memory_proof=proofs.submit(self.transport.fetch,ORIGIN+'/memory',headers={'Cookie':cookie})
+                    socket_proof=proofs.submit(self.transport.websocket,cookie)
+                    status,h,raw=session_proof.result()
+                    if status!=200 or not isinstance(json.loads(raw).get('csrf'),str): raise Failure()
+                    status,_,_=memory_proof.result()
+                    # Missing existing capability is explicit; auth failures still fail closed.
+                    if status not in (200,404): raise Failure()
+                    memory_available=status==200
+                    socket_proof.result()
                 if expiry<=int(self.clock())+60: raise Failure()
                 for item in selected:item['expires_at']=expiry
                 selected.append(cookie_contract('jarvis',jarvis['value'],expiry))

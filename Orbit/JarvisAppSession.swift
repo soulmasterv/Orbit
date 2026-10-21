@@ -140,7 +140,8 @@ final class JarvisAppSessionBroker {
          isAllowed: @escaping () -> Bool, nonce: @escaping () throws -> String = JarvisSessionRequest.freshNonce,
          now: @escaping () -> Date = Date.init) {
         configuration.urlCache = nil; configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
-        configuration.timeoutIntervalForRequest = 10; configuration.timeoutIntervalForResource = 15
+        // Live server-side proof has a dedicated budget; dashboard timeouts are unchanged.
+        configuration.timeoutIntervalForRequest = 15; configuration.timeoutIntervalForResource = 20
         configuration.httpShouldSetCookies = false; configuration.httpCookieStorage = nil
         session = URLSession(configuration: configuration, delegate: NoRedirectDelegate(), delegateQueue: nil)
         build = requestBuilder; self.isAllowed = isAllowed; self.nonce = nonce; self.now = now
