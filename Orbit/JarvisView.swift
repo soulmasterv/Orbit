@@ -283,31 +283,48 @@ struct JarvisView: View {
     @StateObject private var session = JarvisSession()
     @State private var connection: JarvisAppConnection?
     @Environment(\.scenePhase) private var phase
+    @Environment(\.dismiss) private var dismiss
     var body: some View {
-        VStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Label(session.microphoneActive ? "Microphone active" : "Microphone off", systemImage: session.microphoneActive ? "mic.fill" : "mic.slash")
-                        .font(.subheadline).foregroundStyle(session.microphoneActive ? .green : .secondary)
-                    Spacer()
-                    Button("Stop") { session.stop("Stopped. Microphone released.") }.buttonStyle(.bordered)
-                }
-                if let notice = session.notice { Text(notice).font(.caption).foregroundStyle(.secondary) }
-                Text("Tap Start voice below to begin. Use headphones. Nothing starts automatically.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }.padding(12)
-            if session.loading { ProgressView().padding(6) }
-            if let connection { JarvisConnectionControls(connection: connection) }
+        ZStack(alignment: .topTrailing) {
             JarvisWebView(session: session)
-        }
-        .background(Brand.background).navigationTitle("JARVIS").navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItemGroup(placement: .topBarTrailing) {
-                Button { session.showMemory() } label: { Image(systemName: "brain") }.accessibilityLabel("Memory")
-                    .disabled(!session.signedIn || !session.memoryAvailable)
-                Button { Task { await connection?.connect() } } label: { Image(systemName: "arrow.clockwise") }.accessibilityLabel("Reconnect JARVIS")
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            if let connection {
+                JarvisConnectionOverlay(connection: connection, session: session)
+            } else {
+                ProgressView("Connecting securely…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Brand.background)
             }
+            HStack(spacing: 10) {
+                if let connection {
+                    Menu {
+                        Button("Stop voice", systemImage: "stop.fill") { session.stop("Stopped. Microphone released.") }
+                        Button("Memory", systemImage: "brain") { session.showMemory() }
+                            .disabled(!session.signedIn || !session.memoryAvailable)
+                        Button("Reconnect", systemImage: "arrow.clockwise") { Task { await connection.connect() } }
+                            .disabled(connection.busy)
+                        Button("Sign out", systemImage: "rectangle.portrait.and.arrow.right", role: .destructive) {
+                            Task { await connection.signOut() }
+                        }.disabled(connection.busy)
+                    } label: {
+                        Image(systemName: "ellipsis").frame(width: 40, height: 40)
+                    }.accessibilityLabel("JARVIS options")
+                }
+                Button {
+                    session.stop(background: true)
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark").frame(width: 40, height: 40)
+                }.accessibilityLabel("Close JARVIS")
+            }
+            .font(.body.weight(.semibold))
+            .foregroundStyle(.primary)
+            .background(.regularMaterial, in: Capsule())
+            .padding(10)
         }
+        .background(Brand.background)
+        .toolbar(.hidden, for: .navigationBar, .tabBar)
+        .navigationBarBackButtonHidden(true)
         .alert("Confirm memory deletion", isPresented: Binding(get: { session.confirmation != nil }, set: { if !$0 { session.finishConfirmation(false) } })) {
             Button("Cancel", role: .cancel) { session.finishConfirmation(false) }
             Button("Delete", role: .destructive) { session.finishConfirmation(true) }
@@ -334,17 +351,37 @@ struct JarvisView: View {
     }
 }
 
-private struct JarvisConnectionControls: View {
+// Overlays never reserve vertical space above the web page.
+private struct JarvisConnectionOverlay: View {
     @ObservedObject var connection: JarvisAppConnection
+    @ObservedObject var session: JarvisSession
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if let message = connection.message { Text(message).font(.callout).foregroundStyle(.secondary) }
-            if connection.busy { ProgressView("Connecting securely…") }
-            HStack {
-                Button("Reconnect") { Task { await connection.connect() } }
-                Button("Sign out", role: .destructive) { Task { await connection.signOut() } }
-            }.buttonStyle(.bordered).disabled(connection.busy)
-        }.frame(maxWidth: .infinity, alignment: .leading).padding(12)
+        ZStack(alignment: .bottom) {
+            if !connection.connected {
+                VStack(spacing: 16) {
+                    if connection.busy { ProgressView("Connecting securely…") }
+                    else {
+                        Image(systemName: "network").font(.largeTitle)
+                        Text(connection.message ?? "Connect to JARVIS.").multilineTextAlignment(.center)
+                        Button("Reconnect") { Task { await connection.connect() } }
+                            .buttonStyle(.borderedProminent)
+                    }
+                }
+                .padding(30)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Brand.background)
+            } else if session.loading {
+                ProgressView("Loading JARVIS…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Brand.background)
+            } else if let notice = session.notice {
+                Text(notice).font(.caption)
+                    .padding(12)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+                    .padding(12)
+                    .allowsHitTesting(false)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
-
