@@ -9,10 +9,10 @@ struct StudentDatabasesView: View {
                 Text("Two separate student systems. Changes stay with the selected bot.").foregroundStyle(.secondary)
                 NavigationLink { StudentsView(api: api) } label: {
                     databaseCard("School assistant", "Onboarding, subjects and messaging windows", "person.text.rectangle")
-                }
+                }.buttonStyle(.plain)
                 NavigationLink { ClasseraStudentsView(api: api) } label: {
                     databaseCard("Classera subscribers", "Classera 1 (F) · Classera 2 (E)", "graduationcap")
-                }
+                }.buttonStyle(.plain)
             }.padding(20)
         }.background(Brand.background).navigationTitle("Students").navigationBarTitleDisplayMode(.inline)
     }
@@ -180,8 +180,13 @@ struct ClasseraStudentEditor: View {
         }.navigationTitle("Classera student").navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(busy)
         .task(id: phase == .active && api.accessAllowed) {
-            guard phase == .active && api.accessAllowed else { generation += 1; loaded = false; busy = false; student = nil; rows = []; return }
-            await reload()
+            guard phase == .active && api.accessAllowed else {
+                if phase == .background || !api.accessAllowed { generation += 1; loaded = false; busy = false; student = nil; rows = [] }
+                return
+            }
+            // Face ID can briefly make the scene inactive. Keep drafts and the
+            // pending operation; only backgrounding/locking invalidates them.
+            if !loaded && !busy { await reload() }
         }
         .onDisappear { generation += 1; loaded = false }
         .confirmationDialog("Save Classera subscriptions?", isPresented: $confirmSave, titleVisibility: .visible) {

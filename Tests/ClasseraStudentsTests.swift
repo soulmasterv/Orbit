@@ -131,12 +131,15 @@ final class ClasseraStudentsTests: XCTestCase {
             ("classera-student-controls", AnyView(NavigationStack { ClasseraStudentEditor(api: server, phone: "201000000001") }))]
         for (name, view) in views {
             let window = UIWindow(windowScene: scene); window.frame = scene.coordinateSpace.bounds
-            window.rootViewController = UIHostingController(rootView: view.preferredColorScheme(.dark))
+            window.rootViewController = UIHostingController(rootView: view.preferredColorScheme(.dark).environment(\.scenePhase, .active))
             window.makeKeyAndVisible(); window.endEditing(true)
             let laidOut = expectation(description: "Layout \(name)")
             DispatchQueue.main.asyncAfter(deadline: .now()+1) { laidOut.fulfill() }
             await fulfillment(of: [laidOut], timeout: 5)
             window.layoutIfNeeded()
+            if name != "student-databases" {
+                XCTAssertTrue(MockURLProtocol.requests.contains { $0.url?.path == (name == "classera-subscribers" ? "/api/classera-students" : "/api/classera-students/201000000001") })
+            }
             let image = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in window.drawHierarchy(in: window.bounds, afterScreenUpdates: true) }
             let attachment = XCTAttachment(image: image); attachment.name = name; attachment.lifetime = .keepAlways; add(attachment)
             window.isHidden = true
