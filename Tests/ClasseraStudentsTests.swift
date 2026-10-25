@@ -46,7 +46,8 @@ final class ClasseraStudentsTests: XCTestCase {
     }
     func testSaveOnePutWithRevisionAndNoMessageOrRetry() async throws {
         let student = try JSONDecoder().decode(ClasseraStudent.self,from:record)
-        let payload = try ClasseraStudentEdit(student:student,rows:student.subscriptions)
+        let renamed = try ClasseraNameEdit.applying("  Updated Student  ", to: student.subscriptions)
+        let payload = try ClasseraStudentEdit(student:student,rows:renamed)
         let data = record
         MockURLProtocol.handler = { request in
             if request.httpMethod == "PUT" { return (200,data) }
@@ -60,6 +61,40 @@ final class ClasseraStudentsTests: XCTestCase {
         let request = try XCTUnwrap(MockURLProtocol.requests.first)
         XCTAssertEqual(request.url?.path,"/api/classera-students/201000000001")
         XCTAssertEqual(request.value(forHTTPHeaderField:"Content-Type"),"application/json")
+        let body = try XCTUnwrap(request.httpBody ?? request.httpBodyStream.flatMap { stream -> Data? in
+            stream.open(); defer { stream.close() }
+            var data = Data(); var buffer = [UInt8](repeating: 0, count: 1024)
+            while stream.hasBytesAvailable { let count = stream.read(&buffer, maxLength: buffer.count); if count <= 0 { break }; data.append(buffer, count: count) }
+            return data
+        })
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        let sentRows = try XCTUnwrap(json["subscriptions"] as? [[String: Any]])
+        XCTAssertEqual(sentRows.first?["name"] as? String, "Updated Student")
+        XCTAssertEqual(json["expected_revision"] as? String, student.revision)
+    }
+    func testRenamePreservesClassesPreferencesStatusesAndLegacyNames() throws {
+        let student = try JSONDecoder().decode(ClasseraStudent.self, from: record)
+        var rows = student.subscriptions
+        rows.append(ClasseraSubscription(className: "12E", name: "Other name", aiEnabled: nil, status: "waiting_for_class"))
+        let renamed = try ClasseraNameEdit.applying("  أحمد علي  ", to: rows)
+        XCTAssertEqual(renamed.map(\.name), ["أحمد علي", "Legacy", "أحمد علي"])
+        for index in rows.indices {
+            XCTAssertEqual(renamed[index].className, rows[index].className)
+            XCTAssertEqual(renamed[index].aiEnabled, rows[index].aiEnabled)
+            XCTAssertEqual(renamed[index].status, rows[index].status)
+            XCTAssertEqual(renamed[index].joinedAt, rows[index].joinedAt)
+        }
+        for invalid in ["", "   ", String(repeating: "x", count: 121), "Student\u{0000}Name"] {
+            XCTAssertThrowsError(try ClasseraNameEdit.applying(invalid, to: rows))
+        }
+        XCTAssertThrowsError(try ClasseraNameEdit.applying("Valid", to: []))
+        XCTAssertThrowsError(try ClasseraNameEdit.applying("Valid", to: rows.filter { !$0.editable }))
+    }
+    func testPendingClassIsNotInferredFromAllowedActivityOrActiveSubscriptions() throws {
+        let student = try JSONDecoder().decode(ClasseraStudent.self, from: record)
+        XCTAssertFalse(student.hasPendingClass)
+        let pending = String(decoding: record, as: UTF8.self).replacingOccurrences(of: "\"status\":\"active\"", with: "\"status\":\"waiting_for_class\"")
+        XCTAssertTrue(try JSONDecoder().decode(ClasseraStudent.self, from: Data(pending.utf8)).hasPendingClass)
     }
     func testTimeoutAndConflictNeverRepeatMutation() async throws {
         let student = try JSONDecoder().decode(ClasseraStudent.self,from:record)
@@ -124,6 +159,10 @@ final class ClasseraStudentsTests: XCTestCase {
             value["phone"] = index == 5 ? "201000000006123" : String(format: "20100000000%d", index + 1)
             value["activity_status"] = statuses[index]
             value["subscriptions"] = [["class_name": index.isMultiple(of: 2) ? "12F" : "12E", "name": name, "ai_enabled": 1, "status": "active"]]
+            if index == 4 {
+                value["signup_session"] = ["step": "class", "name": name]
+                value["subscriptions"] = [["class_name": "12D", "name": name, "status": "waiting_for_class", "ai_enabled": NSNull()]]
+            }
             return value
         }
         let directoryData = try JSONSerialization.data(withJSONObject: ["version": 1, "students": examples])
@@ -155,4 +194,5 @@ final class ClasseraStudentsTests: XCTestCase {
         }
     }
 }
+
 

@@ -30,7 +30,24 @@ struct ClasseraStudent: Codable, Identifiable {
     var id: String { phone }
     var displayName: String { subscriptions.first?.name ?? signupSession?.name ?? "Onboarding student" }
     var maskedPhone: String { "•••• " + phone.suffix(4) }
+    var hasPendingClass: Bool { subscriptions.contains { $0.status == "waiting_for_class" } }
     enum CodingKeys: String, CodingKey { case phone, subscriptions, revision; case signupSession = "signup_session", activityStatusValue = "activity_status" }
+}
+
+enum ClasseraNameEdit {
+    static func applying(_ input: String, to rows: [ClasseraSubscription]) throws -> [ClasseraSubscription] {
+        let name = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, name.count <= 120,
+              !name.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }),
+              rows.contains(where: \.editable) else {
+            throw APIError.message("Enter a name of 1–120 characters for an existing supported subscription.")
+        }
+        return rows.map { row in
+            var updated = row
+            if updated.editable { updated.name = name }
+            return updated
+        }
+    }
 }
 struct ClasseraDirectoryResponse: Decodable { let version: Int; let students: [ClasseraStudent] }
 struct ClasseraSubscriptionEdit: Encodable {
@@ -80,3 +97,4 @@ enum ClasseraClass {
         }
     }
 }
+

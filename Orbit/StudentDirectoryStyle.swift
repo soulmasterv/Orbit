@@ -93,6 +93,7 @@ struct StudentCompactRow: View {
     let chips: [String]
     let status: StudentActivityStatus
     var note: String? = nil
+    var noteColor: Color = StudentPalette.secondary
     var alternate = false
     @Environment(\.dynamicTypeSize) private var typeSize
     var body: some View {
@@ -110,7 +111,7 @@ struct StudentCompactRow: View {
                     HStack(spacing: 5) { ForEach(chips, id: \.self) { chip($0) } }
                     VStack(alignment: .leading, spacing: 5) { ForEach(chips, id: \.self) { chip($0) } }
                 }
-                if let note { Text(note).font(.caption).foregroundStyle(StudentPalette.secondary) }
+                if let note { Text(note).font(.caption).foregroundStyle(noteColor) }
                 if typeSize.isAccessibilitySize { StudentStatusPill(status: status) }
             }.frame(maxWidth: .infinity, alignment: .leading)
             if !typeSize.isAccessibilitySize { StudentStatusPill(status: status) }
@@ -127,3 +128,4 @@ struct StudentCompactRow: View {
             .background(Color(white: 0.16), in: Capsule())
     }
 }
+

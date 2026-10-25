@@ -85,7 +85,8 @@ struct ClasseraStudentsView: View {
                                 let label = row.className == "12F" ? "1 (F)" : row.className == "12E" ? "2 (E)" : row.className
                                 return row.status == "active" ? label : "\(label) · Waiting"
                             }, status: student.activityStatus,
-                            note: student.signupSession == nil ? nil : "Signup in progress",
+                            note: student.signupSession == nil ? nil : "Sign up in progress",
+                            noteColor: .yellow,
                             alternate: !index.isMultiple(of: 2))
                     }.buttonStyle(.plain)
                 }
@@ -145,6 +146,9 @@ struct ClasseraStudentEditor: View {
     @State private var generation = 0
     @State private var message: String?
     @State private var confirmSave = false
+    @State private var editName = false
+    @State private var nameDraft = ""
+    @State private var nameError: String?
     @State private var removeClass: String?
     @State private var pendingAction: StudentManagementAction?
     @State private var reportClass: String?
@@ -154,12 +158,23 @@ struct ClasseraStudentEditor: View {
         Form {
             Section("Classera subscriber") {
                 Text(phone).textSelection(.enabled)
+                Button("Edit name") {
+                    nameDraft = rows.first(where: \.editable)?.name ?? ""
+                    nameError = nil; editName = true
+                }.disabled(!canSave || !rows.contains(where: \.editable))
                 Text("This edits only Classera subscriptions. The school assistant database is separate.").font(.caption).foregroundStyle(.secondary)
             }
             if busy { ProgressView("Please wait…") }
             if let message { Section { Text(message).foregroundStyle(.secondary) } }
             if student?.signupSession != nil {
-                Section { Text("WhatsApp signup is in progress. Finish it there, then reload before editing.").foregroundStyle(.orange) }
+                Section { Text("Sign up in progress. Finish it on WhatsApp, then reload before editing.").foregroundStyle(.yellow) }
+            }
+            if student?.hasPendingClass == true {
+                Section("Waiting for class support") {
+                    Button("Notify: class now supported") {}.disabled(true)
+                    Text("Not available yet. The WhatsApp backend must verify class support and send an opt-in invitation. This must not activate a subscription automatically.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
             }
             if let student {
                 Section("Replies and reports") {
@@ -214,9 +229,36 @@ struct ClasseraStudentEditor: View {
         }.scrollContentBackground(.hidden).modifier(StudentAppearance())
         .navigationTitle("Classera student").navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(busy)
+        .sheet(isPresented: $editName) {
+            NavigationStack {
+                Form {
+                    Section("Student name") {
+                        TextField("Name", text: $nameDraft).textContentType(.name)
+                            .accessibilityIdentifier("classera.editName")
+                        if let nameError { Text(nameError).foregroundStyle(.yellow) }
+                    }
+                    Text("Applies to this student's Classera 1 (F) and Classera 2 (E) subscriptions. Legacy class names stay unchanged. Tap Save changes on the student page to authorize and save. No WhatsApp message is sent.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }.scrollContentBackground(.hidden).modifier(StudentAppearance())
+                    .navigationTitle("Edit name").navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) { Button("Cancel") { editName = false } }
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Apply name") {
+                                guard canSave else { editName = false; return }
+                                do {
+                                    rows = try ClasseraNameEdit.applying(nameDraft, to: rows)
+                                    message = "Name updated in your draft. Tap Save changes to save it securely."
+                                    editName = false
+                                } catch { nameError = error.localizedDescription }
+                            }.disabled(!canSave)
+                        }
+                    }
+            }
+        }
         .task(id: phase == .active && api.accessAllowed) {
             guard phase == .active && api.accessAllowed else {
-                if phase == .background || !api.accessAllowed { generation += 1; loaded = false; busy = false; student = nil; rows = [] }
+                if phase == .background || !api.accessAllowed { generation += 1; loaded = false; busy = false; student = nil; rows = []; editName = false; nameDraft = "" }
                 return
             }
             // Face ID can briefly make the scene inactive. Keep drafts and the
@@ -321,4 +363,5 @@ enum ClasseraPhone {
         (8...15).contains(value.count) && value.first != "0" && value.utf8.allSatisfy { (48...57).contains($0) }
     }
 }
+
 
