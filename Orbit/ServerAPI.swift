@@ -517,6 +517,63 @@ final class ServerAPI: ObservableObject {
         await loadServices()
     }
 
+    // Classera is the owner-only Orbit database, never the separate Students X-API-Key origin.
+    private func classeraDirectoryData(path: String, method: String = "GET", body: Data? = nil) async throws -> Data {
+        guard accessAllowed && !previewMode && !Task.isCancelled else { throw CancellationError() }
+        let epoch = studentsAccessGeneration
+        var command = try request(path: path, method: method, endpoint: baseURL)
+        if let body { command.httpBody = body; command.setValue("application/json", forHTTPHeaderField: "Content-Type") }
+        let (data, response): (Data, URLResponse)
+        do { (data, response) = try await session.data(for: command) }
+        catch {
+            if method != "GET" { throw ClasseraDirectoryFailure.uncertain }
+            throw APIError.message("Classera could not be reached. Check the connection and retry.")
+        }
+        guard accessAllowed && epoch == studentsAccessGeneration && !Task.isCancelled else { throw CancellationError() }
+        guard let http = response as? HTTPURLResponse else { throw APIError.message("Classera returned an invalid response.") }
+        switch http.statusCode {
+        case 200: return data
+        case 401, 403: throw APIError.message("Owner authentication failed. Check the Orbit connection in Settings.")
+        case 409: throw ClasseraDirectoryFailure.conflict
+        case 404, 501: throw APIError.message("The Classera directory API is not available on this server.")
+        case 422: throw APIError.message("Check the student name, international phone number, class and AI preference.")
+        default:
+            if method != "GET" { throw ClasseraDirectoryFailure.uncertain }
+            throw APIError.message("The Classera database is temporarily unavailable.")
+        }
+    }
+    func loadClasseraDirectory() async throws -> [ClasseraStudent] {
+        let data = try await classeraDirectoryData(path: "/api/classera-students")
+        guard let result = try? JSONDecoder().decode(ClasseraDirectoryResponse.self, from: data), result.version == 1 else {
+            throw APIError.message("The Classera directory response is incompatible.")
+        }
+        return result.students
+    }
+    func loadClasseraStudent(phone: String) async throws -> ClasseraStudent {
+        guard ClasseraPhone.valid(phone) else { throw APIError.message("Use 8–15 international digits, without + or spaces.") }
+        let data = try await classeraDirectoryData(path: "/api/classera-students/\(phone)")
+        guard let result = try? JSONDecoder().decode(ClasseraStudent.self, from: data), result.phone == phone, result.revision.count == 64 else {
+            throw APIError.message("The Classera student response is incompatible.")
+        }
+        return result
+    }
+    func saveClasseraStudent(phone: String, payload: ClasseraStudentEdit) async throws -> ClasseraStudent {
+        guard ClasseraPhone.valid(phone), accessAllowed, !actionBusy, !Task.isCancelled else { throw CancellationError() }
+        actionBusy = true; actionProgress = "Saving Classera subscriptions…"
+        defer { actionBusy = false; actionProgress = "" }
+        let epoch = studentsAccessGeneration
+        try await authorize("Update this student's Classera subscriptions. No message is sent now.")
+        guard accessAllowed && epoch == studentsAccessGeneration && !Task.isCancelled else { throw CancellationError() }
+        let data = try await classeraDirectoryData(path: "/api/classera-students/\(phone)", method: "PUT", body: JSONEncoder().encode(payload))
+        guard let result = try? JSONDecoder().decode(ClasseraStudent.self, from: data), result.phone == phone, result.revision.count == 64 else {
+            throw ClasseraDirectoryFailure.uncertain
+        }
+        servicesGeneration += 1; servicesRefresh?.cancel(); servicesRefresh = nil; servicesLoading = false
+        classeraRecipients.removeAll()
+        await loadServices()
+        return result
+    }
+
     static func isRefreshCancellation(_ error: Error) -> Bool {
         if error is CancellationError { return true }
         let underlying = error as NSError
@@ -823,4 +880,5 @@ extension ServerAPI {
         })
     }
 }
+
 

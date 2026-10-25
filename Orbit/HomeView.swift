@@ -33,7 +33,7 @@ extension ServerAPI {
         guard let s = serviceSnapshot else { return "Unavailable" }
         switch page {
         case .gemini: return aggregateStatus(s.gemini?.map(\.status) ?? [])
-        case .classera: return aggregateStatus(s.classera?.flatMap { [$0.status, $0.schedulerStatus ?? "Unknown", $0.webhookStatus ?? "Unknown"] } ?? [])
+        case .classera: return aggregateStatus(s.classera?.filter { ["classera-1", "classera-2"].contains($0.id) }.flatMap { [$0.status, $0.schedulerStatus ?? "Unknown", $0.webhookStatus ?? "Unknown"] } ?? [])
         case .padel:
             if let delivery = s.padel?.first(where: { $0.isWhatsApp })?.deliveryStatus, [.warning, .error].contains(StatusTone(delivery)) { return delivery }
             return aggregateStatus(s.padel?.map(\.status) ?? [])
@@ -45,7 +45,7 @@ extension ServerAPI {
             guard let keys = serviceSnapshot?.gemini, !keys.isEmpty else { return "Key health not reported" }
             return "\(keys.filter { StatusTone($0.status) == .healthy }.count)/\(keys.count) keys working"
         case .classera:
-            guard let c = serviceSnapshot?.classera, !c.isEmpty else { return "Scheduler health not reported" }
+            guard let c = serviceSnapshot?.classera?.filter({ ["classera-1", "classera-2"].contains($0.id) }), !c.isEmpty else { return "Scheduler health not reported" }
             return "\(c.filter { StatusTone($0.status) == .healthy }.count)/\(c.count) instances working"
         case .padel:
             guard let c = serviceSnapshot?.padel, !c.isEmpty else { return "Application & delivery health" }
@@ -70,7 +70,7 @@ struct HomeView: View {
                 if api.hasNotice { ConnectionNotice(api: api) }
                 if let d = api.dashboard { serverSummary(d.server); systemSummary(d) } else { DashboardPlaceholder(api: api) }
                 NavigationLink {
-                    StudentsView(api: api)
+                    StudentDatabasesView(api: api)
                 } label: {
                     Panel {
                         HStack(spacing: 12) {
@@ -165,7 +165,7 @@ struct HomeView: View {
             summary("PM2", "\(d.processes.filter { StatusTone($0.status) == .healthy }.count)/\(d.processes.count)")
             summary("Docker", "\(d.containers.filter { $0.isRunning && !$0.isUnhealthy }.count)/\(d.containers.count)")
             if let keys = api.serviceSnapshot?.gemini, !keys.isEmpty { summary("Gemini", "\(keys.filter { StatusTone($0.status) == .healthy }.count)/\(keys.count)") }
-            if let c = api.serviceSnapshot?.classera, !c.isEmpty { summary("Classera", "\(c.filter { StatusTone($0.status) == .healthy }.count)/\(c.count)") }
+            if let c = api.serviceSnapshot?.classera?.filter({ ["classera-1", "classera-2"].contains($0.id) }), !c.isEmpty { summary("Classera", "\(c.filter { StatusTone($0.status) == .healthy }.count)/\(c.count)") }
         }
     }
     private func summary(_ title: String, _ value: String) -> some View { VStack(alignment: .leading, spacing: 3) { Text(value).font(.subheadline.bold()).monospacedDigit(); Text(title).font(.caption).foregroundStyle(.secondary) }.frame(maxWidth: .infinity, alignment: .leading) }
@@ -177,6 +177,7 @@ extension DockerContainer {
     var displayStatus: String { isUnhealthy ? "Unhealthy" : (isRunning ? "Running" : (state?.capitalized ?? "Unknown")) }
 }
 extension PadelComponent { var isWhatsApp: Bool { id.lowercased() == "whatsapp" || name.lowercased().contains("whatsapp") } }
+
 
 
 

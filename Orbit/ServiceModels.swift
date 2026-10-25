@@ -45,6 +45,8 @@ struct ClasseraAICacheSummary: Codable {
 }
 
 struct ClasseraStatus: Codable, Identifiable {
+    var displayName: String { ClasseraClass.title(id) }
+    var recipients: [String]? = nil
     let id: String
     let name: String
     let status: String
@@ -143,4 +145,5 @@ enum ClasseraRecipientValidation {
         return clean
     }
 }
+
 

@@ -23,7 +23,10 @@ jobs:
       - name: Install XcodeGen
         run: brew install xcodegen
       - name: Test backend adapter safety
-        run: python3 -m unittest discover -s backend -p 'test_*.py'
+        run: |
+          python3 -m venv .ci-venv
+          .ci-venv/bin/pip install 'Flask>=3.0,<4'
+          .ci-venv/bin/python -m unittest discover -s backend -p 'test_*.py'
       - name: Test JARVIS frontend lifecycle
         run: node --test backend/jarvis/frontend.test.cjs backend/jarvis/app-sessions.test.mjs
       - name: Generate Xcode project
@@ -86,4 +89,5 @@ jobs:
           path: TestResults.xcresult
           if-no-files-found: ignore
           retention-days: 7
+
 

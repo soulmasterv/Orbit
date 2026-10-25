@@ -97,7 +97,7 @@ struct ServiceDetailView: View {
                 }
             }
         case .classera:
-            let instances = api.serviceSnapshot?.classera ?? []
+            let instances = (api.serviceSnapshot?.classera ?? []).filter { ["classera-1", "classera-2"].contains($0.id) }
 
             if instances.isEmpty {
                 FeatureUnavailable(
@@ -111,7 +111,7 @@ struct ServiceDetailView: View {
                     VStack(alignment: .leading, spacing: 10) {
 
                         HStack {
-                            Text(service.name)
+                            Text(service.displayName)
                                 .font(.headline)
 
                             Spacer()
@@ -259,7 +259,7 @@ struct ServiceDetailView: View {
                                 pending = ServiceCommand(
                                     kind: .fireClasseraReport,
                                     id: service.id,
-                                    name: service.name
+                                    name: service.displayName
                                 )
                             } label: {
                                 Label(
@@ -292,7 +292,7 @@ struct ServiceDetailView: View {
                                 pending = ServiceCommand(
                                     kind: .forceFireClasseraReport,
                                     id: service.id,
-                                    name: service.name
+                                    name: service.displayName
                                 )
 
                             } label: {
@@ -309,12 +309,10 @@ struct ServiceDetailView: View {
                                 .frame(minHeight: 44)
                             }
                         }
-                        Button {
-                            recipientSheet = ClasseraRecipientSheetTarget(service: service, forceOne: false)
-                        } label: {
-                            Label("Edit Recipients", systemImage: "person.2").frame(minHeight: 44)
+                        ClasseraRecipientsPreview(api: api, identifier: service.id)
+                        NavigationLink { ClasseraStudentsView(api: api) } label: {
+                            Label("Manage subscribers", systemImage: "person.2").frame(minHeight: 44)
                         }
-                        .disabled(reason(true) != nil)
                         Button(role: .destructive) {
                             recipientSheet = ClasseraRecipientSheetTarget(service: service, forceOne: true)
                         } label: {
@@ -402,6 +400,29 @@ struct ServiceDetailView: View {
     private func timeRow(_ title: String, _ date: String?) -> some View { VStack(alignment: .leading, spacing: 3) { Text(title).font(.caption).foregroundStyle(.secondary); Text(HumanTime.label(date)).font(.caption.weight(.medium)) } }
 }
 
+private struct ClasseraRecipientsPreview: View {
+    @ObservedObject var api: ServerAPI
+    let identifier: String
+    @State private var recipients: [String]?
+    @State private var error: String?
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text("Active recipients").font(.subheadline.weight(.semibold))
+            if let recipients {
+                if recipients.isEmpty { Text("No active subscriptions for this class.").font(.caption).foregroundStyle(.secondary) }
+                ForEach(recipients, id: \.self) { phone in Text(phone).font(.caption).monospacedDigit().textSelection(.enabled) }
+            } else if let error { Text(error).font(.caption).foregroundStyle(.orange) }
+            else { ProgressView("Loading recipients…") }
+        }
+        .task(id: api.servicesUpdatedAt) {
+            recipients = nil; error = nil
+            do { let result = try await api.loadClasseraRecipients(id: identifier); if !Task.isCancelled { recipients = result } }
+            catch { if !ServerAPI.isRefreshCancellation(error) { self.error = "Recipients unavailable. Refresh to try again." } }
+        }
+        .onChange(of: api.accessAllowed) { _, allowed in if !allowed { recipients = nil } }
+    }
+}
+
 private struct ClasseraRecipientSheetTarget: Identifiable {
     let service: ClasseraStatus
     let forceOne: Bool
@@ -429,7 +450,7 @@ private struct ClasseraRecipientSheet: View {
         NavigationStack {
             Form {
                 Section {
-                    Text(target.service.name).font(.headline)
+                    Text(target.service.displayName).font(.headline)
                     if target.forceOne {
                         Text("ONE PERSON ONLY").font(.headline).foregroundStyle(.orange)
                         Text("Choose one configured recipient. No other recipient will receive this force-send request.")
@@ -491,7 +512,7 @@ private struct ClasseraRecipientSheet: View {
             .confirmationDialog("Send to ONE PERSON ONLY?", isPresented: $confirmOne, titleVisibility: .visible) {
                 Button("Force send to \(selected) only", role: .destructive) {
                     let command = ServiceCommand(kind: .forceOneClasseraReport, id: target.service.id,
-                                                 name: target.service.name, recipient: selected)
+                                                 name: target.service.displayName, recipient: selected)
                     Task {
                         saving = true
                         api.actionError = nil
@@ -518,4 +539,5 @@ private struct ClasseraRecipientSheet: View {
         } catch { self.error = api.friendly(error) }
     }
 }
+
 

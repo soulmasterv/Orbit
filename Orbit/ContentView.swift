@@ -25,6 +25,7 @@ struct ContentView: View {
     @State private var pending: PendingCommand?
     @State private var selectedTab = ContentView.initialTab
     @State private var homePath: [DetailRoute] = []
+    @Environment(\.scenePhase) private var scenePhase
     @AppStorage("appearance.v2") private var appearance = AppAppearance.system.rawValue
 
     init(api: ServerAPI, initialTab: Int? = nil, initialDestination: DetailRoute? = nil, mobile: MobileStore? = nil) {
@@ -42,7 +43,7 @@ struct ContentView: View {
         if arguments.contains("--preview-docker") { return 2 }
         if arguments.contains("--preview-settings") { return 4 }
         #endif
-        return 0
+        return 3
     }
 
     private var colorScheme: ColorScheme? {
@@ -74,8 +75,14 @@ struct ContentView: View {
             NavigationStack { ContainersView(api: api, requestCommand: { pending = $0 }) }
                 .tabItem { Label("Docker", systemImage: "shippingbox") }
                 .tag(2)
-            NavigationStack { ActivityView() }
-                .tabItem { Label("Activity", systemImage: "clock.arrow.circlepath") }
+            NavigationStack {
+                StudentDatabasesView(api: api)
+                    .toolbar(.hidden, for: .tabBar)
+                    .toolbar { ToolbarItem(placement: .topBarTrailing) {
+                        Button("Workspace", systemImage: "square.grid.2x2") { selectedTab = 0 }
+                    } }
+            }
+                .tabItem { Label("Students", systemImage: "person.3") }
                 .tag(3)
             NavigationStack { SettingsView(api: api) }
                 .tabItem { Label("Settings", systemImage: "gearshape") }
@@ -85,6 +92,9 @@ struct ContentView: View {
         .environmentObject(mobile)
         .tint(Brand.accent)
         .preferredColorScheme(colorScheme)
+        .onChange(of: scenePhase) { _, value in
+            if value == .background { selectedTab = 3; homePath = [] }
+        }
         .confirmationDialog(pending?.title ?? "Confirm command",
             isPresented: Binding(get: { pending != nil }, set: { if !$0 { pending = nil } }),
             titleVisibility: .visible, presenting: pending) { command in
@@ -116,5 +126,6 @@ struct ContentView: View {
         }
     }
 }
+
 
 
