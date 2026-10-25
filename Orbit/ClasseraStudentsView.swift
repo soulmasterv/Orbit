@@ -58,6 +58,8 @@ struct ClasseraStudentsView: View {
                                         .font(.caption).foregroundStyle(.secondary)
                                 }
                                 if student.signupSession != nil { Text("WhatsApp signup in progress").font(.caption).foregroundStyle(.orange) }
+                                Text("Replies & reports: \(student.activityStatus.title)").font(.caption.weight(.semibold))
+                                    .foregroundStyle(student.activityStatus == .allowed ? .green : .orange)
                             }.frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }.buttonStyle(.plain)
@@ -110,6 +112,9 @@ struct ClasseraStudentEditor: View {
     @State private var message: String?
     @State private var confirmSave = false
     @State private var removeClass: String?
+    @State private var pendingAction: StudentManagementAction?
+    @State private var reportClass: String?
+    @Environment(\.dismiss) private var dismiss
     private var canSave: Bool { loaded && !busy && api.accessAllowed && student?.signupSession == nil }
     var body: some View {
         Form {
@@ -121,6 +126,25 @@ struct ClasseraStudentEditor: View {
             if let message { Section { Text(message).foregroundStyle(.secondary) } }
             if student?.signupSession != nil {
                 Section { Text("WhatsApp signup is in progress. Finish it there, then reload before editing.").foregroundStyle(.orange) }
+            }
+            if let student {
+                Section("Replies and reports") {
+                    Text(student.activityStatus.title)
+                    ForEach(managementActions(student.activityStatus)) { action in
+                        Button(action.title, role: action == .block || action == .remove ? .destructive : nil) { pendingAction = action }
+                            .disabled(!loaded || busy || !api.accessAllowed || student.activityStatus == .unknown)
+                    }
+                    Text("Block and Suspend stop Classera replies and daily reports. Resume or Unblock allows them again. The school assistant is separate.").font(.caption).foregroundStyle(.secondary)
+                }
+                Section("Daily report to this person only") {
+                    ForEach(rows.filter { $0.editable && $0.status == "active" }) { row in
+                        Button("Force-send \(ClasseraClass.title(row.className)) report", role: .destructive) { reportClass = row.className }
+                            .disabled(!loaded || busy || student.activityStatus != .allowed || !api.canControl)
+                    }
+                    Button("Refresh report availability") { Task { await api.refreshAll() } }.disabled(busy || api.loading || api.servicesLoading)
+                    Text("Sends the selected class's daily report to this phone only, even if it was sent before. Confirmation and device authorization are required. No subject editor or free-text messages here.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
             }
             ForEach($rows) { $row in
                 Section(ClasseraClass.title(row.className)) {
@@ -167,6 +191,16 @@ struct ClasseraStudentEditor: View {
             Button("Remove class", role: .destructive) { rows.removeAll { $0.className == removeClass }; removeClass = nil }
             Button("Cancel", role: .cancel) { removeClass = nil }
         } message: { Text("The change takes effect only after Save. Other classes and the other student database remain unchanged.") }
+        .confirmationDialog(pendingAction.map { "\($0.title)?" } ?? "Confirm action", isPresented: Binding(get: { pendingAction != nil }, set: { if !$0 { pendingAction = nil } }), titleVisibility: .visible, presenting: pendingAction) { action in
+            Button(action.title, role: action == .block || action == .remove ? .destructive : nil) { Task { await manage(action) } }
+            Button("Cancel", role: .cancel) {}
+        } message: { action in
+            Text(action == .remove ? "Delete all Classera subscriptions and signup progress for this phone. Messaging Classera again starts onboarding. The other student database is untouched." : "Update Classera replies and daily-report eligibility. Authorize on your iPhone next.")
+        }
+        .confirmationDialog("Force-send to ONE PERSON ONLY?", isPresented: Binding(get: { reportClass != nil }, set: { if !$0 { reportClass = nil } }), titleVisibility: .visible, presenting: reportClass) { klass in
+            Button("Force-send report", role: .destructive) { Task { await sendReport(klass) } }
+            Button("Cancel", role: .cancel) {}
+        } message: { klass in Text("Send \(ClasseraClass.title(klass)) to \(phone) only. This can resend an already delivered daily report.") }
     }
     private func reload() async {
         guard !busy && api.accessAllowed else { return }
@@ -200,6 +234,45 @@ struct ClasseraStudentEditor: View {
             } else { message = error.localizedDescription }
         }
         if epoch == generation { busy = false }
+    }
+    private func managementActions(_ status: StudentActivityStatus) -> [StudentManagementAction] {
+        switch status {
+        case .blocked: return [.unblock, .remove]
+        case .suspended: return [.resume, .block, .remove]
+        case .allowed: return [.suspend, .block, .remove]
+        case .unknown: return []
+        }
+    }
+    private func manage(_ action: StudentManagementAction) async {
+        guard loaded, !busy, let student, action.isValid(for: student.activityStatus) else { return }
+        generation += 1; let epoch = generation; busy = true
+        do {
+            let result = try await api.manageClasseraStudent(student: student, action: action)
+            guard epoch == generation && api.accessAllowed else { return }
+            if action == .remove { dismiss() }
+            else if let result { self.student = result; rows = result.subscriptions; message = "Updated. No message was sent." }
+        } catch {
+            guard epoch == generation else { return }
+            busy = false; loaded = false
+            if error is ClasseraDirectoryFailure {
+                await reload(); message = "The action may have completed or the database changed. Review the refreshed state before trying again."
+            } else { message = error.localizedDescription }
+        }
+        if epoch == generation { busy = false }
+    }
+    private func sendReport(_ klass: String) async {
+        guard !busy, loaded, student?.activityStatus == .allowed else { return }
+        busy = true
+        defer { busy = false }
+        let id = klass == "12F" ? "classera-1" : "classera-2"
+        do {
+            let recipients = try await api.loadClasseraRecipients(id: id)
+            guard recipients.contains(phone), api.accessAllowed, phase == .active, !Task.isCancelled else {
+                message = "This phone is no longer an active, allowed recipient for this class. Reload before sending."; return
+            }
+            await api.serviceAction(ServiceCommand(kind: .forceOneClasseraReport, id: id, name: ClasseraClass.title(klass), recipient: phone))
+            message = api.actionError ?? api.actionNotice
+        } catch { message = "Could not verify the current recipient. No report was requested." }
     }
 }
 

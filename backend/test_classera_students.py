@@ -13,6 +13,8 @@ class DirectoryTests(unittest.TestCase):
         with sqlite3.connect(self.path) as c:
             c.executescript("CREATE TABLE subscribers(phone TEXT,name TEXT,class_name TEXT,ai_enabled INTEGER,status TEXT,joined_at TEXT,updated_at TEXT,PRIMARY KEY(phone,class_name)); CREATE TABLE signup_sessions(phone TEXT PRIMARY KEY,step TEXT,name TEXT,class_name TEXT,updated_at TEXT);")
         self.directory = Directory(self.path)
+        with sqlite3.connect(self.path) as c:
+            c.execute('CREATE TABLE orbit_student_controls(phone TEXT PRIMARY KEY,activity_status TEXT NOT NULL,updated_at TEXT NOT NULL)')
         self.app = Flask(__name__)
         register(self.app, "test-owner", self.directory)
         self.client = self.app.test_client()
@@ -67,5 +69,24 @@ class DirectoryTests(unittest.TestCase):
         missing=Path(self.tmp.name)/"missing.sqlite3"
         with self.assertRaises(sqlite3.Error): Directory(missing).listing()
         self.assertFalse(missing.exists())
+
+    def test_activity_enforces_recipients_and_remove_is_scoped(self):
+        from classera_access import can_reply
+        self.put([self.row(),self.row('12E')])
+        for status in ('blocked','suspended','allowed'):
+            current=self.directory.get(self.phone)
+            response=self.client.put(self.url+'/activity',headers=self.headers,json={'expected_revision':current['revision'],'activity_status':status})
+            self.assertEqual(response.status_code,200)
+            self.assertEqual(can_reply(self.phone,self.path),status=='allowed')
+            self.assertEqual(self.directory.recipients('classera-1'),[self.phone] if status=='allowed' else [])
+        before=self.directory.get(self.phone)
+        self.assertEqual(self.client.delete(self.url,headers=self.headers,json={'expected_revision':'0'*64}).status_code,409)
+        self.assertEqual(self.client.delete(self.url,headers=self.headers,json={'expected_revision':before['revision']}).status_code,200)
+        self.assertEqual(self.directory.get(self.phone)['subscriptions'],[])
+        self.assertTrue(can_reply(self.phone,self.path))
+
+    def test_reply_gate_fails_closed(self):
+        from classera_access import can_reply
+        self.assertFalse(can_reply(self.phone,Path(self.tmp.name)/'missing.db'))
 
 if __name__ == "__main__": unittest.main()

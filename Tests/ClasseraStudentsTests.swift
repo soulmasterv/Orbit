@@ -1,4 +1,6 @@
 import XCTest
+import SwiftUI
+import UIKit
 @testable import Orbit
 
 @MainActor
@@ -6,7 +8,7 @@ final class ClasseraStudentsTests: XCTestCase {
     private var defaults: UserDefaults!
     private var suite: String!
     private var record: Data { Data("""
-    {"phone":"201000000001","revision":"\(String(repeating: "a", count: 64))","signup_session":null,"subscriptions":[{"phone":"201000000001","class_name":"12F","name":"Test Student","ai_enabled":null,"status":"active","joined_at":"old","updated_at":"now"},{"class_name":"LEGACY","name":"Legacy","ai_enabled":0,"status":"active"}]}
+    {"phone":"201000000001","activity_status":"allowed","revision":"\(String(repeating: "a", count: 64))","signup_session":null,"subscriptions":[{"phone":"201000000001","class_name":"12F","name":"Test Student","ai_enabled":null,"status":"active","joined_at":"old","updated_at":"now"},{"class_name":"LEGACY","name":"Legacy","ai_enabled":0,"status":"active"}]}
     """.utf8) }
     override func setUp() async throws {
         suite = "ClasseraStudentsTests.\(UUID())"; defaults = UserDefaults(suiteName: suite)
@@ -94,5 +96,50 @@ final class ClasseraStudentsTests: XCTestCase {
         server=api(authorize:{ _ in server.setAccessAllowed(false) })
         do { _ = try await server.saveClasseraStudent(phone:student.phone,payload:payload); XCTFail() } catch {}
         XCTAssertTrue(MockURLProtocol.requests.isEmpty)
+    }
+    func testManagementPutDeleteAndNoMutationRetry() async throws {
+        let student = try JSONDecoder().decode(ClasseraStudent.self, from: record)
+        for action in [StudentManagementAction.block, .suspend, .remove] {
+            MockURLProtocol.requests = []
+            MockURLProtocol.handler = { _ in throw URLError(.timedOut) }
+            do { _ = try await api().manageClasseraStudent(student: student, action: action); XCTFail() }
+            catch { XCTAssertEqual(error as? ClasseraDirectoryFailure, .uncertain) }
+            let request = try XCTUnwrap(MockURLProtocol.requests.first)
+            XCTAssertEqual(MockURLProtocol.requests.count, 1)
+            XCTAssertEqual(request.httpMethod, action == .remove ? "DELETE" : "PUT")
+            XCTAssertEqual(request.url?.path, "/api/classera-students/201000000001" + (action == .remove ? "" : "/activity"))
+            XCTAssertNil(request.value(forHTTPHeaderField: "X-API-Key"))
+        }
+        let payload = ClasseraManagementPayload(expectedRevision: student.revision, activityStatus: "blocked")
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(payload)) as? [String: Any])
+        XCTAssertEqual(json["activity_status"] as? String, "blocked")
+        XCTAssertEqual(json["expected_revision"] as? String, student.revision)
+    }
+    func testStudentWorkspaceAndClasseraDirectoryIPhoneLayouts() async throws {
+        let data = record
+        MockURLProtocol.handler = { request in
+            if request.url?.path == "/api/classera-students" {
+                return (200, Data("{\"version\":1,\"students\":[".utf8) + data + Data("]}".utf8))
+            }
+            return (200,data)
+        }
+        let server = api()
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let views: [(String, AnyView)] = [
+            ("student-databases", AnyView(NavigationStack { StudentDatabasesView(api: server) })),
+            ("classera-subscribers", AnyView(NavigationStack { ClasseraStudentsView(api: server) })),
+            ("classera-student-controls", AnyView(NavigationStack { ClasseraStudentEditor(api: server, phone: "201000000001") }))]
+        for (name, view) in views {
+            let window = UIWindow(windowScene: scene); window.frame = scene.coordinateSpace.bounds
+            window.rootViewController = UIHostingController(rootView: view.preferredColorScheme(.dark))
+            window.makeKeyAndVisible(); window.endEditing(true)
+            let laidOut = expectation(description: "Layout \(name)")
+            DispatchQueue.main.asyncAfter(deadline: .now()+1) { laidOut.fulfill() }
+            await fulfillment(of: [laidOut], timeout: 5)
+            window.layoutIfNeeded()
+            let image = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in window.drawHierarchy(in: window.bounds, afterScreenUpdates: true) }
+            let attachment = XCTAttachment(image: image); attachment.name = name; attachment.lifetime = .keepAlways; add(attachment)
+            window.isHidden = true
+        }
     }
 }

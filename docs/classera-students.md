@@ -22,7 +22,15 @@ Recipient GETs for the two supported instances now read active subscriptions fro
 
 Students is the default screen, with separate School assistant and Classera subscribers entries. The tab bar is hidden in the student workspace; Workspace opens existing server controls. Backgrounding returns to Students. This is a presentation choice, not a second authorization boundary or a disguise for server controls. App lock remains the security control.
 
-Classera shows two instances, not the legacy third card. Names, per-class AI preferences, status and explicit class removals are saved together after confirmation and device authorization. A failed/uncertain PUT triggers one GET and asks for review, never another PUT. Generation checks prevent stale replies from replacing current editor state. Real iPhone UI/device-auth checks remain required after installing the built IPA.
+Classera shows two instances, not the legacy third card. Names, per-class AI preferences, status and explicit class removals are saved together after confirmation and device authorization. A failed/uncertain mutation triggers one GET and asks for review, never another mutation. Generation checks prevent stale replies from replacing current editor state. Real iPhone UI/device-auth checks remain required after installing the built IPA.
+
+## Management controls
+
+Student records include `activity_status` (allowed/suspended/blocked). Missing values decode as unknown and disable management. `PUT /api/classera-students/{phone}/activity` takes `{expected_revision,activity_status}` and returns the complete updated record. `DELETE /api/classera-students/{phone}` takes `{expected_revision}` and returns `{ok:true}`; it removes all Classera subscriptions, signup progress and the Classera restriction for that phone, not the other bot's profile. These mutations require the owner credential and device authorization. Revision conflicts return 409. The additive `orbit_student_controls` table in the same SQLite database preserves both original tables and their schemas.
+
+The shared `classera_access.can_reply` gate is fail-closed if the database is unavailable. The webhook checks it before onboarding/AI handlers and again before outbound text/buttons. Both report senders check it immediately before their outgoing message calls; active-recipient enumeration also filters restrictions. Existing provider authentication, payloads, report generation and delivery guard remain unchanged. A message already accepted by the provider cannot be recalled by blocking.
+
+The Classera details page offers a confirmed Force-send daily report action for each active class, using the existing single-recipient endpoint and its device authorization. Current recipient membership is fetched before requesting the action. No reports are sent automatically by opening/editing the directory. Classera intentionally has no subjects or free-text composer: it is the daily-report database. The school-assistant Students feature retains its original subjects, messaging and management controls.
 
 ## Deployment
 

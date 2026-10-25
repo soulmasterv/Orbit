@@ -39,8 +39,11 @@ class Directory:
             "SELECT phone,name,class_name,ai_enabled,status,joined_at,updated_at FROM subscribers WHERE phone=? ORDER BY class_name", (phone,))]
         session = conn.execute("SELECT phone,step,name,class_name,updated_at FROM signup_sessions WHERE phone=?", (phone,)).fetchone()
         session = dict(session) if session else None
-        raw = json.dumps([phone, rows, session], ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        control = conn.execute('SELECT activity_status,updated_at FROM orbit_student_controls WHERE phone=?',(phone,)).fetchone()
+        activity = control['activity_status'] if control else 'allowed'
+        raw = json.dumps([phone, rows, session, dict(control) if control else None], ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         return {"phone": phone, "subscriptions": rows, "signup_session": session,
+                "activity_status": activity,
                 "revision": hashlib.sha256(raw.encode()).hexdigest()}
 
     def get(self, phone):
@@ -52,7 +55,7 @@ class Directory:
     def listing(self):
         with self.connect() as conn:
             conn.execute("BEGIN")
-            phones = conn.execute("SELECT phone FROM (SELECT phone,updated_at FROM subscribers UNION ALL SELECT phone,updated_at FROM signup_sessions) GROUP BY phone ORDER BY MAX(updated_at) DESC,phone").fetchall()
+            phones = conn.execute("SELECT phone FROM (SELECT phone,updated_at FROM subscribers UNION ALL SELECT phone,updated_at FROM signup_sessions UNION ALL SELECT phone,updated_at FROM orbit_student_controls) GROUP BY phone ORDER BY MAX(updated_at) DESC,phone").fetchall()
             return {"version": 1, "students": [self.record(conn, r["phone"]) for r in phones],
                     "classes": [{"id": k, "class_name": v} for k,v in CLASSES.items()]}
 
@@ -94,7 +97,28 @@ class Directory:
         klass = CLASSES.get(identifier)
         if klass is None: raise Invalid()
         with self.connect() as conn:
-            return [r[0] for r in conn.execute("SELECT phone FROM subscribers WHERE status='active' AND UPPER(class_name)=? ORDER BY joined_at,phone", (klass,))]
+            return [r[0] for r in conn.execute("SELECT s.phone FROM subscribers s LEFT JOIN orbit_student_controls c ON c.phone=s.phone WHERE s.status='active' AND UPPER(s.class_name)=? AND (c.activity_status IS NULL OR c.activity_status='allowed') ORDER BY s.joined_at,s.phone", (klass,))]
+
+    def manage(self, phone, data, remove=False):
+        phone_value(phone)
+        keys = {'expected_revision'} if remove else {'expected_revision','activity_status'}
+        if not isinstance(data,dict) or set(data)!=keys: raise Invalid()
+        revision=data.get('expected_revision')
+        if not isinstance(revision,str) or not re.fullmatch(r'[a-f0-9]{64}',revision): raise Invalid()
+        status=data.get('activity_status')
+        if not remove and status not in ('allowed','suspended','blocked'): raise Invalid()
+        with self.connect() as conn:
+            conn.execute('BEGIN IMMEDIATE')
+            current=self.record(conn,phone)
+            if not hmac.compare_digest(current['revision'],revision): raise Conflict()
+            if remove:
+                conn.execute('DELETE FROM subscribers WHERE phone=?',(phone,))
+                conn.execute('DELETE FROM signup_sessions WHERE phone=?',(phone,))
+                conn.execute('DELETE FROM orbit_student_controls WHERE phone=?',(phone,))
+                return {'ok':True}
+            conn.execute('INSERT INTO orbit_student_controls(phone,activity_status,updated_at) VALUES(?,?,?) ON CONFLICT(phone) DO UPDATE SET activity_status=excluded.activity_status,updated_at=excluded.updated_at',
+                (phone,status,datetime.now(ZoneInfo('Africa/Cairo')).isoformat()))
+            return self.record(conn,phone)
 
 def register(app, owner_token, directory=None):
     directory = directory or Directory()
@@ -107,10 +131,13 @@ def register(app, owner_token, directory=None):
         if request.headers.get("Origin") or request.headers.get("Sec-Fetch-Site") == "cross-site":
             return jsonify(error="owner_not_permitted"), 403
         try:
-            if request.method == "PUT":
+            if request.method in ("PUT", "DELETE"):
                 if request.content_length is None or request.content_length > 8192 or not request.is_json:
                     return jsonify(error="invalid_request"), 422
-                result = directory.save(phone, request.get_json(silent=True))
+                data=request.get_json(silent=True)
+                if request.method=='DELETE' or request.path.endswith('/activity'):
+                    result=directory.manage(phone,data,remove=request.method=='DELETE')
+                else: result = directory.save(phone,data)
             else: result = directory.get(phone) if phone else directory.listing()
             return jsonify(result), 200
         except Invalid: return jsonify(error="invalid_input"), 422
@@ -118,7 +145,8 @@ def register(app, owner_token, directory=None):
         except (sqlite3.Error, OSError): return jsonify(error="directory_unavailable"), 503
 
     app.add_url_rule("/api/classera-students", "classera_student_list", handle, methods=["GET"])
-    app.add_url_rule("/api/classera-students/<phone>", "classera_student_detail", handle, methods=["GET", "PUT"])
+    app.add_url_rule("/api/classera-students/<phone>", "classera_student_detail", handle, methods=["GET", "PUT", "DELETE"])
+    app.add_url_rule("/api/classera-students/<phone>/activity", "classera_student_activity", handle, methods=["PUT"])
 
     @app.after_request
     def private_directory(response):

@@ -25,10 +25,12 @@ struct ClasseraStudent: Codable, Identifiable {
     let subscriptions: [ClasseraSubscription]
     let signupSession: ClasseraSignup?
     let revision: String
+    private let activityStatusValue: String?
+    var activityStatus: StudentActivityStatus { StudentActivityStatus(rawValue: activityStatusValue ?? "") ?? .unknown }
     var id: String { phone }
     var displayName: String { subscriptions.first?.name ?? signupSession?.name ?? "Onboarding student" }
     var maskedPhone: String { "•••• " + phone.suffix(4) }
-    enum CodingKeys: String, CodingKey { case phone, subscriptions, revision; case signupSession = "signup_session" }
+    enum CodingKeys: String, CodingKey { case phone, subscriptions, revision; case signupSession = "signup_session", activityStatusValue = "activity_status" }
 }
 struct ClasseraDirectoryResponse: Decodable { let version: Int; let students: [ClasseraStudent] }
 struct ClasseraSubscriptionEdit: Encodable {
@@ -64,6 +66,11 @@ struct ClasseraStudentEdit: Encodable {
     }
 }
 enum ClasseraDirectoryFailure: Error, Equatable { case conflict, uncertain }
+struct ClasseraManagementPayload: Encodable {
+    let expectedRevision: String
+    let activityStatus: String?
+    enum CodingKeys: String, CodingKey { case expectedRevision = "expected_revision", activityStatus = "activity_status" }
+}
 enum ClasseraClass {
     static func title(_ value: String) -> String {
         switch value {

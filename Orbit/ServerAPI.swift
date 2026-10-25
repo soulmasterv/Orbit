@@ -557,6 +557,28 @@ final class ServerAPI: ObservableObject {
         }
         return result
     }
+    func manageClasseraStudent(student: ClasseraStudent, action: StudentManagementAction) async throws -> ClasseraStudent? {
+        guard ClasseraPhone.valid(student.phone), action.isValid(for: student.activityStatus), accessAllowed, !actionBusy, !Task.isCancelled else { throw CancellationError() }
+        actionBusy = true; actionProgress = "Updating Classera student…"
+        defer { actionBusy = false; actionProgress = "" }
+        let epoch = studentsAccessGeneration
+        try await authorize("\(action.title) for this Classera student. This affects replies and daily reports.")
+        guard accessAllowed && epoch == studentsAccessGeneration && !Task.isCancelled else { throw CancellationError() }
+        let payload = ClasseraManagementPayload(expectedRevision: student.revision, activityStatus: action.activityStatus?.rawValue)
+        let path = "/api/classera-students/\(student.phone)" + (action == .remove ? "" : "/activity")
+        let data = try await classeraDirectoryData(path: path, method: action == .remove ? "DELETE" : "PUT", body: JSONEncoder().encode(payload))
+        let result: ClasseraStudent?
+        if action == .remove {
+            guard (try? JSONDecoder().decode(StudentMutationAcknowledgement.self, from: data))?.ok == true else { throw ClasseraDirectoryFailure.uncertain }
+            result = nil
+        } else {
+            guard let record = try? JSONDecoder().decode(ClasseraStudent.self, from: data), record.phone == student.phone, record.activityStatus == action.activityStatus else { throw ClasseraDirectoryFailure.uncertain }
+            result = record
+        }
+        servicesGeneration += 1; servicesRefresh?.cancel(); servicesRefresh = nil; servicesLoading = false
+        classeraRecipients.removeAll(); await loadServices()
+        return result
+    }
     func saveClasseraStudent(phone: String, payload: ClasseraStudentEdit) async throws -> ClasseraStudent {
         guard ClasseraPhone.valid(phone), accessAllowed, !actionBusy, !Task.isCancelled else { throw CancellationError() }
         actionBusy = true; actionProgress = "Saving Classera subscriptions…"
