@@ -35,3 +35,15 @@ The Classera details page offers a confirmed Force-send daily report action for 
 ## Deployment
 
 Register `classera_students.register(app, SERVER_TOKEN)` in the existing authenticated Orbit API and configure `Directory` to the existing shared database path. Back up the live database and API before deployment. The API service's OS user must already have access to the database; do not loosen database permissions or expose SQLite. Use the existing HTTPS tunnel route. Run backend tests against temporary SQLite databases, then verify unauthenticated 401, owner GET 200 and recipient membership against the shared database without invoking send actions.
+
+After the backup, install this additive table (do not recreate either existing table):
+
+```sql
+CREATE TABLE IF NOT EXISTS orbit_student_controls (
+  phone TEXT PRIMARY KEY,
+  activity_status TEXT NOT NULL CHECK(activity_status IN ('allowed','suspended','blocked')),
+  updated_at TEXT NOT NULL
+);
+```
+
+Install the shared gate module on the webhook/report Python import path. Check `can_reply` at inbound dispatch and immediately before every outbound message call, and filter active report recipients through it. Enable management only after these guards and the table are deployed together. Existing processes must reload the changed code. Backups and deployment scripts stay on the owner server; they do not contain credentials in this repository.

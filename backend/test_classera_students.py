@@ -78,6 +78,7 @@ class DirectoryTests(unittest.TestCase):
             response=self.client.put(self.url+'/activity',headers=self.headers,json={'expected_revision':current['revision'],'activity_status':status})
             self.assertEqual(response.status_code,200)
             self.assertEqual(can_reply(self.phone,self.path),status=='allowed')
+            self.assertEqual(can_reply('+'+self.phone,self.path),status=='allowed')
             self.assertEqual(self.directory.recipients('classera-1'),[self.phone] if status=='allowed' else [])
         before=self.directory.get(self.phone)
         self.assertEqual(self.client.delete(self.url,headers=self.headers,json={'expected_revision':'0'*64}).status_code,409)
@@ -88,5 +89,6 @@ class DirectoryTests(unittest.TestCase):
     def test_reply_gate_fails_closed(self):
         from classera_access import can_reply
         self.assertFalse(can_reply(self.phone,Path(self.tmp.name)/'missing.db'))
+        self.assertFalse(can_reply('not-a-number',self.path))
 
 if __name__ == "__main__": unittest.main()
