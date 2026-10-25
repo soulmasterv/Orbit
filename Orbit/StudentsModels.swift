@@ -109,7 +109,12 @@ enum StudentsDirectory {
 
 enum StudentActivityStatus: String {
     case allowed, suspended, blocked, unknown
-    var title: String { rawValue.capitalized }
+    // Decode legacy restrictions without silently allowing those students.
+    // The administrator now sees one reversible pause state.
+    var title: String { self == .blocked ? "Suspended" : rawValue.capitalized }
+    func matches(_ filter: StudentActivityStatus?) -> Bool {
+        filter == nil || self == filter || (filter == .suspended && self == .blocked)
+    }
 }
 
 enum StudentManagementAction: String, Identifiable, CaseIterable {
@@ -137,8 +142,8 @@ enum StudentManagementAction: String, Identifiable, CaseIterable {
         case .remove: return "Remove this student's profile and activity restriction? Messaging the bot again starts onboarding. Already sent messages cannot be recalled."
         case .block: return "Block this student? The server must stop bot replies until you unblock them. Their profile is preserved."
         case .unblock: return "Unblock this student and allow bot replies again? Onboarding and the WhatsApp messaging window still apply."
-        case .suspend: return "Pause bot replies indefinitely until you resume them? The student's profile and onboarding progress are preserved."
-        case .resume: return "Resume bot replies for this student? Onboarding and the WhatsApp messaging window still apply."
+        case .suspend: return "Pause outgoing messages from this student database until you choose Resume? The profile and onboarding progress are preserved. Messages already submitted to WhatsApp cannot be recalled."
+        case .resume: return "Allow messages from this student database again? Normal onboarding, opt-in and WhatsApp messaging-window rules still apply."
         }
     }
     func isValid(for status: StudentActivityStatus) -> Bool {
@@ -147,7 +152,14 @@ enum StudentManagementAction: String, Identifiable, CaseIterable {
         case .block: return status == .allowed || status == .suspended
         case .unblock: return status == .blocked
         case .suspend: return status == .allowed
-        case .resume: return status == .suspended
+        case .resume: return status == .suspended || status == .blocked
+        }
+    }
+    static func available(for status: StudentActivityStatus) -> [StudentManagementAction] {
+        switch status {
+        case .allowed: return [.suspend, .remove]
+        case .suspended, .blocked: return [.resume, .remove]
+        case .unknown: return []
         }
     }
 }
@@ -158,5 +170,6 @@ struct StudentActivityPayload: Encodable {
 }
 struct StudentMutationAcknowledgement: Decodable { let ok: Bool }
 enum StudentMutationFailure: Error { case notSent, authorizationFailed, uncertain }
+
 
 

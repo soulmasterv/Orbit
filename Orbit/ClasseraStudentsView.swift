@@ -56,7 +56,7 @@ struct ClasseraStudentsView: View {
     @State private var newPhone: String?
     private var filtered: [ClasseraStudent] {
         students.filter { student in
-            (activity == nil || student.activityStatus == activity) &&
+            student.activityStatus.matches(activity) &&
             (search.isEmpty || student.displayName.localizedCaseInsensitiveContains(search) || student.phone.contains(search))
         }
     }
@@ -183,7 +183,7 @@ struct ClasseraStudentEditor: View {
                         Button(action.title, role: action == .block || action == .remove ? .destructive : nil) { pendingAction = action }
                             .disabled(!loaded || busy || !api.accessAllowed || student.activityStatus == .unknown)
                     }
-                    Text("Block and Suspend stop Classera replies and daily reports. Resume or Unblock allows them again. The school assistant is separate.").font(.caption).foregroundStyle(.secondary)
+                    Text("Suspend pauses Classera replies and daily reports until Resume. Your subscriptions remain. Messages already submitted to WhatsApp cannot be recalled. The school assistant has separate controls.").font(.caption).foregroundStyle(.secondary)
                 }
                 Section("Daily report to this person only") {
                     ForEach(rows.filter { $0.editable && $0.status == "active" }) { row in
@@ -318,12 +318,7 @@ struct ClasseraStudentEditor: View {
         if epoch == generation { busy = false }
     }
     private func managementActions(_ status: StudentActivityStatus) -> [StudentManagementAction] {
-        switch status {
-        case .blocked: return [.unblock, .remove]
-        case .suspended: return [.resume, .block, .remove]
-        case .allowed: return [.suspend, .block, .remove]
-        case .unknown: return []
-        }
+        StudentManagementAction.available(for: status)
     }
     private func manage(_ action: StudentManagementAction) async {
         guard loaded, !busy, let student, action.isValid(for: student.activityStatus) else { return }
@@ -363,5 +358,6 @@ enum ClasseraPhone {
         (8...15).contains(value.count) && value.first != "0" && value.utf8.allSatisfy { (48...57).contains($0) }
     }
 }
+
 
 

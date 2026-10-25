@@ -70,6 +70,45 @@ final class StudentsManagementTests: XCTestCase {
         XCTAssertTrue(MockURLProtocol.requests.allSatisfy { $0.httpMethod == "GET" })
     }
 
+    func testSuspendOnlyControlsKeepLegacyRestrictionsPaused() throws {
+        XCTAssertEqual(StudentManagementAction.available(for: .allowed), [.suspend, .remove])
+        for status in [StudentActivityStatus.suspended, .blocked] {
+            XCTAssertEqual(status.title, "Suspended")
+            XCTAssertEqual(StudentManagementAction.available(for: status), [.resume, .remove])
+            XCTAssertTrue(StudentManagementAction.resume.isValid(for: status))
+            XCTAssertTrue(status.matches(.suspended))
+            XCTAssertFalse(status.matches(.allowed))
+        }
+        XCTAssertTrue(StudentManagementAction.available(for: .unknown).isEmpty)
+        for status in [StudentActivityStatus.allowed, .suspended, .blocked, .unknown] {
+            XCTAssertFalse(StudentManagementAction.available(for: status).contains(.block))
+            XCTAssertFalse(StudentManagementAction.available(for: status).contains(.unblock))
+        }
+        let legacy = try student("blocked")
+        XCTAssertEqual(legacy.activityStatus, .blocked)
+        XCTAssertNotEqual(legacy.activityStatus, .allowed)
+    }
+
+    func testResumeLegacyRestrictionStillUsesAuthorizationAndAllowedPayload() async throws {
+        var authorizations = 0
+        var resumed = false
+        let api = makeAPI(authorize: { _ in authorizations += 1 })
+        let store = makeStore(api)
+        MockURLProtocol.handler = { request in
+            if request.httpMethod == "PUT" { resumed = true; return (200, Data(#"{"ok":true}"#.utf8)) }
+            return (200, Self.rows(resumed ? "allowed" : "blocked"))
+        }
+        await store.refresh()
+        MockURLProtocol.requests = []
+        let succeeded = await store.manage(phone: phone, action: .resume)
+        XCTAssertTrue(succeeded)
+        let mutation = try XCTUnwrap(MockURLProtocol.requests.first(where: { $0.httpMethod == "PUT" }))
+        XCTAssertEqual(authorizations, 1)
+        XCTAssertEqual(try body(mutation), ["activity_status": "allowed"])
+        XCTAssertEqual(mutation.value(forHTTPHeaderField: "X-API-Key"), connection.apiKey)
+        XCTAssertNil(mutation.value(forHTTPHeaderField: "Authorization"))
+    }
+
     func testAllMutationMethodsPathsPayloadsAndDeviceAuthorization() async throws {
         var reasons: [String] = []
         let api = makeAPI(authorize: { reasons.append($0) })
@@ -271,3 +310,4 @@ final class StudentsManagementTests: XCTestCase {
         }
     }
 }
+

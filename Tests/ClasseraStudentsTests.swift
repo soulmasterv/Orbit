@@ -150,6 +150,25 @@ final class ClasseraStudentsTests: XCTestCase {
         XCTAssertEqual(json["activity_status"] as? String, "blocked")
         XCTAssertEqual(json["expected_revision"] as? String, student.revision)
     }
+
+    func testResumeLegacyClasseraRestrictionUsesExistingDeviceAuthorization() async throws {
+        let legacy = String(decoding: record, as: UTF8.self).replacingOccurrences(of: "\"activity_status\":\"allowed\"", with: "\"activity_status\":\"blocked\"")
+        let student = try JSONDecoder().decode(ClasseraStudent.self, from: Data(legacy.utf8))
+        let data = record
+        var authorizations = 0
+        MockURLProtocol.handler = { request in
+            if request.url?.path.hasSuffix("/activity") == true { return (200, data) }
+            return (200, Data(#"{"gemini":[],"classera":[],"padel":[]}"#.utf8))
+        }
+        let result = try await api(authorize: { _ in authorizations += 1 }).manageClasseraStudent(student: student, action: .resume)
+        XCTAssertEqual(authorizations, 1)
+        XCTAssertEqual(result?.activityStatus, .allowed)
+        XCTAssertEqual(MockURLProtocol.requests.filter { $0.httpMethod == "PUT" }.count, 1)
+        let request = try XCTUnwrap(MockURLProtocol.requests.first)
+        XCTAssertEqual(request.url?.path, "/api/classera-students/201000000001/activity")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer owner-placeholder")
+        XCTAssertNil(request.value(forHTTPHeaderField: "X-API-Key"))
+    }
     func testStudentWorkspaceAndClasseraDirectoryIPhoneLayouts() async throws {
         let data = record
         let names = ["Omar Hassan", "Ahmed Ali", "Sara Mahmoud", "Nour Ahmed", "Youssef Adel", "Mariam Tarek With A Longer Name"]
@@ -194,5 +213,6 @@ final class ClasseraStudentsTests: XCTestCase {
         }
     }
 }
+
 
 

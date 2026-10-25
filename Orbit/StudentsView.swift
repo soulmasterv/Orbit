@@ -118,7 +118,7 @@ struct StudentsView: View {
 
     private func directory(_ snapshot: StudentsSnapshot, at now: ContinuousClock.Instant) -> some View {
         let rows = StudentsDirectory.filtered(snapshot, search: search, filter: filter, grade: selectedGrade, at: now)
-            .filter { activity == nil || $0.activityStatus == activity }
+            .filter { $0.activityStatus.matches(activity) }
         let open = snapshot.students.filter { snapshot.isWindowOpen(for: $0, at: now) }.count
         return VStack(alignment: .leading, spacing: 0) {
             ViewThatFits(in: .horizontal) {
@@ -214,7 +214,7 @@ struct StudentDetailView: View {
                 }
                 Section("Bot reply activity") {
                     StudentActivityBadge(status: student.activityStatus)
-                    Text("Separate from onboarding and the WhatsApp 24-hour messaging window. Server-side enforcement is required.")
+                    Text("Suspend pauses outgoing messages from the school assistant until Resume. Your profile and onboarding remain. Messages already submitted to WhatsApp cannot be recalled. Classera has separate controls.")
                         .font(.caption).foregroundStyle(.secondary)
                     if let reason = store.managementUnavailableReason(for: student) {
                         Text(reason).font(.caption).foregroundStyle(.secondary)
@@ -282,11 +282,7 @@ struct StudentDetailView: View {
         return value.formatted(date: .abbreviated, time: .shortened)
     }
     private func actions(for status: StudentActivityStatus) -> [StudentManagementAction] {
-        switch status {
-        case .blocked: return [.unblock, .remove]
-        case .suspended: return [.resume, .block, .remove]
-        case .allowed, .unknown: return [.suspend, .block, .remove]
-        }
+        StudentManagementAction.available(for: status)
     }
 }
 
@@ -294,6 +290,7 @@ private struct StudentActivityBadge: View {
     let status: StudentActivityStatus
     var body: some View { StudentStatusPill(status: status) }
 }
+
 
 
 

@@ -15,7 +15,7 @@ enum StudentPalette {
         switch status {
         case .allowed: return accent
         case .suspended: return .orange
-        case .blocked: return Color(red: 1, green: 0.46, blue: 0.42)
+        case .blocked: return statusColor(.suspended)
         case .unknown: return secondary
         }
     }
@@ -67,7 +67,7 @@ struct StudentAccessFilters: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 7) {
                 StudentFilterChip(title: "All", selected: selection == nil) { selection = nil }
-                ForEach([StudentActivityStatus.allowed, .suspended, .blocked], id: \.rawValue) { status in
+                ForEach([StudentActivityStatus.allowed, .suspended], id: \.rawValue) { status in
                     StudentFilterChip(title: status.title, selected: selection == status) { selection = status }
                 }
             }
@@ -128,4 +128,5 @@ struct StudentCompactRow: View {
             .background(Color(white: 0.16), in: Capsule())
     }
 }
+
 

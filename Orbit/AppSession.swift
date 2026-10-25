@@ -131,8 +131,6 @@ struct LockScreen: View {
         VStack(spacing: 24) {
             BrandMark(size: 80)
             Text("Orbit").font(.largeTitle.bold())
-            Label("Your server stays private", systemImage: "lock.shield")
-                .font(.subheadline).foregroundStyle(.secondary)
             if !privacyOnly {
                 if session.isAuthenticating { ProgressView("Authenticating…") }
                 else {
@@ -150,6 +148,7 @@ struct LockScreen: View {
         }.padding(32)
     }
 }
+
 
 
 
