@@ -316,7 +316,7 @@ final class MobileTests: XCTestCase {
                 await fulfillment(of: [ready], timeout: 5)
                 window.layoutIfNeeded()
                 XCTAssertEqual(studentsStore.snapshot?.students.count, 2)
-                let searchField = try XCTUnwrap(fields(in: window).first { $0.placeholder == "Search name or phone" })
+                let searchField = try XCTUnwrap(fields(in: window).first { $0.placeholder == "Name or phone" })
                 XCTAssertFalse(searchField.isFirstResponder)
                 let frame = searchField.convert(searchField.bounds, to: window)
                 XCTAssertGreaterThan(frame.width, window.bounds.width * 0.65)
@@ -329,4 +329,5 @@ final class MobileTests: XCTestCase {
         }
     }
 }
+
 

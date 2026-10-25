@@ -76,11 +76,8 @@ struct ContentView: View {
                 .tabItem { Label("Docker", systemImage: "shippingbox") }
                 .tag(2)
             NavigationStack {
-                StudentDatabasesView(api: api)
+                StudentDatabasesView(api: api, onWorkspace: { selectedTab = 0 })
                     .toolbar(.hidden, for: .tabBar)
-                    .toolbar { ToolbarItem(placement: .topBarTrailing) {
-                        Button("Workspace", systemImage: "square.grid.2x2") { selectedTab = 0 }
-                    } }
             }
                 .tabItem { Label("Students", systemImage: "person.3") }
                 .tag(3)
@@ -126,6 +123,7 @@ struct ContentView: View {
         }
     }
 }
+
 
 
 

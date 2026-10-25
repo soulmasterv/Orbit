@@ -2,75 +2,109 @@ import SwiftUI
 
 struct StudentDatabasesView: View {
     @ObservedObject var api: ServerAPI
+    var onWorkspace: (() -> Void)? = nil
+    @State private var classeraSelected = true
+    @Environment(\.dismiss) private var dismiss
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                Text("Student databases").font(.largeTitle.bold())
-                Text("Two separate student systems. Changes stay with the selected bot.").foregroundStyle(.secondary)
-                NavigationLink { StudentsView(api: api) } label: {
-                    databaseCard("School assistant", "Onboarding, subjects and messaging windows", "person.text.rectangle")
-                }.buttonStyle(.plain)
-                NavigationLink { ClasseraStudentsView(api: api) } label: {
-                    databaseCard("Classera subscribers", "Classera 1 (F) · Classera 2 (E)", "graduationcap")
-                }.buttonStyle(.plain)
-            }.padding(20)
-        }.background(Brand.background).navigationTitle("Students").navigationBarTitleDisplayMode(.inline)
-    }
-    private func databaseCard(_ title: String, _ subtitle: String, _ symbol: String) -> some View {
-        Panel {
-            HStack(spacing: 14) {
-                Image(systemName: symbol).font(.title2).foregroundStyle(Brand.accent)
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(title).font(.headline).foregroundStyle(.primary)
-                    Text(subtitle).font(.subheadline).foregroundStyle(.secondary)
-                }.frame(maxWidth: .infinity, alignment: .leading)
-                Image(systemName: "chevron.right").foregroundStyle(.secondary)
-            }.padding(.vertical, 8)
+        VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 15) {
+                Text("Students").font(.largeTitle.bold()).foregroundStyle(.white)
+                HStack(spacing: 0) {
+                    databaseTab("School assistant", selected: !classeraSelected) { classeraSelected = false }
+                    databaseTab("Classera", selected: classeraSelected) { classeraSelected = true }
+                }.padding(3).background(StudentPalette.surface, in: RoundedRectangle(cornerRadius: 10))
+            }.padding(.horizontal, 16).padding(.top, 6).padding(.bottom, 14)
+            if classeraSelected { ClasseraStudentsView(api: api, embedded: true) }
+            else { StudentsView(api: api, embedded: true) }
         }
+        .modifier(StudentAppearance())
+        .toolbar(.hidden, for: .tabBar)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            HStack {
+                Label("Students", systemImage: "person.2.fill")
+                    .foregroundStyle(StudentPalette.accent).frame(maxWidth: .infinity)
+                Button {
+                    if let onWorkspace { onWorkspace() } else { dismiss() }
+                } label: {
+                    Label("Workspace", systemImage: "square.grid.2x2").frame(maxWidth: .infinity)
+                }.foregroundStyle(StudentPalette.secondary)
+            }.font(.caption.weight(.medium)).padding(.vertical, 14)
+                .background(.black).overlay(alignment: .top) { Divider().overlay(StudentPalette.border) }
+        }
+    }
+    private func databaseTab(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title).font(.subheadline.weight(.medium)).foregroundStyle(.white)
+                .frame(maxWidth: .infinity).padding(.vertical, 11)
+                .background(selected ? StudentPalette.accent : Color.clear, in: RoundedRectangle(cornerRadius: 8))
+        }.buttonStyle(.plain).accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
 
 struct ClasseraStudentsView: View {
     @ObservedObject var api: ServerAPI
+    var embedded = false
     @Environment(\.scenePhase) private var phase
     @State private var students: [ClasseraStudent] = []
     @State private var search = ""
+    @State private var activity: StudentActivityStatus?
     @State private var error: String?
     @State private var loading = false
     @State private var generation = 0
     @State private var add = false
     @State private var phone = ""
     @State private var newPhone: String?
+    private var filtered: [ClasseraStudent] {
+        students.filter { student in
+            (activity == nil || student.activityStatus == activity) &&
+            (search.isEmpty || student.displayName.localizedCaseInsensitiveContains(search) || student.phone.contains(search))
+        }
+    }
+    private var classCount: Int { Set(students.flatMap(\.subscriptions).filter(\.editable).map(\.className)).count }
     var body: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 14) {
-                Text("Subscriptions shared with WhatsApp signups. Saving here does not send a message.")
-                    .font(.caption).foregroundStyle(.secondary)
-                if loading { ProgressView("Loading subscribers…") }
-                if let error { Text(error).foregroundStyle(.orange); Button("Retry") { Task { await refresh() } } }
-                ForEach(students.filter { search.isEmpty || $0.displayName.localizedCaseInsensitiveContains(search) || $0.phone.contains(search) }) { student in
+            LazyVStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 12) {
+                    StudentSearchField(text: $search)
+                    HStack {
+                        Text("\(students.count) subscribers")
+                        Spacer()
+                        Text("\(classCount) classes")
+                    }.font(.caption).foregroundStyle(StudentPalette.secondary)
+                    StudentAccessFilters(selection: $activity)
+                    if loading { ProgressView("Refreshing…").font(.caption) }
+                    if let error {
+                        Text(error).font(.caption).foregroundStyle(.orange)
+                        Button("Retry") { Task { await refresh() } }
+                    }
+                }.padding(.horizontal, 16).padding(.bottom, 14)
+                ForEach(Array(filtered.enumerated()), id: \.element.id) { index, student in
                     NavigationLink { ClasseraStudentEditor(api: api, phone: student.phone) } label: {
-                        Panel {
-                            VStack(alignment: .leading, spacing: 8) {
-                                HStack { Text(student.displayName).font(.headline); Spacer(); Text(student.maskedPhone).font(.caption).monospacedDigit() }
-                                ForEach(student.subscriptions) { row in
-                                    Text("\(ClasseraClass.title(row.className)) · \(row.status == "active" ? "Active" : row.status.replacingOccurrences(of: "_", with: " ")) · AI \(row.aiEnabled.map { $0 == 1 ? "on" : "off" } ?? "not set")")
-                                        .font(.caption).foregroundStyle(.secondary)
-                                }
-                                if student.signupSession != nil { Text("WhatsApp signup in progress").font(.caption).foregroundStyle(.orange) }
-                                Text("Replies & reports: \(student.activityStatus.title)").font(.caption.weight(.semibold))
-                                    .foregroundStyle(student.activityStatus == .allowed ? .green : .orange)
-                            }.frame(maxWidth: .infinity, alignment: .leading)
-                        }
+                        StudentCompactRow(name: student.displayName, phone: student.phone,
+                            chips: student.subscriptions.map { row in
+                                let label = row.className == "12F" ? "1 (F)" : row.className == "12E" ? "2 (E)" : row.className
+                                return row.status == "active" ? label : "\(label) · Waiting"
+                            }, status: student.activityStatus,
+                            note: student.signupSession == nil ? nil : "Signup in progress",
+                            alternate: !index.isMultiple(of: 2))
                     }.buttonStyle(.plain)
                 }
-                if !loading && error == nil && students.isEmpty {
-                    ContentUnavailableView("No Classera subscribers", systemImage: "person.2", description: Text("WhatsApp signups and subscriptions added here will appear together."))
+                if !loading && error == nil && filtered.isEmpty {
+                    ContentUnavailableView(students.isEmpty ? "No Classera subscribers" : "No matching students",
+                        systemImage: "person.2",
+                        description: Text(students.isEmpty ? "New WhatsApp signups appear here." : "Try a different name, phone or activity filter."))
                 }
-            }.padding(16)
-        }.background(Brand.background).navigationTitle("Classera subscribers").navigationBarTitleDisplayMode(.inline)
-        .searchable(text: $search, prompt: "Name or phone")
-        .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Add", systemImage: "plus") { phone = ""; add = true } } }
+            }.padding(.bottom, 12)
+        }.modifier(StudentAppearance())
+        .navigationTitle(embedded ? "Orbit" : "Classera subscribers").navigationBarTitleDisplayMode(.inline)
+        .scrollDismissesKeyboard(.interactively)
+        .toolbar { ToolbarItem(placement: .topBarTrailing) {
+            Button { phone = ""; add = true } label: {
+                Label("Add", systemImage: "plus").font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white).padding(.horizontal, 10).padding(.vertical, 7)
+                    .background(StudentPalette.accent, in: RoundedRectangle(cornerRadius: 8))
+            }.accessibilityLabel("Add Classera subscriber")
+        } }
         .alert("Add subscriber", isPresented: $add) {
             TextField("International phone, digits only", text: $phone).keyboardType(.phonePad)
             Button("Continue") {
@@ -129,7 +163,7 @@ struct ClasseraStudentEditor: View {
             }
             if let student {
                 Section("Replies and reports") {
-                    Text(student.activityStatus.title)
+                    StudentStatusPill(status: student.activityStatus)
                     ForEach(managementActions(student.activityStatus)) { action in
                         Button(action.title, role: action == .block || action == .remove ? .destructive : nil) { pendingAction = action }
                             .disabled(!loaded || busy || !api.accessAllowed || student.activityStatus == .unknown)
@@ -177,7 +211,8 @@ struct ClasseraStudentEditor: View {
                 Button("Reload from server") { Task { await reload() } }.disabled(busy || !api.accessAllowed)
                 Text("Saving updates report eligibility for future scheduled reports. It does not send WhatsApp messages. Unselected legacy classes remain preserved.").font(.caption).foregroundStyle(.secondary)
             }
-        }.navigationTitle("Classera student").navigationBarTitleDisplayMode(.inline)
+        }.scrollContentBackground(.hidden).modifier(StudentAppearance())
+        .navigationTitle("Classera student").navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(busy)
         .task(id: phase == .active && api.accessAllowed) {
             guard phase == .active && api.accessAllowed else {
@@ -286,3 +321,4 @@ enum ClasseraPhone {
         (8...15).contains(value.count) && value.first != "0" && value.utf8.allSatisfy { (48...57).contains($0) }
     }
 }
+

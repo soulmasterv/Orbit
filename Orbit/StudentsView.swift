@@ -8,10 +8,13 @@ struct StudentsView: View {
     @State private var visible = false
     @State private var search = ""
     @State private var filter: StudentsFilter = .all
+    @State private var activity: StudentActivityStatus?
+    private let embedded: Bool
     @State private var selectedGrade = ""
     @State private var refreshOwner = UUID()
 
-    init(api: ServerAPI, store: StudentsStore? = nil) {
+    init(api: ServerAPI, store: StudentsStore? = nil, embedded: Bool = false) {
+        self.embedded = embedded
         self.api = api
         _store = StateObject(wrappedValue: store ?? StudentsStore(api: api))
     }
@@ -23,8 +26,8 @@ struct StudentsView: View {
 
     var body: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 16) {
-                directoryHeader
+            LazyVStack(alignment: .leading, spacing: 0) {
+                directoryHeader.padding(.horizontal, 16).padding(.bottom, 14)
                 if let error = store.error {
                     Panel {
                         VStack(alignment: .leading, spacing: 10) {
@@ -46,10 +49,10 @@ struct StudentsView: View {
                         directory(snapshot, at: .now)
                     }
                 }
-            }.frame(maxWidth: .infinity, alignment: .leading).padding(16)
+            }.frame(maxWidth: .infinity, alignment: .leading)
         }
-        .background(Brand.background)
-        .navigationTitle("Students").navigationBarTitleDisplayMode(.inline)
+        .modifier(StudentAppearance())
+        .navigationTitle(embedded ? "Orbit" : "Students").navigationBarTitleDisplayMode(.inline)
         .scrollDismissesKeyboard(.interactively)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -74,97 +77,64 @@ struct StudentsView: View {
     }
 
     private var directoryHeader: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Your students").font(.title2.bold())
-                    Text("Profiles, reply access and messaging windows").font(.caption).foregroundStyle(.secondary)
-                }
-                Spacer(minLength: 8)
-                NavigationLink { MobileHubView(api: api) } label: {
-                    Image(systemName: "slider.horizontal.3").font(.headline)
-                        .frame(width: 44, height: 44).background(Brand.accent.opacity(0.12), in: Circle())
-                }.accessibilityLabel("Student tools and connection settings")
-            }
-            HStack(spacing: 10) {
-                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField("Search name or phone", text: $search)
-                    .textInputAutocapitalization(.never).autocorrectionDisabled()
-                    .accessibilityIdentifier("students.search")
-                if !search.isEmpty {
-                    Button { search = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
-                        .accessibilityLabel("Clear search")
-                }
-            }.padding(12).background(Brand.surface, in: RoundedRectangle(cornerRadius: 12))
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(StudentsFilter.allCases) { item in
-                        Button { filter = item } label: {
-                            Text(item == .open ? "Open" : item == .closed ? "Closed" : item.rawValue)
-                                .font(.subheadline.weight(.medium)).padding(.horizontal, 14).padding(.vertical, 10)
-                                .foregroundStyle(filter == item ? Color.white : Color.primary)
-                                .background(filter == item ? Brand.accent : Brand.surface, in: Capsule())
-                        }.buttonStyle(.plain)
-                         .accessibilityLabel(item.rawValue)
-                         .accessibilityAddTraits(filter == item ? .isSelected : [])
-                    }
-                }
-            }
-            if filter == .grade {
+        VStack(alignment: .leading, spacing: 12) {
+            StudentSearchField(text: $search)
+            HStack {
+                Text("School assistant").font(.caption).foregroundStyle(StudentPalette.secondary)
+                Spacer()
                 Menu {
-                    Button("All grades") { selectedGrade = "" }
-                    ForEach(grades, id: \.self) { grade in Button("Grade \(grade)") { selectedGrade = grade } }
+                    Picker("Messaging window", selection: $filter) {
+                        ForEach(StudentsFilter.allCases) { item in Text(item.rawValue).tag(item) }
+                    }
+                    if filter == .grade {
+                        Picker("Grade", selection: $selectedGrade) {
+                            Text("All grades").tag("")
+                            ForEach(grades, id: \.self) { grade in Text("Grade \(grade)").tag(grade) }
+                        }
+                    }
                 } label: {
-                    HStack {
-                        Label(selectedGrade.isEmpty ? "All grades" : "Grade \(selectedGrade)", systemImage: "graduationcap")
-                        Spacer()
-                        Image(systemName: "chevron.up.chevron.down").font(.caption)
-                    }.font(.subheadline).padding(12).background(Brand.surface, in: RoundedRectangle(cornerRadius: 12))
+                    Label(filter == .grade && !selectedGrade.isEmpty ? "Grade \(selectedGrade)" : filter.rawValue,
+                          systemImage: "line.3.horizontal.decrease").font(.caption.weight(.medium))
                 }
+                Menu {
+                    NavigationLink("Student tools and settings") { MobileHubView(api: api) }
+                    NavigationLink("Feedback") { MobileFeedbackView(api: api, selectedID: nil) }
+                    NavigationLink("Recent events") { MobileEventsView(api: api) }
+                    if mobile.state?.outbox != nil {
+                        NavigationLink("Review saved message") { MessageOutboxView() }
+                    }
+                } label: { Image(systemName: "ellipsis.circle").frame(minWidth: 30, minHeight: 30) }
+                    .accessibilityLabel("Student tools, feedback and events")
             }
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 12) { feedbackLink; eventsLink }
-                VStack(alignment: .leading, spacing: 10) { feedbackLink; eventsLink }
-            }
+            StudentAccessFilters(selection: $activity)
             if mobile.state?.outbox != nil {
                 NavigationLink { MessageOutboxView() } label: { Label("Review saved message", systemImage: "tray") }
-                    .font(.subheadline.weight(.medium))
+                    .font(.caption.weight(.medium))
             }
             SnapshotStamp(date: store.snapshot?.receivedAt, failed: store.error != nil)
         }.frame(maxWidth: .infinity, alignment: .leading)
          .accessibilityIdentifier("students.header")
     }
 
-    private var feedbackLink: some View {
-        NavigationLink { MobileFeedbackView(api: api, selectedID: nil) } label: {
-            Label("Feedback", systemImage: "bubble.left.and.text.bubble.right").font(.subheadline.weight(.medium))
-                .frame(maxWidth: .infinity).padding(12).background(Brand.accent.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
-        }
-    }
-    private var eventsLink: some View {
-        NavigationLink { MobileEventsView(api: api) } label: {
-            Label("Recent events", systemImage: "clock").font(.subheadline.weight(.medium))
-                .frame(maxWidth: .infinity).padding(12).background(Brand.surface, in: RoundedRectangle(cornerRadius: 12))
-        }
-    }
-
     private func directory(_ snapshot: StudentsSnapshot, at now: ContinuousClock.Instant) -> some View {
         let rows = StudentsDirectory.filtered(snapshot, search: search, filter: filter, grade: selectedGrade, at: now)
+            .filter { activity == nil || $0.activityStatus == activity }
         let open = snapshot.students.filter { snapshot.isWindowOpen(for: $0, at: now) }.count
-        return VStack(alignment: .leading, spacing: 12) {
+        return VStack(alignment: .leading, spacing: 0) {
             ViewThatFits(in: .horizontal) {
                 HStack { resultCount(rows.count, total: snapshot.students.count); Spacer(); Text("\(open) window open").font(.caption).foregroundStyle(.secondary) }
                 VStack(alignment: .leading, spacing: 4) { resultCount(rows.count, total: snapshot.students.count); Text("\(open) window open").font(.caption).foregroundStyle(.secondary) }
             }
+            .padding(.horizontal, 16).padding(.bottom, 12)
             if rows.isEmpty {
                 ContentUnavailableView(snapshot.students.isEmpty ? "No students yet" : "No matching students",
                     systemImage: "person.3",
                     description: Text(snapshot.students.isEmpty ? "Profiles appear after students contact the bot." : "Try another search, window filter or grade."))
                     .frame(maxWidth: .infinity).padding(.vertical, 20)
             }
-            ForEach(rows) { student in
+            ForEach(Array(rows.enumerated()), id: \.element.id) { index, student in
                 NavigationLink { StudentDetailView(api: api, store: store, phone: student.phone) } label: {
-                    StudentDirectoryCard(snapshot: snapshot, student: student, now: now)
+                    StudentDirectoryCard(snapshot: snapshot, student: student, now: now, alternate: !index.isMultiple(of: 2))
                 }.buttonStyle(.plain)
             }
         }.frame(maxWidth: .infinity, alignment: .leading)
@@ -180,28 +150,13 @@ struct StudentDirectoryCard: View {
     let snapshot: StudentsSnapshot
     let student: Student
     let now: ContinuousClock.Instant
+    var alternate = false
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .top, spacing: 12) {
-                Image(systemName: "person.fill").font(.title3)
-                    .foregroundStyle(Brand.accent).frame(width: 42, height: 42)
-                    .background(Brand.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 13))
-                    .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(student.displayName).font(.headline).foregroundStyle(.primary).fixedSize(horizontal: false, vertical: true)
-                    Text(student.state == "active" ? student.gradeLabel : student.stateLabel).font(.subheadline).foregroundStyle(.secondary)
-                    Text(student.maskedPhone).font(.caption).monospacedDigit().foregroundStyle(.secondary)
-                }.frame(maxWidth: .infinity, alignment: .leading)
-                Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary).padding(.top, 4)
-            }
-            Divider()
-            ViewThatFits(in: .horizontal) {
-                HStack { StudentActivityBadge(status: student.activityStatus); Spacer(minLength: 10); StudentWindowStatus(snapshot: snapshot, student: student, now: now) }
-                VStack(alignment: .leading, spacing: 10) { StudentActivityBadge(status: student.activityStatus); StudentWindowStatus(snapshot: snapshot, student: student, now: now) }
-            }
-        }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
-         .background(Brand.surface, in: RoundedRectangle(cornerRadius: 18))
-         .accessibilityElement(children: .combine)
+        StudentCompactRow(name: student.displayName, phone: student.phone,
+            chips: [student.state == "active" ? student.gradeLabel : student.stateLabel],
+            status: student.activityStatus,
+            note: snapshot.isWindowOpen(for: student, at: now) ? "Window open · \(snapshot.countdown(for: student, at: now))" : "Window closed",
+            alternate: alternate)
     }
 }
 
@@ -213,7 +168,7 @@ private struct StudentWindowStatus: View {
 
     var body: some View {
         HStack(spacing: 5) {
-            Circle().fill(open ? Color.green : Color.gray).frame(width: 7, height: 7)
+            Circle().fill(open ? StudentPalette.accent : Color.gray).frame(width: 7, height: 7)
             Text(open ? "Window open · \(snapshot.countdown(for: student, at: now))" : "Window closed")
                 .font(.caption.weight(.semibold)).monospacedDigit().foregroundStyle(.secondary)
         }
@@ -294,7 +249,8 @@ struct StudentDetailView: View {
                         .disabled(store.mutationBusy || store.loading || !api.accessAllowed)
                 }
             }
-        }.navigationTitle("Student Details").navigationBarTitleDisplayMode(.inline)
+        }.scrollContentBackground(.hidden).modifier(StudentAppearance())
+        .navigationTitle("Student Details").navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(store.mutationBusy)
         .onAppear { store.claimVisibility(refreshOwner); visible = true }
         .onDisappear { visible = false; store.suspend(owner: refreshOwner) }
@@ -336,21 +292,9 @@ struct StudentDetailView: View {
 
 private struct StudentActivityBadge: View {
     let status: StudentActivityStatus
-    private var color: Color {
-        switch status {
-        case .allowed: return .green
-        case .suspended: return .orange
-        case .blocked: return .red
-        case .unknown: return .gray
-        }
-    }
-    var body: some View {
-        Text("Replies: \(status.title)").font(.caption.weight(.medium))
-            .foregroundStyle(color).padding(.horizontal, 8).padding(.vertical, 4)
-            .background(color.opacity(0.12), in: Capsule())
-            .accessibilityLabel("Bot reply activity: \(status.title)")
-    }
+    var body: some View { StudentStatusPill(status: status) }
 }
+
 
 
 

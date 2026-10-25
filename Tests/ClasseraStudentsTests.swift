@@ -117,9 +117,19 @@ final class ClasseraStudentsTests: XCTestCase {
     }
     func testStudentWorkspaceAndClasseraDirectoryIPhoneLayouts() async throws {
         let data = record
+        let names = ["Omar Hassan", "Ahmed Ali", "Sara Mahmoud", "Nour Ahmed", "Youssef Adel", "Mariam Tarek With A Longer Name"]
+        let statuses = ["allowed", "suspended", "allowed", "blocked", "allowed", "allowed"]
+        let examples: [[String: Any]] = try names.enumerated().map { index, name in
+            var value = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+            value["phone"] = index == 5 ? "201000000006123" : String(format: "20100000000%d", index + 1)
+            value["activity_status"] = statuses[index]
+            value["subscriptions"] = [["class_name": index.isMultiple(of: 2) ? "12F" : "12E", "name": name, "ai_enabled": 1, "status": "active"]]
+            return value
+        }
+        let directoryData = try JSONSerialization.data(withJSONObject: ["version": 1, "students": examples])
         MockURLProtocol.handler = { request in
             if request.url?.path == "/api/classera-students" {
-                return (200, Data("{\"version\":1,\"students\":[".utf8) + data + Data("]}".utf8))
+                return (200, directoryData)
             }
             return (200,data)
         }
@@ -128,6 +138,7 @@ final class ClasseraStudentsTests: XCTestCase {
         let views: [(String, AnyView)] = [
             ("student-databases", AnyView(NavigationStack { StudentDatabasesView(api: server) })),
             ("classera-subscribers", AnyView(NavigationStack { ClasseraStudentsView(api: server) })),
+            ("student-databases-large-text", AnyView(NavigationStack { StudentDatabasesView(api: server) }.environment(\.dynamicTypeSize, .accessibility1))),
             ("classera-student-controls", AnyView(NavigationStack { ClasseraStudentEditor(api: server, phone: "201000000001") }))]
         for (name, view) in views {
             let window = UIWindow(windowScene: scene); window.frame = scene.coordinateSpace.bounds
@@ -137,12 +148,11 @@ final class ClasseraStudentsTests: XCTestCase {
             DispatchQueue.main.asyncAfter(deadline: .now()+1) { laidOut.fulfill() }
             await fulfillment(of: [laidOut], timeout: 5)
             window.layoutIfNeeded()
-            if name != "student-databases" {
-                XCTAssertTrue(MockURLProtocol.requests.contains { $0.url?.path == (name == "classera-subscribers" ? "/api/classera-students" : "/api/classera-students/201000000001") })
-            }
+            XCTAssertTrue(MockURLProtocol.requests.contains { $0.url?.path == (name == "classera-student-controls" ? "/api/classera-students/201000000001" : "/api/classera-students") })
             let image = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in window.drawHierarchy(in: window.bounds, afterScreenUpdates: true) }
             let attachment = XCTAttachment(image: image); attachment.name = name; attachment.lifetime = .keepAlways; add(attachment)
             window.isHidden = true
         }
     }
 }
+
