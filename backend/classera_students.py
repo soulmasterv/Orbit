@@ -148,6 +148,9 @@ def register(app, owner_token, directory=None):
     app.add_url_rule("/api/classera-students/<phone>", "classera_student_detail", handle, methods=["GET", "PUT", "DELETE"])
     app.add_url_rule("/api/classera-students/<phone>/activity", "classera_student_activity", handle, methods=["PUT"])
 
+    from classera_monitoring_api import register as register_monitoring
+    register_monitoring(app, owner_token)
+
     @app.after_request
     def private_directory(response):
         if request.path.startswith("/api/classera-students"):

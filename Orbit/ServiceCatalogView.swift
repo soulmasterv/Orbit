@@ -97,6 +97,9 @@ struct ServiceDetailView: View {
                 }
             }
         case .classera:
+            NavigationLink { ClasseraMonitoringView(api: api) } label: {
+                Label("Waiting list, delivery history & statistics", systemImage: "chart.bar.xaxis")
+            }.font(.subheadline.weight(.semibold))
             let instances = (api.serviceSnapshot?.classera ?? []).filter { ["classera-1", "classera-2"].contains($0.id) }
 
             if instances.isEmpty {

@@ -904,3 +904,89 @@ extension ServerAPI {
 }
 
 
+
+
+extension ServerAPI {
+    private func classeraMonitoringRequest<T: ClasseraVersioned>(_ path: String,
+        query: [String: String] = [:], method: String = "GET", body: Data? = nil) async throws -> T {
+        guard accessAllowed && !previewMode && !Task.isCancelled else { throw CancellationError() }
+        let epoch = studentsAccessGeneration
+        var parts = URLComponents()
+        parts.queryItems = query.filter { !$0.value.isEmpty }.sorted { $0.key < $1.key }.map { URLQueryItem(name: $0.key, value: $0.value) }
+        let suffix = parts.percentEncodedQuery.map { "?" + $0.replacingOccurrences(of: "+", with: "%2B") } ?? ""
+        var command = try request(path: path + suffix, method: method, endpoint: baseURL)
+        if let body { command.httpBody = body; command.setValue("application/json", forHTTPHeaderField: "Content-Type") }
+        let data: Data
+        let response: URLResponse
+        do { (data, response) = try await session.data(for: command) }
+        catch {
+            if method != "GET" { throw ClasseraMonitoringFailure.uncertain }
+            throw error
+        }
+        guard accessAllowed && epoch == studentsAccessGeneration && !Task.isCancelled else {
+            if method != "GET" { throw ClasseraMonitoringFailure.uncertain }
+            throw CancellationError()
+        }
+        guard let http = response as? HTTPURLResponse else { throw ClasseraMonitoringFailure.invalidResponse }
+        guard [200, 202].contains(http.statusCode) else {
+            let code = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String ?? ""
+            throw ClasseraMonitoringFailure.http(http.statusCode, code == "sending_disabled" ? code : "")
+        }
+        guard let result = try? JSONDecoder().decode(T.self, from: data), result.version == 1 else {
+            throw method == "GET" ? ClasseraMonitoringFailure.invalidResponse : ClasseraMonitoringFailure.uncertain
+        }
+        return result
+    }
+    func classeraWaitingList() async throws -> ClasseraWaitingResponse {
+        try await classeraMonitoringRequest("/api/classera/waiting-list")
+    }
+    func classeraReadyPreview(_ classID: String) async throws -> ClasseraReadyPreview {
+        let result: ClasseraReadyPreview = try await classeraMonitoringRequest("/api/classera/class-ready/preview", query: ["class_id": classID])
+        guard result.class_id == classID, result.eligible_count >= 0,
+              result.eligible_count == result.students.filter(\.eligible).count else { throw ClasseraMonitoringFailure.invalidResponse }
+        return result
+    }
+    func classeraDeliveryHistory(_ query: [String: String]) async throws -> ClasseraHistoryResponse {
+        try await classeraMonitoringRequest("/api/classera/delivery-history", query: query)
+    }
+    func classeraDailyStatistics(_ query: [String: String]) async throws -> ClasseraStatisticsResponse {
+        let result: ClasseraStatisticsResponse = try await classeraMonitoringRequest("/api/classera/daily-statistics", query: query)
+        guard Self.validClasseraCounts(result.counts, total: result.attempts),
+              result.reports.allSatisfy({ Self.validClasseraCounts($0.counts, total: $0.attempts) &&
+                  ($0.expected == nil || $0.expected! >= 0) &&
+                  ($0.delivery_rate == nil || (0...100).contains($0.delivery_rate!)) }),
+              result.delivery_rate == nil || (0...100).contains(result.delivery_rate!) else {
+            throw ClasseraMonitoringFailure.invalidResponse
+        }
+        return result
+    }
+    private static func validClasseraCounts(_ counts: [String: Int], total: Int) -> Bool {
+        total >= 0 && Set(counts.keys) == Set(ClasseraDeliveryState.all) &&
+            counts.values.allSatisfy { $0 >= 0 } && counts.values.reduce(0,+) == total
+    }
+    func classeraReadyOperation(_ identifier: String) async throws -> ClasseraReadyOperation {
+        guard let uuid = UUID(uuidString: identifier), uuid.uuidString.lowercased() == identifier else {
+            throw ClasseraMonitoringFailure.invalidResponse
+        }
+        let result: ClasseraReadyOperation = try await classeraMonitoringRequest("/api/classera/class-ready/operations/" + identifier)
+        guard result.request_id == identifier, result.total >= 0,
+              result.total == result.recipients.count,
+              Self.validClasseraCounts(result.counts, total: result.total) else { throw ClasseraMonitoringFailure.invalidResponse }
+        return result
+    }
+    func sendClasseraReady(_ payload: ClasseraReadyPayload, beforeSubmit: () throws -> Void) async throws -> ClasseraReadyOperation {
+        guard accessAllowed && !previewMode && !actionBusy && !Task.isCancelled else { throw ClasseraMonitoringFailure.notSent }
+        actionBusy = true; actionProgress = "Authorize class notification…"
+        defer { actionBusy = false; actionProgress = "" }
+        let epoch = studentsAccessGeneration
+        do { try await authorize("Invite \(payload.expected_eligible_count) waiting students in \(payload.class_id) to opt in. This sends WhatsApp notifications.") }
+        catch { throw ClasseraMonitoringFailure.notSent }
+        guard accessAllowed && epoch == studentsAccessGeneration && !Task.isCancelled else { throw ClasseraMonitoringFailure.notSent }
+        try beforeSubmit() // Persist identity before the only POST. Failure aborts the send.
+        let result: ClasseraReadyOperation = try await classeraMonitoringRequest("/api/classera/class-ready/operations",
+            method: "POST", body: JSONEncoder().encode(payload))
+        guard result.request_id == payload.request_id, result.class_id == payload.class_id,
+              result.total == payload.expected_eligible_count else { throw ClasseraMonitoringFailure.uncertain }
+        return result
+    }
+}

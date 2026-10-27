@@ -99,7 +99,11 @@ struct ClasseraStudentsView: View {
         }.modifier(StudentAppearance())
         .navigationTitle(embedded ? "Orbit" : "Classera subscribers").navigationBarTitleDisplayMode(.inline)
         .scrollDismissesKeyboard(.interactively)
-        .toolbar { ToolbarItem(placement: .topBarTrailing) {
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                NavigationLink { ClasseraMonitoringView(api: api) } label: { Label("Monitoring", systemImage: "chart.bar.xaxis") }
+            }
+            ToolbarItem(placement: .topBarTrailing) {
             Button { phone = ""; add = true } label: {
                 Label("Add", systemImage: "plus").font(.subheadline.weight(.semibold))
                     .foregroundStyle(.white).padding(.horizontal, 10).padding(.vertical, 7)
@@ -158,6 +162,7 @@ struct ClasseraStudentEditor: View {
         Form {
             Section("Classera subscriber") {
                 Text(phone).textSelection(.enabled)
+                NavigationLink { ClasseraMonitoringView(api: api, initialTab: 1, initialSearch: phone) } label: { Text("Delivery history") }
                 Button("Edit name") {
                     nameDraft = rows.first(where: \.editable)?.name ?? ""
                     nameError = nil; editName = true
@@ -171,8 +176,8 @@ struct ClasseraStudentEditor: View {
             }
             if student?.hasPendingClass == true {
                 Section("Waiting for class support") {
-                    Button("Notify: class now supported") {}.disabled(true)
-                    Text("Not available yet. The WhatsApp backend must verify class support and send an opt-in invitation. This must not activate a subscription automatically.")
+                    NavigationLink { ClasseraMonitoringView(api: api) } label: { Label("Waiting list and invitation preview", systemImage: "person.badge.clock") }
+                    Text("Review the class-wide preview. Sending stays disabled until the approved template contract is verified; subscriptions and schedulers are not activated.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
