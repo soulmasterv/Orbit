@@ -47,3 +47,22 @@ CREATE TABLE IF NOT EXISTS orbit_student_controls (
 ```
 
 Install the shared gate module on the webhook/report Python import path. Check `can_reply` at inbound dispatch and immediately before every outbound message call, and filter active report recipients through it. Enable management only after these guards and the table are deployed together. Existing processes must reload the changed code. Backups and deployment scripts stay on the owner server; they do not contain credentials in this repository.
+
+## Grouped Student Details and 24-hour window capability
+
+Student Details uses the approved grouped design: Profile, Subscriptions (expand a class to edit), Messaging, Management. A bottom Save changes button is enabled only for changed subscription drafts. Names, class-specific preferences, subscription removals, revision conflicts, Face ID, one-person report confirmations, mutation retry protection, legacy preservation and the two separate databases retain their existing behavior. Waiting subscriptions display AI as Not set. Full phone numbers remain visible to the authenticated administrator.
+
+The Classera database currently has no verified last-inbound timestamp or 24-hour messaging-window record. Signup updated_at, subscription timestamps and delivery/read receipts do NOT establish a window. The current production UI therefore displays Unavailable rather than a fabricated Closed/Open state. The school-assistant window is separate and unchanged.
+
+The native model accepts this optional future read-only addition on the existing owner-authenticated Classera detail response:
+```json
+{
+  "whatsapp_windows": [
+    {"class_name":"12F","window_open":true,"seconds_left":5400,"last_inbound_at":1793010000},
+    {"class_name":"12E","window_open":false,"seconds_left":0,"last_inbound_at":1792900000}
+  ]
+}
+```
+This is a capability contract, NOT a claim those fields are deployed. The WhatsApp backend must source it from verified student inbound events, scoped to the receiving WhatsApp business number mapped to each class. Never reuse the school-assistant database or another business number's window. Missing or inconsistent data must stay unavailable. seconds_left is a response-time snapshot (0–86400); last_inbound_at is Unix seconds and required for a known window. A closed response has zero seconds. The native countdown uses a monotonic clock locally; refreshing replaces its baseline. No per-second network polling or sending is introduced.
+
+Window status is informational; it never enables reports, changes activity, or overrides backend/provider eligibility. Templated reports are separate from customer-service-window rules. Real provider/window verification and physical-device checks remain pending.

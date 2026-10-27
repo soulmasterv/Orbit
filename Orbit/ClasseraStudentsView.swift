@@ -156,84 +156,54 @@ struct ClasseraStudentEditor: View {
     @State private var removeClass: String?
     @State private var pendingAction: StudentManagementAction?
     @State private var reportClass: String?
+    @State private var expandedClasses: Set<String> = []
+    @State private var windowInstant = ContinuousClock.now
     @Environment(\.dismiss) private var dismiss
     private var canSave: Bool { loaded && !busy && api.accessAllowed && student?.signupSession == nil }
+    private var hasChanges: Bool { loaded && (student.map { rows != $0.subscriptions } ?? false) }
     var body: some View {
-        Form {
-            Section("Classera subscriber") {
-                Text(phone).textSelection(.enabled)
-                NavigationLink { ClasseraMonitoringView(api: api, initialTab: 1, initialSearch: phone) } label: { Text("Delivery history") }
-                Button("Edit name") {
-                    nameDraft = rows.first(where: \.editable)?.name ?? ""
-                    nameError = nil; editName = true
-                }.disabled(!canSave || !rows.contains(where: \.editable))
-                Text("This edits only Classera subscriptions. The school assistant database is separate.").font(.caption).foregroundStyle(.secondary)
-            }
-            if busy { ProgressView("Please wait…") }
-            if let message { Section { Text(message).foregroundStyle(.secondary) } }
-            if student?.signupSession != nil {
-                Section { Text("Sign up in progress. Finish it on WhatsApp, then reload before editing.").foregroundStyle(.yellow) }
-            }
-            if student?.hasPendingClass == true {
-                Section("Waiting for class support") {
-                    NavigationLink { ClasseraMonitoringView(api: api) } label: { Label("Waiting list and invitation preview", systemImage: "person.badge.clock") }
-                    Text("Review the class-wide preview. Sending stays disabled until the approved template contract is verified; subscriptions and schedulers are not activated.")
-                        .font(.caption).foregroundStyle(.secondary)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                profileSection
+                if busy { ProgressView("Please wait…").font(.caption) }
+                if let message {
+                    Text(message).font(.subheadline).foregroundStyle(StudentPalette.secondary)
+                        .accessibilityIdentifier("classera.student.notice")
                 }
-            }
-            if let student {
-                Section("Replies and reports") {
-                    StudentStatusPill(status: student.activityStatus)
-                    ForEach(managementActions(student.activityStatus)) { action in
-                        Button(action.title, role: action == .block || action == .remove ? .destructive : nil) { pendingAction = action }
-                            .disabled(!loaded || busy || !api.accessAllowed || student.activityStatus == .unknown)
-                    }
-                    Text("Suspend pauses Classera replies and daily reports until Resume. Your subscriptions remain. Messages already submitted to WhatsApp cannot be recalled. The school assistant has separate controls.").font(.caption).foregroundStyle(.secondary)
+                if student?.signupSession != nil {
+                    Text("Sign up in progress. Finish on WhatsApp, then reload before editing.")
+                        .font(.subheadline).foregroundStyle(.yellow)
                 }
-                Section("Daily report to this person only") {
-                    ForEach(rows.filter { $0.editable && $0.status == "active" }) { row in
-                        Button("Force-send \(ClasseraClass.title(row.className)) report", role: .destructive) { reportClass = row.className }
-                            .disabled(!loaded || busy || student.activityStatus != .allowed || !api.canControl)
-                    }
-                    Button("Refresh report availability") { Task { await api.refreshAll() } }.disabled(busy || api.loading || api.servicesLoading)
-                    Text("Sends the selected class's daily report to this phone only, even if it was sent before. Confirmation and device authorization are required. No subject editor or free-text messages here.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-            }
-            ForEach($rows) { $row in
-                Section(ClasseraClass.title(row.className)) {
-                    if row.editable {
-                        TextField("Student name", text: $row.name)
-                        Picker("AI preference", selection: $row.aiEnabled) {
-                            Text("Not set").tag(nil as Int?); Text("Enabled").tag(1 as Int?); Text("Disabled").tag(0 as Int?)
-                        }.disabled(row.status == "waiting_for_class")
-                        Picker("Subscription", selection: $row.status) {
-                            Text("Active").tag("active"); Text("Waiting for class").tag("waiting_for_class")
-                        }.onChange(of: row.status) { _, status in
-                            if status == "waiting_for_class" { row.aiEnabled = nil }
-                        }
-                        Button("Remove this class", role: .destructive) { removeClass = row.className }
-                    } else {
-                        Text("Legacy class preserved: \(row.name)")
-                        Text("This class cannot be changed here.").font(.caption)
-                    }
-                }.disabled(!canSave)
-            }
-            Section("Add subscription") {
-                ForEach(["12F", "12E"].filter { klass in !rows.contains { $0.className == klass } }, id: \.self) { klass in
-                    Button("Add \(ClasseraClass.title(klass))") {
-                        rows.append(ClasseraSubscription(className: klass, name: rows.first?.name ?? student?.signupSession?.name ?? "", aiEnabled: nil, status: "active"))
-                    }.disabled(!canSave)
-                }
-            }
-            Section {
-                Button("Save changes") { confirmSave = true }.disabled(!canSave)
-                Button("Reload from server") { Task { await reload() } }.disabled(busy || !api.accessAllowed)
-                Text("Saving updates report eligibility for future scheduled reports. It does not send WhatsApp messages. Unselected legacy classes remain preserved.").font(.caption).foregroundStyle(.secondary)
-            }
-        }.scrollContentBackground(.hidden).modifier(StudentAppearance())
-        .navigationTitle("Classera student").navigationBarTitleDisplayMode(.inline)
+                subscriptionsSection
+                messagingSection
+                managementSection
+                Button { Task { await reload() } } label: {
+                    Label("Reload from server", systemImage: "arrow.clockwise")
+                }.disabled(busy || !api.accessAllowed)
+                Text("Classera subscriptions only. The school assistant database has separate data and controls.")
+                    .font(.caption).foregroundStyle(StudentPalette.secondary)
+            }.padding(16)
+        }.modifier(StudentAppearance())
+        .scrollDismissesKeyboard(.interactively)
+        .navigationTitle("Student details").navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(busy)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            VStack(spacing: 6) {
+                Button { confirmSave = true } label: {
+                    Text("Save changes").font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity).padding(.vertical, 13)
+                        .foregroundStyle(canSave && hasChanges ? .white : StudentPalette.secondary)
+                        .background(canSave && hasChanges ? StudentPalette.accent : StudentPalette.surface,
+                                    in: RoundedRectangle(cornerRadius: 10))
+                }.buttonStyle(.plain).disabled(!canSave || !hasChanges)
+                    .accessibilityIdentifier("classera.student.save")
+                if hasChanges {
+                    Text("Unsaved changes · Saving does not send a message")
+                        .font(.caption2).foregroundStyle(StudentPalette.secondary)
+                }
+            }.padding(.horizontal, 16).padding(.vertical, 10).background(.black)
+                .overlay(alignment: .top) { Divider().overlay(StudentPalette.border) }
+        }
         .sheet(isPresented: $editName) {
             NavigationStack {
                 Form {
@@ -289,6 +259,181 @@ struct ClasseraStudentEditor: View {
             Button("Cancel", role: .cancel) {}
         } message: { klass in Text("Send \(ClasseraClass.title(klass)) to \(phone) only. This can resend an already delivered daily report.") }
     }
+    private var profileSection: some View {
+        detailGroup("Profile") {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(rows.first?.name ?? student?.displayName ?? "Student")
+                        .font(.title3.bold()).foregroundStyle(.white)
+                    Text(phone).font(.subheadline).monospacedDigit().textSelection(.enabled)
+                        .foregroundStyle(StudentPalette.secondary)
+                        .accessibilityIdentifier("classera.student.fullPhone")
+                }
+                Spacer(minLength: 8)
+                Button("Edit name") {
+                    nameDraft = rows.first(where: \.editable)?.name ?? ""
+                    nameError = nil; editName = true
+                }.font(.subheadline).disabled(!canSave || !rows.contains(where: \.editable))
+            }
+            Divider()
+            HStack {
+                Text("Activity").foregroundStyle(StudentPalette.secondary)
+                Spacer()
+                StudentStatusPill(status: student?.activityStatus ?? .unknown)
+            }
+            Divider()
+            LabeledContent("Source", value: "Classera")
+            Divider()
+            windowStatus
+        }
+    }
+    private var windowStatus: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("WhatsApp 24-hour window").font(.subheadline.weight(.medium))
+            TimelineView(.periodic(from: .now, by: 15)) { _ in
+                if let windows = student?.whatsappWindows, !windows.isEmpty {
+                    ForEach(windows) { window in
+                        let remaining = window.remainingSeconds(since: windowInstant)
+                        HStack(alignment: .top) {
+                            Text(ClasseraClass.title(window.className)).foregroundStyle(StudentPalette.secondary)
+                            Spacer()
+                            HStack(spacing: 6) {
+                                Circle().fill(remaining == nil ? Color.gray : remaining! > 0 ? Color.green : Color.gray)
+                                    .frame(width: 6, height: 6)
+                                Text(window.label(since: windowInstant)).monospacedDigit()
+                            }
+                        }.font(.caption)
+                    }
+                } else {
+                    Label("Unavailable — not reported by Classera", systemImage: "clock")
+                        .font(.caption).foregroundStyle(StudentPalette.secondary)
+                }
+            }
+            Text("The window follows the student's last message to that WhatsApp number. It is separate from activity and subscription status.")
+                .font(.caption2).foregroundStyle(StudentPalette.secondary)
+        }.accessibilityIdentifier("classera.student.whatsappWindow")
+    }
+    private var subscriptionsSection: some View {
+        detailGroup("Subscriptions") {
+            if rows.isEmpty {
+                Text("No subscriptions").foregroundStyle(StudentPalette.secondary)
+            }
+            ForEach($rows) { $row in
+                DisclosureGroup(isExpanded: Binding(
+                    get: { expandedClasses.contains(row.className) },
+                    set: { if $0 { expandedClasses.insert(row.className) } else { expandedClasses.remove(row.className) } }
+                )) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        if row.editable {
+                            TextField("Student name", text: $row.name).textContentType(.name)
+                                .textFieldStyle(.plain).padding(10)
+                                .background(StudentPalette.alternate, in: RoundedRectangle(cornerRadius: 8))
+                            Picker("AI preference", selection: $row.aiEnabled) {
+                                Text("Not set").tag(nil as Int?)
+                                Text("Enabled").tag(1 as Int?)
+                                Text("Disabled").tag(0 as Int?)
+                            }.disabled(row.status == "waiting_for_class")
+                            Picker("Subscription", selection: $row.status) {
+                                Text("Active").tag("active")
+                                Text("Waiting for class").tag("waiting_for_class")
+                            }.onChange(of: row.status) { _, status in
+                                if status == "waiting_for_class" { row.aiEnabled = nil }
+                            }
+                            Button("Remove this class", role: .destructive) { removeClass = row.className }
+                        } else {
+                            Text("Legacy subscription preserved. This class cannot be edited here.")
+                                .font(.caption).foregroundStyle(StudentPalette.secondary)
+                        }
+                    }.padding(.top, 10).disabled(!canSave)
+                } label: {
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(ClasseraClass.title(row.className)).font(.subheadline.weight(.semibold)).foregroundStyle(.white)
+                        HStack(spacing: 8) {
+                            Text(row.status == "active" ? "Active" : "Waiting for class")
+                                .foregroundStyle(row.status == "active" ? StudentPalette.secondary : .yellow)
+                            Text("·")
+                            Text("AI: " + ClasseraSubscriptionSummary.aiLabel(row))
+                        }.font(.caption).foregroundStyle(StudentPalette.secondary)
+                    }.padding(.vertical, 3)
+                }
+                Divider()
+            }
+            ForEach(["12F", "12E"].filter { klass in !rows.contains { $0.className == klass } }, id: \.self) { klass in
+                Button {
+                    rows.append(ClasseraSubscription(className: klass, name: rows.first?.name ?? student?.signupSession?.name ?? "",
+                                                     aiEnabled: nil, status: "active"))
+                    expandedClasses.insert(klass)
+                } label: { Label("Add " + ClasseraClass.title(klass), systemImage: "plus.circle") }
+                    .disabled(!canSave)
+            }
+            if student?.hasPendingClass == true {
+                NavigationLink { ClasseraMonitoringView(api: api) } label: {
+                    Label("Waiting list and invitation preview", systemImage: "person.badge.clock")
+                }
+                Text("Class-wide sending remains disabled until the approved template is verified.")
+                    .font(.caption2).foregroundStyle(StudentPalette.secondary)
+            }
+        }
+    }
+    private var messagingSection: some View {
+        detailGroup("Messaging") {
+            NavigationLink { ClasseraMonitoringView(api: api, initialTab: 1, initialSearch: phone) } label: {
+                detailAction("Delivery history", icon: "doc.text")
+            }.disabled(!loaded || busy)
+            Divider()
+            Menu {
+                ForEach(rows.filter { $0.editable && $0.status == "active" }) { row in
+                    Button("Force-send " + ClasseraClass.title(row.className)) { reportClass = row.className }
+                }
+            } label: { detailAction("Send daily report to this person", icon: "paperplane") }
+                .disabled(!loaded || busy || student?.activityStatus != .allowed || !api.canControl ||
+                          !rows.contains { $0.editable && $0.status == "active" })
+                .accessibilityIdentifier("classera.student.sendReport")
+            Text("One person only. Can resend a delivered report. Confirmation and device authorization are required.")
+                .font(.caption2).foregroundStyle(StudentPalette.secondary)
+            Button("Refresh report availability") { Task { await api.refreshAll() } }
+                .font(.caption).disabled(busy || api.loading || api.servicesLoading)
+        }
+    }
+    private var managementSection: some View {
+        detailGroup("Management") {
+            if let student {
+                ForEach(managementActions(student.activityStatus)) { action in
+                    Button(role: action == .remove ? .destructive : nil) { pendingAction = action } label: {
+                        HStack {
+                            Image(systemName: action == .remove ? "trash" : action == .resume ? "play.circle" : "pause.circle")
+                                .frame(width: 20)
+                            Text(action == .suspend ? "Suspend replies & reports" : action.title)
+                            Spacer()
+                            Image(systemName: "chevron.right").font(.caption)
+                        }.padding(.vertical, 5)
+                    }.disabled(!loaded || busy || !api.accessAllowed || student.activityStatus == .unknown)
+                    if action != .remove { Divider() }
+                }
+                Text("Suspend pauses replies and daily reports until Resume. Subscriptions stay saved. Messages already sent to WhatsApp cannot be recalled.")
+                    .font(.caption2).foregroundStyle(StudentPalette.secondary)
+            } else {
+                Text("Load student details to manage access.").foregroundStyle(StudentPalette.secondary)
+            }
+        }
+    }
+    private func detailAction(_ title: String, icon: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon).foregroundStyle(StudentPalette.accent).frame(width: 20)
+            Text(title).foregroundStyle(.white)
+            Spacer(minLength: 8)
+            Image(systemName: "chevron.right").font(.caption).foregroundStyle(StudentPalette.secondary)
+        }.padding(.vertical, 6)
+    }
+    private func detailGroup<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title.uppercased()).font(.caption.weight(.medium)).foregroundStyle(StudentPalette.secondary)
+                .padding(.horizontal, 4)
+            VStack(alignment: .leading, spacing: 12, content: content)
+                .font(.subheadline).padding(14).frame(maxWidth: .infinity, alignment: .leading)
+                .background(StudentPalette.surface, in: RoundedRectangle(cornerRadius: 12))
+        }
+    }
     private func reload() async {
         guard !busy && api.accessAllowed else { return }
         generation += 1; let epoch = generation; busy = true; loaded = false
@@ -296,7 +441,7 @@ struct ClasseraStudentEditor: View {
         do {
             let result = try await api.loadClasseraStudent(phone: phone)
             guard epoch == generation && api.accessAllowed && !Task.isCancelled else { return }
-            student = result; rows = result.subscriptions; loaded = true; message = nil
+            student = result; rows = result.subscriptions; windowInstant = .now; loaded = true; message = nil
         } catch { if epoch == generation && !ServerAPI.isRefreshCancellation(error) { message = error.localizedDescription } }
     }
     private func save() async {
@@ -308,7 +453,7 @@ struct ClasseraStudentEditor: View {
         do {
             let result = try await api.saveClasseraStudent(phone: phone, payload: payload)
             guard epoch == generation && api.accessAllowed else { return }
-            self.student = result; rows = result.subscriptions; message = "Saved. No WhatsApp message was sent."
+            self.student = result; rows = result.subscriptions; windowInstant = .now; message = "Saved. No WhatsApp message was sent."
         } catch {
             guard epoch == generation else { return }
             busy = false; loaded = false

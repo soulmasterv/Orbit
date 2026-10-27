@@ -25,13 +25,14 @@ struct ClasseraStudent: Codable, Identifiable {
     let subscriptions: [ClasseraSubscription]
     let signupSession: ClasseraSignup?
     let revision: String
+    let whatsappWindows: [ClasseraWhatsAppWindow]?
     private let activityStatusValue: String?
     var activityStatus: StudentActivityStatus { StudentActivityStatus(rawValue: activityStatusValue ?? "") ?? .unknown }
     var id: String { phone }
     var displayName: String { subscriptions.first?.name ?? signupSession?.name ?? "Onboarding student" }
     var maskedPhone: String { "•••• " + phone.suffix(4) }
     var hasPendingClass: Bool { subscriptions.contains { $0.status == "waiting_for_class" } }
-    enum CodingKeys: String, CodingKey { case phone, subscriptions, revision; case signupSession = "signup_session", activityStatusValue = "activity_status" }
+    enum CodingKeys: String, CodingKey { case phone, subscriptions, revision; case signupSession = "signup_session", activityStatusValue = "activity_status", whatsappWindows = "whatsapp_windows" }
 }
 
 enum ClasseraNameEdit {
@@ -98,3 +99,38 @@ enum ClasseraClass {
     }
 }
 
+
+enum ClasseraSubscriptionSummary {
+    static func aiLabel(_ row: ClasseraSubscription) -> String {
+        guard row.status != "waiting_for_class" else { return "Not set" }
+        switch row.aiEnabled { case 1: return "On"; case 0: return "Off"; default: return "Not set" }
+    }
+}
+
+/// Optional read-only capability. Missing data is never inferred from signup,
+/// subscription updates, delivery/read receipts or the school-assistant database.
+struct ClasseraWhatsAppWindow: Codable, Identifiable {
+    let className: String
+    let windowOpen: Bool?
+    let secondsLeft: Int?
+    let lastInboundAt: Int?
+    var id: String { className }
+    enum CodingKeys: String, CodingKey {
+        case className = "class_name", windowOpen = "window_open"
+        case secondsLeft = "seconds_left", lastInboundAt = "last_inbound_at"
+    }
+    func remainingSeconds(since received: ContinuousClock.Instant, at now: ContinuousClock.Instant = .now) -> TimeInterval? {
+        guard let open = windowOpen, let seconds = secondsLeft, (0...86400).contains(seconds),
+              let inbound = lastInboundAt, inbound > 0 else { return nil }
+        if !open { return seconds == 0 ? 0 : nil }
+        let elapsed = received.duration(to: now).components
+        let duration = max(0, Double(elapsed.seconds) + Double(elapsed.attoseconds) / 1e18)
+        return max(0, Double(seconds) - duration)
+    }
+    func label(since received: ContinuousClock.Instant, at now: ContinuousClock.Instant = .now) -> String {
+        guard let seconds = remainingSeconds(since: received, at: now) else { return "Unavailable" }
+        guard seconds > 0 else { return "Closed" }
+        let minutes = Int(ceil(seconds / 60))
+        return String(format: "Open · %02ld:%02ld", minutes / 60, minutes % 60)
+    }
+}

@@ -32,6 +32,43 @@ final class ClasseraStudentsTests: XCTestCase {
         XCTAssertEqual(ClasseraClass.title("classera-1"),"Classera 1 (F)")
         XCTAssertEqual(ClasseraClass.title("12E"),"Classera 2 (E)")
     }
+    func testClasseraWindowIsOptionalAndNeverInferredFromSubscriptionDates() throws {
+        let legacy = try JSONDecoder().decode(ClasseraStudent.self, from: record)
+        XCTAssertNil(legacy.whatsappWindows)
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: record) as? [String: Any])
+        json["whatsapp_windows"] = [
+            ["class_name": "12F", "window_open": true, "seconds_left": 5400, "last_inbound_at": 1793010000],
+            ["class_name": "12E", "window_open": false, "seconds_left": 0, "last_inbound_at": 1792900000]
+        ]
+        let student = try JSONDecoder().decode(ClasseraStudent.self, from: JSONSerialization.data(withJSONObject: json))
+        let start = ContinuousClock.now
+        let open = try XCTUnwrap(student.whatsappWindows?.first)
+        XCTAssertEqual(open.label(since: start, at: start), "Open · 01:30")
+        XCTAssertEqual(open.remainingSeconds(since: start, at: start.advanced(by: .seconds(60))), 5340)
+        XCTAssertEqual(open.label(since: start, at: start.advanced(by: .seconds(5400))), "Closed")
+        XCTAssertEqual(student.whatsappWindows?.last?.label(since: start, at: start), "Closed")
+        // Activity/AI preferences are separate; window data never enables an action.
+        XCTAssertEqual(student.activityStatus, legacy.activityStatus)
+        XCTAssertEqual(student.subscriptions, legacy.subscriptions)
+    }
+    func testClasseraWindowInvalidOrUnverifiedDataIsUnavailable() {
+        let start = ContinuousClock.now
+        for item in [
+            ClasseraWhatsAppWindow(className: "12F", windowOpen: nil, secondsLeft: nil, lastInboundAt: nil),
+            ClasseraWhatsAppWindow(className: "12F", windowOpen: true, secondsLeft: 86401, lastInboundAt: 1793010000),
+            ClasseraWhatsAppWindow(className: "12F", windowOpen: true, secondsLeft: -1, lastInboundAt: 1793010000),
+            ClasseraWhatsAppWindow(className: "12F", windowOpen: false, secondsLeft: 30, lastInboundAt: 1793010000),
+            ClasseraWhatsAppWindow(className: "12F", windowOpen: true, secondsLeft: 5400, lastInboundAt: nil)
+        ] {
+            XCTAssertNil(item.remainingSeconds(since: start, at: start))
+            XCTAssertEqual(item.label(since: start, at: start), "Unavailable")
+        }
+    }
+    func testWaitingSubscriptionNeverDisplaysEnabledAIPreference() {
+        let row = ClasseraSubscription(className: "12E", name: "Student", aiEnabled: 1, status: "waiting_for_class")
+        XCTAssertEqual(ClasseraSubscriptionSummary.aiLabel(row), "Not set")
+        XCTAssertEqual(ClasseraSubscriptionSummary.aiLabel(ClasseraSubscription(className: "12F", name: "Student", aiEnabled: 1, status: "active")), "On")
+    }
     func testOwnerCredentialOnlyOnOrbitOriginAndNoStudentKey() async throws {
         let data = record
         MockURLProtocol.handler = { _ in (200,data) }
@@ -212,6 +249,50 @@ final class ClasseraStudentsTests: XCTestCase {
             window.isHidden = true
         }
     }
+    func testGroupedClasseraStudentDetailsWithWindowIPhoneLayouts() async throws {
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: record) as? [String: Any])
+        json["subscriptions"] = [
+            ["class_name": "12F", "name": "Ahmed Ali", "ai_enabled": 1, "status": "active"],
+            ["class_name": "12E", "name": "Ahmed Ali", "ai_enabled": NSNull(), "status": "waiting_for_class"]
+        ]
+        json["whatsapp_windows"] = [
+            ["class_name": "12F", "window_open": true, "seconds_left": 5400, "last_inbound_at": 1793010000],
+            ["class_name": "12E", "window_open": false, "seconds_left": 0, "last_inbound_at": 1792900000]
+        ]
+        let data = try JSONSerialization.data(withJSONObject: json)
+        MockURLProtocol.handler = { _ in (200, data) }
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        for large in [false, true] {
+            let window = UIWindow(windowScene: scene); window.frame = scene.coordinateSpace.bounds
+            window.rootViewController = UIHostingController(rootView: NavigationStack {
+                ClasseraStudentEditor(api: api(), phone: "201000000001")
+            }.preferredColorScheme(.dark).environment(\.scenePhase, .active)
+                .environment(\.dynamicTypeSize, large ? .accessibility1 : .large))
+            window.makeKeyAndVisible(); window.endEditing(true)
+            let ready = expectation(description: "Student details loaded")
+            DispatchQueue.main.asyncAfter(deadline: .now()+1.5) { ready.fulfill() }
+            await fulfillment(of: [ready], timeout: 5)
+            window.layoutIfNeeded()
+            for lower in [false, true] {
+                if lower, let scroll = detailsScroll(window.rootViewController!.view) {
+                    scroll.setContentOffset(CGPoint(x: 0, y: max(0, scroll.contentSize.height-scroll.bounds.height)), animated: false)
+                    window.layoutIfNeeded()
+                }
+                let image = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in window.drawHierarchy(in: window.bounds, afterScreenUpdates: true) }
+                let attachment = XCTAttachment(image: image)
+                attachment.name = "classera-grouped-\(large ? "large-text" : "standard")-\(lower ? "management" : "profile")"
+                attachment.lifetime = .keepAlways; add(attachment)
+            }
+            window.isHidden = true
+        }
+        XCTAssertTrue(MockURLProtocol.requests.allSatisfy { $0.httpMethod == "GET" })
+    }
+    private func detailsScroll(_ view: UIView) -> UIScrollView? {
+        if let scroll = view as? UIScrollView, scroll.contentSize.height > scroll.bounds.height + 100 { return scroll }
+        for child in view.subviews { if let found = detailsScroll(child) { return found } }
+        return nil
+    }
+
 }
 
 
