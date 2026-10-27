@@ -25,7 +25,7 @@ struct ClasseraMonitoringView: View {
     }
     private var query: [String: String] {
         if tab == 2 {
-            return ["from": Self.day(Date().addingTimeInterval(Double(1-days)*86400)), "to": Self.day(Date()), "class_id": classID]
+            return ["from": Self.day(Self.periodStart(days)), "to": Self.day(Date()), "class_id": classID]
         }
         return ["search": search, "class_id": classID, "template": template, "status": status,
                 "sort": sort, "direction": ascending ? "asc" : "desc", "offset": String(offset), "limit": "30",
@@ -70,6 +70,9 @@ struct ClasseraMonitoringView: View {
             do { try await Task.sleep(for: .milliseconds(300)) } catch { return }
             await refresh()
         }
+        .onChange(of: sort) { _, _ in offset = 0 }
+        .onChange(of: ascending) { _, _ in offset = 0 }
+        .onChange(of: classID) { _, _ in offset = 0 }
         .onChange(of: phase) { _, value in if value == .background { store.clear() } }
         .onChange(of: api.accessAllowed) { _, value in if !value { store.clear() } }
         .onDisappear { store.clear() }
@@ -300,6 +303,10 @@ struct ClasseraMonitoringView: View {
         case "reserved", "unknown": return .yellow
         default: return .gray
         }
+    }
+    static func periodStart(_ days: Int) -> Date {
+        var calendar = Calendar(identifier: .gregorian); calendar.timeZone = TimeZone(identifier: "Africa/Cairo")!
+        return calendar.date(byAdding: .day, value: 1-days, to: Date()) ?? Date()
     }
     static func day(_ date: Date) -> String {
         let formatter = DateFormatter(); formatter.calendar = Calendar(identifier: .gregorian)

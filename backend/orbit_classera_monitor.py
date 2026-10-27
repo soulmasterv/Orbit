@@ -68,8 +68,8 @@ class Store:
               id TEXT PRIMARY KEY,report TEXT NOT NULL,class_id TEXT NOT NULL,report_date TEXT,created_at INTEGER NOT NULL,expected_known INTEGER NOT NULL);
             CREATE TABLE IF NOT EXISTS orbit_report_skips(run_id TEXT NOT NULL,phone TEXT NOT NULL,PRIMARY KEY(run_id,phone));
             CREATE TABLE IF NOT EXISTS orbit_report_targets(
-              report TEXT NOT NULL,class_id TEXT NOT NULL,report_date TEXT,phone TEXT NOT NULL,
-              PRIMARY KEY(report,class_id,phone));
+              report TEXT NOT NULL,class_id TEXT NOT NULL,report_date TEXT NOT NULL,phone TEXT NOT NULL,
+              PRIMARY KEY(report,class_id,report_date,phone));
             CREATE TABLE IF NOT EXISTS orbit_delivery_attempts(
               id TEXT PRIMARY KEY,legacy_key TEXT UNIQUE,run_id TEXT,report TEXT NOT NULL,
               report_date TEXT,class_id TEXT NOT NULL,phone TEXT NOT NULL,template TEXT,
@@ -112,7 +112,7 @@ class Store:
         with self.connect() as c:
             c.execute("INSERT INTO orbit_report_runs VALUES(?,?,?,?,?,?)",(run,report,class_id,day,now,not forced))
             c.executemany("INSERT OR IGNORE INTO orbit_report_targets VALUES(?,?,?,?)",
-                          [(report,class_id,day,p) for p in set(phones)] if not forced else [])
+                          [(report,class_id,day or '',p) for p in set(phones)] if not forced else [])
         return run
 
     def attempt(self, run, phone, template):

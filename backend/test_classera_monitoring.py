@@ -4,6 +4,8 @@ import tempfile
 import time
 import unittest
 import uuid
+from concurrent.futures import ThreadPoolExecutor
+from unittest.mock import patch
 from pathlib import Path
 from flask import Flask
 from orbit_classera_monitor import Store, report_date
@@ -173,3 +175,28 @@ class ClasseraMonitoringTests(unittest.TestCase):
         self.store.result(identifier,"accepted","race")
         self.assertEqual(self.store.history({})["records"][0]["status"],"read")
         self.assertEqual(self.store.statistics({"from":"2026-10-26","to":"2026-10-26"})["delivery_rate"],100)
+
+    def test_same_title_in_different_year_keeps_separate_expected_targets(self):
+        with patch("orbit_classera_monitor.report_date",return_value="2026-10-26"):
+            self.store.begin("12F 26_10","12F",["201000000001"])
+        with patch("orbit_classera_monitor.report_date",return_value="2027-10-26"):
+            self.store.begin("12F 26_10","12F",["201000000001"])
+        self.assertEqual(self.store.statistics({"from":"2027-10-26","to":"2027-10-26"})["expected"],1)
+
+    def test_concurrent_different_uuid_cannot_reserve_same_enrollment(self):
+        class Deferred:
+            def submit(self,*args):pass
+            def shutdown(self,**kwargs):pass
+        service=self.verified_service();service.pool.shutdown(wait=True);service.pool=Deferred()
+        preview=service.preview("12F")
+        bodies=[self.post_body(preview),self.post_body(preview)]
+        def submit(body):
+            try:return service.submit(body)[1]
+            except Problem as error:return error.status
+        with ThreadPoolExecutor(max_workers=2) as workers:
+            outcomes=list(workers.map(submit,bodies))
+        self.assertEqual(sorted(outcomes),[202,409])
+        with self.store.connect(True) as c:
+            self.assertEqual(c.execute("SELECT COUNT(*) FROM orbit_class_ready_operations").fetchone()[0],1)
+            self.assertEqual(c.execute("SELECT COUNT(*) FROM orbit_class_ready_recipients").fetchone()[0],2)
+        self.assertEqual(self.calls,[])
