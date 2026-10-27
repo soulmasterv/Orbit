@@ -5,10 +5,12 @@ scoped server-side readers/actions after inspecting the real upstream systems.
 Never bind an extra port or expose the providers themselves to the client.
 """
 from datetime import datetime
+import re
 from threading import Lock
 from time import monotonic
 
-KEY_IDS = tuple(f"key-{i}" for i in range(1, 11))
+def valid_key_id(value):
+    return isinstance(value,str) and re.fullmatch(r"key-[1-9][0-9]{0,2}|key-1000",value) is not None
 CLASSERA_IDS = ("classera-1", "classera-2", "classera-3")
 PADEL_IDS = ("watcher", "bot", "dashboard", "whatsapp")
 STATES = {"working", "rate limited", "invalid", "high demand", "google issue",
@@ -31,7 +33,7 @@ def timestamp(value):
 class ServicesAdapter:
     def __init__(self, reader=None, gemini_tests=None, classera_fires=None):
         self.reader = reader
-        self.tests = {k: v for k, v in (gemini_tests or {}).items() if k in KEY_IDS and callable(v)}
+        self.tests = {k: v for k, v in (gemini_tests or {}).items() if valid_key_id(k) and callable(v)}
         self.fires = {k: v for k, v in (classera_fires or {}).items() if k in CLASSERA_IDS and callable(v)}
         self.lock = Lock()
         self.busy = set()
@@ -53,7 +55,7 @@ class ServicesAdapter:
             return 404, {"ok": False}
         group, ident, action = parts[3:]
         callback = None
-        if group == "gemini" and action == "test" and ident in KEY_IDS:
+        if group == "gemini" and action == "test" and valid_key_id(ident):
             callback = self.tests.get(ident)
         elif group == "classera" and action == "fire" and ident in CLASSERA_IDS:
             callback = self.fires.get(ident)
@@ -79,7 +81,8 @@ class ServicesAdapter:
         classera = raw.get("classera", {})
         padel = raw.get("padel", {})
         result = {"geminiHealth": state(raw.get("geminiHealth")), "gemini": [], "classera": [], "padel": []}
-        for ident in KEY_IDS:
+        identities=sorted((k for k in gemini if valid_key_id(k)),key=lambda k:int(k.split("-")[1]))
+        for ident in identities:
             item = gemini.get(ident, {})
             # Friendly names are generated locally, not copied from unsafe upstream fields.
             result["gemini"].append({"id": ident, "name": "Gemini " + ident.split("-")[-1],
@@ -87,10 +90,91 @@ class ServicesAdapter:
                 "lastGenerationCheck": timestamp(item.get("lastGenerationCheck")), "canTest": ident in self.tests})
         for ident in CLASSERA_IDS:
             item = classera.get(ident, {})
-            result["classera"].append({"id": ident, "name": "Classera " + ident.split("-")[-1],
-                "status": state(item.get("status")), "schedulerStatus": state(item.get("schedulerStatus")),
-                "webhookStatus": state(item.get("webhookStatus")), "lastRun": timestamp(item.get("lastRun")),
-                "lastReport": timestamp(item.get("lastReport")), "canFire": ident in self.fires})
+
+            assessments = []
+            for exam in item.get("upcomingAssessments", [])[:6]:
+                if not isinstance(exam, dict):
+                    continue
+
+                assessments.append({
+                    "date": str(exam.get("date") or "")[:10],
+                    "label": str(exam.get("label") or "")[:120],
+                    "type": str(exam.get("type") or "")[:30],
+                    "week": exam.get("week")
+                        if isinstance(exam.get("week"), int)
+                        else None,
+                    "subjects": [
+                        str(subject)[:80]
+                        for subject in exam.get("subjects", [])[:10]
+                        if isinstance(subject, str)
+                    ],
+                })
+
+            cache = item.get("aiCache", {})
+            if not isinstance(cache, dict):
+                cache = {}
+
+            recent_cache = []
+            for entry in cache.get("recent", [])[:5]:
+                if not isinstance(entry, dict):
+                    continue
+
+                recent_cache.append({
+                    "hash": str(entry.get("hash") or "")[:64],
+                    "updatedAt": timestamp(entry.get("updatedAt")),
+                    "hasSummary": bool(entry.get("hasSummary")),
+                    "hasShortSummary": bool(entry.get("hasShortSummary")),
+                    "hasExamMaterial": bool(entry.get("hasExamMaterial")),
+                })
+
+            result["classera"].append({
+                "id": ident,
+                "name": "Classera " + ident.split("-")[-1],
+                "status": state(item.get("status")),
+                "schedulerStatus": state(item.get("schedulerStatus")),
+                "webhookStatus": state(item.get("webhookStatus")),
+                "lastRun": timestamp(item.get("lastRun")),
+                "nextRun": timestamp(item.get("nextRun")),
+                "lastRunExitCode": item.get("lastRunExitCode")
+                    if isinstance(item.get("lastRunExitCode"), int)
+                    else None,
+                "lastReport": timestamp(item.get("lastReport")),
+                "lastReportName": str(item.get("lastReportName") or "")[:160] or None,
+                "upcomingAssessments": assessments,
+                "aiCache": {
+                    "count": len(recent_cache),
+                    "recent": recent_cache,
+                },
+                "whatsappStatus": str(
+                    item.get("whatsappStatus") or "Unknown"
+                )[:40],
+                "sendingCount": int(item.get("sendingCount") or 0),
+                "acceptedCount": int(item.get("acceptedCount") or 0),
+                "sentCount": int(item.get("sentCount") or 0),
+                "deliveredCount": int(item.get("deliveredCount") or 0),
+                "readCount": int(item.get("readCount") or 0),
+                "failedCount": int(item.get("failedCount") or 0),
+                "unknownCount": int(item.get("unknownCount") or 0),
+                "latestDeliveryAt": timestamp(
+                    item.get("latestDeliveryAt")
+                ),
+                "latestDeliveryReport": str(
+                    item.get("latestDeliveryReport") or ""
+                )[:160] or None,
+                "recipients": [
+                    str(x)
+                    for x in (item.get("recipients") or [])
+                    if str(x).strip()
+                ],
+                "canEditRecipients": bool(
+                    item.get("canEditRecipients")
+                ),
+                "canForceOne": bool(
+                    item.get("canForceOne")
+                ),
+                "canFire": ident in self.fires,
+                "canForceFire": bool(item.get("canForceFire")),
+            })
         for ident in PADEL_IDS:
             item = padel.get(ident, {})
             result["padel"].append({"id": ident, "name": "Padel " + ident.title(),

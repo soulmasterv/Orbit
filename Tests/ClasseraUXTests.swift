@@ -38,6 +38,27 @@ final class ClasseraUXTests: XCTestCase {
         }
         return try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
     }
+    func testDisabledFaceIDIsUnlockedBeforeFirstRender() async {
+        defaults.set(false, forKey: "appLock.v4")
+        var prompts = 0
+        let session = AppSession(defaults: defaults, authenticate: { prompts += 1 })
+        XCTAssertTrue(session.isUnlocked)
+        await session.activate()
+        XCTAssertTrue(session.isUnlocked)
+        XCTAssertEqual(prompts, 0)
+    }
+    func testGeminiAdditionalKeyCanBeTestedOnlyWhenServerPermits() async throws {
+        let status = Data(#"{"gemini":[{"id":"key-12","name":"Gemini 12","status":"Working","canTest":true}],"classera":[],"padel":[]}"#.utf8)
+        MockURLProtocol.handler = { request in
+            if request.httpMethod == "POST" { return (200, Data(#"{"ok":true}"#.utf8)) }
+            return (200, status)
+        }
+        let server = api()
+        await server.loadServices()
+        await server.serviceAction(ServiceCommand(kind: .testGeminiKey, id: "key-12", name: "Gemini 12"))
+        XCTAssertEqual(MockURLProtocol.requests.filter { $0.httpMethod == "POST" }.count, 1)
+        XCTAssertEqual(MockURLProtocol.requests.first { $0.httpMethod == "POST" }?.url?.path, "/api/services/gemini/key-12/test")
+    }
     func testEgyptianPhoneNormalization() {
         XCTAssertEqual(ClasseraPhone.normalized("01011288486"), "201011288486")
         XCTAssertEqual(ClasseraPhone.normalized(" 201011288486 "), "201011288486")

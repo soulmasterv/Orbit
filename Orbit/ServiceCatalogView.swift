@@ -389,7 +389,7 @@ struct ServiceDetailView: View {
     private func safeGeminiName(_ key: GeminiKeyStatus) -> String {
         // Never render monitor-provided names that could contain an actual key.
         let suffix = key.id.replacingOccurrences(of: "key-", with: "")
-        return Int(suffix).map { (1...10).contains($0) ? "Gemini \($0)" : "Gemini key" } ?? "Gemini key"
+        return Int(suffix).map { (1...1000).contains($0) ? "Gemini \($0)" : "Gemini key" } ?? "Gemini key"
     }
     private func reason(_ capable: Bool?) -> String? {
         if capable != true { return "not enabled by the backend" }

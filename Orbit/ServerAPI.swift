@@ -388,7 +388,7 @@ final class ServerAPI: ObservableObject {
         switch action.kind {
         case .testGeminiKey:
             permitted =
-                (1...10).map { "key-\($0)" }.contains(action.id)
+                (1...1000).map { "key-\($0)" }.contains(action.id)
                 && serviceSnapshot?.gemini?.contains {
                     $0.id == action.id && $0.canTest == true
                 } == true

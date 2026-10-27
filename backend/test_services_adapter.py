@@ -24,7 +24,7 @@ class AdapterTests(unittest.TestCase):
         status, result = adapter.handle("GET", "/api/services", authenticated=True)
         self.assertEqual(status, 200)
         self.assertNotIn("secret-sentinel", json.dumps(result))
-        self.assertEqual(len(result["gemini"]), 10)
+        self.assertEqual(len(result["gemini"]), 1)
         self.assertEqual(len(result["classera"]), 3)
         self.assertEqual(result["padel"][-1]["status"], "Online")
         self.assertEqual(result["padel"][-1]["deliveryStatus"], "Billing Required")
@@ -35,3 +35,20 @@ class AdapterTests(unittest.TestCase):
         self.assertEqual(adapter.handle("GET", "/api/services", authenticated=True), (503, {"ok": False}))
 
 if __name__ == "__main__": unittest.main()
+
+class DynamicKeysTests(unittest.TestCase):
+    def test_all_configured_keys_and_only_registered_tests(self):
+        raw={"gemini":{f"key-{i}":{"status":"Working","apiKey":"private-sentinel","name":"private-sentinel"} for i in range(1,13)}}
+        raw["gemini"]["../unsafe"]={"status":"Working"}
+        calls=[]
+        adapter=ServicesAdapter(reader=lambda:raw,gemini_tests={"key-12":lambda:calls.append(12),"key-9999":lambda:calls.append(9999)})
+        code,data=adapter.handle("GET","/api/services",authenticated=True)
+        self.assertEqual(code,200);self.assertEqual(len(data["gemini"]),12)
+        self.assertEqual(data["gemini"][-1]["name"],"Gemini 12")
+        self.assertNotIn("private-sentinel",json.dumps(data))
+        self.assertEqual(adapter.handle("POST","/api/services/gemini/key-12/test",authenticated=True)[0],200)
+        self.assertEqual(adapter.handle("POST","/api/services/gemini/key-13/test",authenticated=True)[0],404)
+        self.assertEqual(calls,[12])
+    def test_empty_monitor_does_not_invent_ten_keys(self):
+        result=ServicesAdapter(reader=lambda:{"gemini":{}}).handle("GET","/api/services",authenticated=True)[1]
+        self.assertEqual(result["gemini"],[])

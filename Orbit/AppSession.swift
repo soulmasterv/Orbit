@@ -28,6 +28,7 @@ final class AppSession: ObservableObject {
         self.authenticate = authenticate
         self.defaults = defaults
         self.uptime = uptime
+        if !lockEnabled { isUnlocked = true; automaticUnlockPending = false }
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("--ui-preview") &&
             !ProcessInfo.processInfo.arguments.contains("--preview-lock") {
@@ -78,7 +79,7 @@ struct AppRootView: View {
     @StateObject private var mobile: MobileStore
     @StateObject private var session = AppSession()
     @Environment(\.scenePhase) private var phase
-    @State private var privacyCover = true
+    @State private var privacyCover = false
 
     init() {
         let api = ServerAPI(accessAllowed: false, snapshotStore: DashboardSnapshotStore())
@@ -94,7 +95,7 @@ struct AppRootView: View {
                     .disabled(privacyCover)
                     .accessibilityHidden(privacyCover)
             }
-            if !session.isUnlocked || privacyCover {
+            if session.lockEnabled && (!session.isUnlocked || privacyCover) {
                 LockScreen(session: session, privacyOnly: session.isUnlocked)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Brand.background.ignoresSafeArea())

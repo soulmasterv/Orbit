@@ -184,7 +184,6 @@ struct ClasseraStudentEditor: View {
     @State private var loaded = false
     @State private var generation = 0
     @State private var message: String?
-    @State private var confirmSave = false
     @State private var editName = false
     @State private var nameDraft = ""
     @State private var nameError: String?
@@ -196,7 +195,6 @@ struct ClasseraStudentEditor: View {
     @State private var messaging: ClasseraMessagingResponse?
     @Environment(\.dismiss) private var dismiss
     private var canSave: Bool { loaded && !busy && api.accessAllowed && student?.signupSession == nil }
-    private var hasChanges: Bool { loaded && (student.map { rows != $0.subscriptions } ?? false) }
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
@@ -223,23 +221,6 @@ struct ClasseraStudentEditor: View {
         .scrollDismissesKeyboard(.interactively)
         .navigationTitle("Student details").navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(busy)
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            VStack(spacing: 6) {
-                Button { confirmSave = true } label: {
-                    Text("Save changes").font(.subheadline.weight(.semibold))
-                        .frame(maxWidth: .infinity).padding(.vertical, 13)
-                        .foregroundStyle(canSave && hasChanges ? .white : StudentPalette.secondary)
-                        .background(canSave && hasChanges ? StudentPalette.accent : StudentPalette.surface,
-                                    in: RoundedRectangle(cornerRadius: 10))
-                }.buttonStyle(.plain).disabled(!canSave || !hasChanges)
-                    .accessibilityIdentifier("classera.student.save")
-                if hasChanges {
-                    Text("Unsaved changes · Saving does not send a message")
-                        .font(.caption2).foregroundStyle(StudentPalette.secondary)
-                }
-            }.padding(.horizontal, 16).padding(.vertical, 10).background(.black)
-                .overlay(alignment: .top) { Divider().overlay(StudentPalette.border) }
-        }
         .sheet(isPresented: $editName) {
             NavigationStack {
                 Form {
@@ -271,13 +252,13 @@ struct ClasseraStudentEditor: View {
             if !loaded && !busy { await reload() }
         }
         .onDisappear { generation += 1; loaded = false }
-        .confirmationDialog("Save Classera subscriptions?", isPresented: $confirmSave, titleVisibility: .visible) {
-            Button("Save") { Task { await save() } }; Button("Cancel", role: .cancel) {}
-        } message: { Text("This includes any class removals. Authorize on your iPhone next. No message is sent now.") }
         .confirmationDialog("Remove this subscription?", isPresented: Binding(get: { removeClass != nil }, set: { if !$0 { removeClass = nil } }), titleVisibility: .visible) {
-            Button("Remove class", role: .destructive) { rows.removeAll { $0.className == removeClass }; removeClass = nil }
+            Button("Remove class", role: .destructive) {
+                rows.removeAll { $0.className == removeClass }; removeClass = nil
+                Task { await save() }
+            }
             Button("Cancel", role: .cancel) { removeClass = nil }
-        } message: { Text("The change takes effect only after Save. Other classes and the other student database remain unchanged.") }
+        } message: { Text("This saves immediately after device authorization. Other classes and the other student database remain unchanged.") }
         .confirmationDialog(pendingAction.map { "\($0.title)?" } ?? "Confirm action", isPresented: Binding(get: { pendingAction != nil }, set: { if !$0 { pendingAction = nil } }), titleVisibility: .visible, presenting: pendingAction) { action in
             Button(action.title, role: action == .block || action == .remove ? .destructive : nil) { Task { await manage(action) } }
             Button("Cancel", role: .cancel) {}
@@ -345,6 +326,8 @@ struct ClasseraStudentEditor: View {
     }
     private var subscriptionsSection: some View {
         detailGroup("Subscriptions") {
+            Text("Each change saves immediately after device authorization. No message is sent.")
+                .font(.caption).foregroundStyle(StudentPalette.secondary)
             if rows.isEmpty {
                 Text("No subscriptions").foregroundStyle(StudentPalette.secondary)
             }
@@ -359,7 +342,11 @@ struct ClasseraStudentEditor: View {
                     if row.editable {
                         Menu {
                             ForEach(ClasseraSubscriptionMode.allCases) { mode in
-                                Button(mode.rawValue) { row = mode.applying(to: row) }
+                                Button(mode.rawValue) {
+                                    guard canSave else { return }
+                                    row = mode.applying(to: row)
+                                    Task { await save() }
+                                }
                             }
                         } label: {
                             HStack(spacing: 5) {
@@ -376,6 +363,7 @@ struct ClasseraStudentEditor: View {
                     rows.append(ClasseraSubscription(className: klass, name: student?.profileName ?? rows.first?.name ?? student?.signupSession?.name ?? "",
                                                      aiEnabled: nil, status: "disabled"))
                     expandedClasses.insert(klass)
+                    Task { await save() }
                 } label: { Label("Add " + ClasseraClass.title(klass), systemImage: "plus.circle") }
                     .disabled(!canSave)
             }
@@ -513,7 +501,7 @@ struct ClasseraStudentEditor: View {
                 message = error as? ClasseraDirectoryFailure == .conflict
                     ? "The database changed or signup is in progress. Review the latest values before saving again."
                     : "The save may have succeeded. Latest values were requested; review them before another attempt."
-            } else { message = error.localizedDescription }
+            } else { rows = student.subscriptions; loaded = true; message = DeviceAuthorization.isCancellation(error) ? "Change cancelled. Previous selection restored." : error.localizedDescription }
         }
         if epoch == generation { busy = false }
     }
