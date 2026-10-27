@@ -25,14 +25,15 @@ struct ClasseraStudent: Codable, Identifiable {
     let subscriptions: [ClasseraSubscription]
     let signupSession: ClasseraSignup?
     let revision: String
+    let profileName: String?
     let whatsappWindows: [ClasseraWhatsAppWindow]?
     private let activityStatusValue: String?
     var activityStatus: StudentActivityStatus { StudentActivityStatus(rawValue: activityStatusValue ?? "") ?? .unknown }
     var id: String { phone }
-    var displayName: String { subscriptions.first?.name ?? signupSession?.name ?? "Onboarding student" }
+    var displayName: String { profileName ?? subscriptions.first?.name ?? signupSession?.name ?? "Onboarding student" }
     var maskedPhone: String { "•••• " + phone.suffix(4) }
     var hasPendingClass: Bool { subscriptions.contains { $0.status == "waiting_for_class" } }
-    enum CodingKeys: String, CodingKey { case phone, subscriptions, revision; case signupSession = "signup_session", activityStatusValue = "activity_status", whatsappWindows = "whatsapp_windows" }
+    enum CodingKeys: String, CodingKey { case phone, subscriptions, revision; case signupSession = "signup_session", activityStatusValue = "activity_status", whatsappWindows = "whatsapp_windows", profileName = "profile_name" }
 }
 
 enum ClasseraNameEdit {
@@ -74,9 +75,9 @@ struct ClasseraStudentEdit: Encodable {
               Set(known.map(\.className)).count == known.count,
               known.allSatisfy({ !$0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && $0.name.count <= 120 &&
                   !$0.name.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) &&
-                  ["active", "waiting_for_class"].contains($0.status) &&
+                  ["active", "waiting_for_class", "disabled"].contains($0.status) &&
                   ($0.aiEnabled == nil || $0.aiEnabled == 0 || $0.aiEnabled == 1) &&
-                  ($0.status != "waiting_for_class" || $0.aiEnabled == nil) }) else {
+                  (!["waiting_for_class", "disabled"].contains($0.status) || $0.aiEnabled == nil) }) else {
             throw APIError.message("Enter a name for each class. Finish any WhatsApp signup before editing here.")
         }
         expectedRevision = student.revision
@@ -114,10 +115,11 @@ struct ClasseraWhatsAppWindow: Codable, Identifiable {
     let windowOpen: Bool?
     let secondsLeft: Int?
     let lastInboundAt: Int?
+    var canSendPlaintext: Bool? = nil
     var id: String { className }
     enum CodingKeys: String, CodingKey {
         case className = "class_name", windowOpen = "window_open"
-        case secondsLeft = "seconds_left", lastInboundAt = "last_inbound_at"
+        case secondsLeft = "seconds_left", lastInboundAt = "last_inbound_at", canSendPlaintext = "can_send_plaintext"
     }
     func remainingSeconds(since received: ContinuousClock.Instant, at now: ContinuousClock.Instant = .now) -> TimeInterval? {
         guard let open = windowOpen, let seconds = secondsLeft, (0...86400).contains(seconds),
@@ -132,5 +134,60 @@ struct ClasseraWhatsAppWindow: Codable, Identifiable {
         guard seconds > 0 else { return "Closed" }
         let minutes = Int(ceil(seconds / 60))
         return String(format: "Open · %02ld:%02ld", minutes / 60, minutes % 60)
+    }
+}
+
+enum ClasseraSubscriptionMode: String, CaseIterable, Identifiable {
+    case ai = "AI", noAI = "No AI", disabled = "Disabled"
+    var id: String { rawValue }
+    static func current(_ row: ClasseraSubscription) -> Self? {
+        if row.status == "disabled" { return .disabled }
+        guard row.status == "active" else { return nil }
+        switch row.aiEnabled { case 1: return .ai; case 0: return .noAI; default: return nil }
+    }
+    func applying(to row: ClasseraSubscription) -> ClasseraSubscription {
+        var result = row
+        result.status = self == .disabled ? "disabled" : "active"
+        result.aiEnabled = self == .disabled ? nil : self == .ai ? 1 : 0
+        return result
+    }
+}
+struct ClasseraProfilePayload: Encodable {
+    let name: String
+    let expectedRevision: String
+    enum CodingKeys: String, CodingKey { case name; case expectedRevision = "expected_revision" }
+}
+struct ClasseraCreatePayload: Encodable { let phone: String; let name: String }
+struct ClasseraMessagingResponse: Decodable {
+    let version: Int
+    let phone: String
+    let whatsappWindows: [ClasseraWhatsAppWindow]
+    enum CodingKeys: String, CodingKey { case version, phone; case whatsappWindows = "whatsapp_windows" }
+}
+struct ClasseraTextPayload: Codable {
+    let requestID: String
+    let className: String
+    let text: String
+    enum CodingKeys: String, CodingKey { case requestID = "request_id", className = "class_name", text }
+}
+struct ClasseraTextOperation: Decodable {
+    let id: String
+    let phone: String
+    let status: String
+    let messageID: String?
+    enum CodingKeys: String, CodingKey { case id, phone, status; case messageID = "message_id" }
+}
+
+struct ClasseraTextRejection: Error, LocalizedError {
+    let code: String
+    var errorDescription: String? {
+        switch code {
+        case "window_unavailable", "provider_unavailable": return "The server could not verify the WhatsApp window. Nothing was sent. Refresh before a new action."
+        case "window_closed": return "The WhatsApp window is closed or about to close. Nothing was sent. Refresh the window."
+        case "student_not_eligible": return "This student or subscription is not eligible. Nothing was sent. Refresh their details."
+        case "issuance_throttled": return "Too many message requests. Nothing was sent; wait before a new action."
+        case "unauthorized", "owner_not_permitted": return "Owner authentication failed. Nothing was sent."
+        default: return "Check the message and recipient. Nothing was sent."
+        }
     }
 }

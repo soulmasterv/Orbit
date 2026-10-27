@@ -48,21 +48,37 @@ CREATE TABLE IF NOT EXISTS orbit_student_controls (
 
 Install the shared gate module on the webhook/report Python import path. Check `can_reply` at inbound dispatch and immediately before every outbound message call, and filter active report recipients through it. Enable management only after these guards and the table are deployed together. Existing processes must reload the changed code. Backups and deployment scripts stay on the owner server; they do not contain credentials in this repository.
 
-## Grouped Student Details and 24-hour window capability
 
-Student Details uses the approved grouped design: Profile, Subscriptions (expand a class to edit), Messaging, Management. A bottom Save changes button is enabled only for changed subscription drafts. Names, class-specific preferences, subscription removals, revision conflicts, Face ID, one-person report confirmations, mutation retry protection, legacy preservation and the two separate databases retain their existing behavior. Waiting subscriptions display AI as Not set. Full phone numbers remain visible to the authenticated administrator.
+## Student profile and simplified subscription editing
+Student Details retains the approved grouped layout, full phone numbers, confirmation and device authorization.
+- POST /api/classera-students accepts {phone,name}, creates only a profile and no class enrollment. The iOS Add sheet accepts Egyptian 01xxxxxxxxx and normalizes it to international digits. Existing profiles/signup/subscriptions are never silently overwritten.
+- PUT /api/classera-students/{phone}/name accepts {name,expected_revision}. It saves immediately after device authorization; it does not submit unrelated subscription drafts. The profile name and editable 12F/12E names update together; legacy class names remain intact.
+- Class modes are AI (active, ai_enabled=1), No AI (active,0), Disabled (disabled,null). Disabled is persistent and excluded by the existing active-recipient query. It preserves the profile, class record and original joined_at. Waiting/unknown states are preserved until an explicit mode choice. Global Suspend remains a separate reply/report restriction.
+- The additive orbit_classera_profiles table stores profiles without manufacturing a class or WhatsApp signup session. Name changes made later by WhatsApp are reflected when their subscription updated_at is newer than the saved profile name.
+- Existing revision conflicts, one-person report actions, shared database and no mutation retries remain.
 
-The Classera database currently has no verified last-inbound timestamp or 24-hour messaging-window record. Signup updated_at, subscription timestamps and delivery/read receipts do NOT establish a window. The current production UI therefore displays Unavailable rather than a fabricated Closed/Open state. The school-assistant window is separate and unchanged.
+## Five-minute app unlock
+When app lock is enabled, successful device authentication starts a fixed five-minute monotonic session. App switching within that session adds no privacy overlay or repeated unlock prompt. It does not extend the deadline. Expiry or a cold process launch requires authentication. Backgrounding still suspends API work and stops JARVIS audio. Sensitive actions retain their own device authorization.
 
-The native model accepts this optional future read-only addition on the existing owner-authenticated Classera detail response:
+## Verified WhatsApp window and plain-text sending
+Kapso's authenticated conversation endpoint was live-read-verified with the existing Ubuntu-held credential. No provider credential enters the IPA. The existing webhook configuration is unchanged.
+
+GET /api/classera-students/{phone}/messaging returns:
 ```json
-{
-  "whatsapp_windows": [
-    {"class_name":"12F","window_open":true,"seconds_left":5400,"last_inbound_at":1793010000},
-    {"class_name":"12E","window_open":false,"seconds_left":0,"last_inbound_at":1792900000}
-  ]
-}
+{"version":1,"phone":"201000000001","updated_at":1793010000,"whatsapp_windows":[
+ {"class_name":"12F","window_open":true,"seconds_left":5400,"last_inbound_at":1793000000,"can_send_plaintext":true}
+]}
 ```
-This is a capability contract, NOT a claim those fields are deployed. The WhatsApp backend must source it from verified student inbound events, scoped to the receiving WhatsApp business number mapped to each class. Never reuse the school-assistant database or another business number's window. Missing or inconsistent data must stay unavailable. seconds_left is a response-time snapshot (0–86400); last_inbound_at is Unix seconds and required for a known window. A closed response has zero seconds. The native countdown uses a monotonic clock locally; refreshing replaces its baseline. No per-second network polling or sending is introduced.
+Windows are derived from last_inbound_at on an exact recipient AND receiving Kapso number match. Only classes mapped to the configured shared Kapso account are supported. Missing, invalid, future, mismatched or failed provider metadata is unavailable, never inferred from signup/subscription timestamps or delivery/read receipts. The iOS display counts down locally with a monotonic clock. No per-second network requests.
 
-Window status is informational; it never enables reports, changes activity, or overrides backend/provider eligibility. Templated reports are separate from customer-service-window rules. Real provider/window verification and physical-device checks remain pending.
+POST /api/classera-students/{phone}/messaging accepts exactly {request_id:<canonical UUID>,class_name:<12F|12E>,text:<1–4096 characters>}. It sends to that phone only, after native confirmation/device authorization and a fresh authoritative provider window check. At least30seconds must remain; the student must be globally allowed, not onboarding, and active for the selected class. This never extends the WhatsApp window, enables a subscription or sends a template.
+
+The request identity is saved to a dedicated Keychain record before the single native POST. The server persists an operation reservation and a hash of the request, without storing plaintext. Same UUID/same body returns saved state without resending; same UUID/changed body409. Unknown/provider timeout/crash outcomes are never automatically retried. A local unknown operation remains pending until server status can be reviewed. Known pre-dispatch rejections can be cleared safely; the window must be refreshed before another attempt.
+
+GET /api/classera-students/{phone}/messaging/{request_id} is read-only recovery. Responses include version,id,phone,class_name,status,message_id,created_at,updated_at. Accepted is not delivered. Existing provider webhook events can resolve sent/delivered/read/failed by the returned message ID.
+
+All routes require the existing owner Bearer credential, reject browser Origin/cross-site use and redirect forwarding, and use no-store. Provider requests use fixed HTTPS endpoints, TLS verification, no redirects and no transport retries. New send reservations are capped at6/minute. Authentication401/403; invalid422; closed/ineligible/conflicting request409; rate429; unavailable503. No raw upstream bodies or credentials are exposed.
+
+Class-ready invitations remain independently disabled until their approved template/callback contract is verified. Enabling plain-text within an authenticated window does not enable invitation broadcasts.
+
+Tests use temporary databases and fake provider sends only. Live verification performs GETs only; real messages are never sent during implementation. Physical iPhone/real-send validation remains a user-device check.

@@ -531,6 +531,12 @@ final class ServerAPI: ObservableObject {
         }
         guard accessAllowed && epoch == studentsAccessGeneration && !Task.isCancelled else { throw CancellationError() }
         guard let http = response as? HTTPURLResponse else { throw APIError.message("Classera returned an invalid response.") }
+        if method == "POST" && path.hasSuffix("/messaging"), (400..<500).contains(http.statusCode),
+           let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let code = body["error"] as? String,
+           ["window_closed","student_not_eligible","unauthorized","owner_not_permitted","invalid_request","issuance_throttled","window_unavailable","provider_unavailable"].contains(code) {
+            throw ClasseraTextRejection(code: code)
+        }
         switch http.statusCode {
         case 200: return data
         case 401, 403: throw APIError.message("Owner authentication failed. Check the Orbit connection in Settings.")
@@ -593,6 +599,64 @@ final class ServerAPI: ObservableObject {
         servicesGeneration += 1; servicesRefresh?.cancel(); servicesRefresh = nil; servicesLoading = false
         classeraRecipients.removeAll()
         await loadServices()
+        return result
+    }
+
+    func createClasseraProfile(phone: String, name: String) async throws -> ClasseraStudent {
+        guard ClasseraPhone.valid(phone), accessAllowed, !actionBusy else { throw CancellationError() }
+        actionBusy = true; defer { actionBusy = false }
+        let epoch = studentsAccessGeneration
+        try await authorize("Add this Classera student profile. No message will be sent.")
+        guard accessAllowed && epoch == studentsAccessGeneration && !Task.isCancelled else { throw CancellationError() }
+        let data = try await classeraDirectoryData(path: "/api/classera-students", method: "POST",
+            body: JSONEncoder().encode(ClasseraCreatePayload(phone: phone, name: name)))
+        guard let result = try? JSONDecoder().decode(ClasseraStudent.self, from: data),
+              result.phone == phone, result.revision.count == 64 else { throw ClasseraDirectoryFailure.uncertain }
+        return result
+    }
+    func renameClasseraStudent(student: ClasseraStudent, name: String) async throws -> ClasseraStudent {
+        guard accessAllowed, !actionBusy else { throw CancellationError() }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed.count <= 120,
+              !trimmed.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else {
+            throw APIError.message("Enter a name of 1–120 characters.")
+        }
+        actionBusy = true; defer { actionBusy = false }
+        let epoch = studentsAccessGeneration
+        try await authorize("Save this student's Classera name. No message will be sent.")
+        guard accessAllowed && epoch == studentsAccessGeneration && !Task.isCancelled else { throw CancellationError() }
+        let data = try await classeraDirectoryData(path: "/api/classera-students/\(student.phone)/name", method: "PUT",
+            body: JSONEncoder().encode(ClasseraProfilePayload(name: trimmed, expectedRevision: student.revision)))
+        guard let result = try? JSONDecoder().decode(ClasseraStudent.self, from: data),
+              result.phone == student.phone, result.revision.count == 64 else { throw ClasseraDirectoryFailure.uncertain }
+        return result
+    }
+    func loadClasseraMessaging(phone: String) async throws -> ClasseraMessagingResponse {
+        guard ClasseraPhone.valid(phone) else { throw APIError.message("Invalid phone number.") }
+        let data = try await classeraDirectoryData(path: "/api/classera-students/\(phone)/messaging")
+        let result = try JSONDecoder().decode(ClasseraMessagingResponse.self, from: data)
+        guard result.version == 1 && result.phone == phone else { throw APIError.message("Messaging response is incompatible.") }
+        return result
+    }
+    func classeraTextStatus(phone: String, id: String) async throws -> ClasseraTextOperation {
+        guard ClasseraPhone.valid(phone), UUID(uuidString: id) != nil else { throw APIError.message("Invalid saved operation.") }
+        let data = try await classeraDirectoryData(path: "/api/classera-students/\(phone)/messaging/\(id)")
+        return try JSONDecoder().decode(ClasseraTextOperation.self, from: data)
+    }
+    func sendClasseraText(phone: String, payload: ClasseraTextPayload, persist: () throws -> Void) async throws -> ClasseraTextOperation {
+        guard ClasseraPhone.valid(phone), ["12F", "12E"].contains(payload.className),
+              UUID(uuidString: payload.requestID) != nil,
+              !payload.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, payload.text.count <= 4096,
+              accessAllowed, !actionBusy, !Task.isCancelled else { throw CancellationError() }
+        actionBusy = true; defer { actionBusy = false }
+        let epoch = studentsAccessGeneration
+        try await authorize("Send this confirmed plain-text WhatsApp message to ONE person.")
+        guard accessAllowed && epoch == studentsAccessGeneration && !Task.isCancelled else { throw CancellationError() }
+        try persist()
+        let data = try await classeraDirectoryData(path: "/api/classera-students/\(phone)/messaging", method: "POST",
+            body: JSONEncoder().encode(payload))
+        let result = try JSONDecoder().decode(ClasseraTextOperation.self, from: data)
+        guard result.id == payload.requestID && result.phone == phone else { throw ClasseraDirectoryFailure.uncertain }
         return result
     }
 

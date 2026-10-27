@@ -53,6 +53,8 @@ struct ClasseraStudentsView: View {
     @State private var generation = 0
     @State private var add = false
     @State private var phone = ""
+    @State private var newName = ""
+    @State private var creating = false
     @State private var newPhone: String?
     private var filtered: [ClasseraStudent] {
         students.filter { student in
@@ -83,7 +85,7 @@ struct ClasseraStudentsView: View {
                         StudentCompactRow(name: student.displayName, phone: student.phone,
                             chips: student.subscriptions.map { row in
                                 let label = row.className == "12F" ? "1 (F)" : row.className == "12E" ? "2 (E)" : row.className
-                                return row.status == "active" ? label : "\(label) · Waiting"
+                                return row.status == "waiting_for_class" ? "\(label) · Waiting" : "\(label) · \(ClasseraSubscriptionMode.current(row)?.rawValue ?? "Not set")"
                             }, status: student.activityStatus,
                             note: student.signupSession == nil ? nil : "Sign up in progress",
                             noteColor: .yellow,
@@ -104,18 +106,32 @@ struct ClasseraStudentsView: View {
                 NavigationLink { ClasseraMonitoringView(api: api) } label: { Label("Monitoring", systemImage: "chart.bar.xaxis") }
             }
             ToolbarItem(placement: .topBarTrailing) {
-            Button { phone = ""; add = true } label: {
+            Button { phone = ""; newName = ""; error = nil; add = true } label: {
                 Label("Add", systemImage: "plus").font(.subheadline.weight(.semibold))
                     .foregroundStyle(.white).padding(.horizontal, 10).padding(.vertical, 7)
                     .background(StudentPalette.accent, in: RoundedRectangle(cornerRadius: 8))
             }.accessibilityLabel("Add Classera subscriber")
         } }
-        .alert("Add subscriber", isPresented: $add) {
-            TextField("International phone, digits only", text: $phone).keyboardType(.phonePad)
-            Button("Continue") {
-                if ClasseraPhone.valid(phone) { newPhone = phone } else { error = "Use 8–15 international digits, without + or spaces." }
+        .sheet(isPresented: $add) {
+            NavigationStack {
+                Form {
+                    Section("Student") {
+                        TextField("Phone — 01xxxxxxxxx", text: $phone).keyboardType(.phonePad)
+                        TextField("Name", text: $newName).textContentType(.name)
+                    }
+                    Text("Egyptian 01 numbers are converted to international format. No class is enabled and no message is sent.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    if let error { Text(error).foregroundStyle(.orange) }
+                    if creating { ProgressView("Adding profile…") }
+                }.modifier(StudentAppearance()).navigationTitle("Add subscriber")
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) { Button("Cancel") { add = false }.disabled(creating) }
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Add") { Task { await createProfile() } }
+                                .disabled(creating || newName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || ClasseraPhone.normalized(phone) == nil)
+                        }
+                    }.interactiveDismissDisabled(creating)
             }
-            Button("Cancel", role: .cancel) {}
         }
         .navigationDestination(isPresented: Binding(get: { newPhone != nil }, set: { if !$0 { newPhone = nil } })) {
             if let newPhone { ClasseraStudentEditor(api: api, phone: newPhone) }
@@ -126,6 +142,25 @@ struct ClasseraStudentsView: View {
         }
         .onDisappear { generation += 1; loading = false }
         .refreshable { await refresh() }
+    }
+    private func createProfile() async {
+        guard !creating, let number = ClasseraPhone.normalized(phone), api.accessAllowed, phase == .active else { return }
+        creating = true; defer { creating = false }
+        let epoch = generation
+        do {
+            _ = try await api.createClasseraProfile(phone: number, name: newName.trimmingCharacters(in: .whitespacesAndNewlines))
+            guard api.accessAllowed && phase == .active && generation == epoch else { return }
+            add = false; newPhone = number
+        } catch {
+            guard api.accessAllowed && phase == .active else { return }
+            if error is ClasseraDirectoryFailure {
+                // Read only recovery. Never repeat the POST or overwrite an existing profile.
+                if let latest = try? await api.loadClasseraStudent(phone: number),
+                   latest.profileName != nil || !latest.subscriptions.isEmpty || latest.signupSession != nil {
+                    add = false; newPhone = number
+                } else { self.error = "The profile may have been created. Check the directory before trying again." }
+            } else { self.error = error.localizedDescription }
+        }
     }
     private func refresh() async {
         guard api.accessAllowed && phase == .active && !loading else { return }
@@ -158,6 +193,7 @@ struct ClasseraStudentEditor: View {
     @State private var reportClass: String?
     @State private var expandedClasses: Set<String> = []
     @State private var windowInstant = ContinuousClock.now
+    @State private var messaging: ClasseraMessagingResponse?
     @Environment(\.dismiss) private var dismiss
     private var canSave: Bool { loaded && !busy && api.accessAllowed && student?.signupSession == nil }
     private var hasChanges: Bool { loaded && (student.map { rows != $0.subscriptions } ?? false) }
@@ -212,28 +248,21 @@ struct ClasseraStudentEditor: View {
                             .accessibilityIdentifier("classera.editName")
                         if let nameError { Text(nameError).foregroundStyle(.yellow) }
                     }
-                    Text("Applies to this student's Classera 1 (F) and Classera 2 (E) subscriptions. Legacy class names stay unchanged. Tap Save changes on the student page to authorize and save. No WhatsApp message is sent.")
+                    Text("Saves the name immediately after device authorization. Other subscription changes stay in your draft. No WhatsApp message is sent.")
                         .font(.caption).foregroundStyle(.secondary)
                 }.scrollContentBackground(.hidden).modifier(StudentAppearance())
                     .navigationTitle("Edit name").navigationBarTitleDisplayMode(.inline)
                     .toolbar {
                         ToolbarItem(placement: .cancellationAction) { Button("Cancel") { editName = false } }
                         ToolbarItem(placement: .confirmationAction) {
-                            Button("Apply name") {
-                                guard canSave else { editName = false; return }
-                                do {
-                                    rows = try ClasseraNameEdit.applying(nameDraft, to: rows)
-                                    message = "Name updated in your draft. Tap Save changes to save it securely."
-                                    editName = false
-                                } catch { nameError = error.localizedDescription }
-                            }.disabled(!canSave)
+                            Button("Save name") { Task { await saveName() } }.disabled(!canSave)
                         }
                     }
             }
         }
         .task(id: phase == .active && api.accessAllowed) {
             guard phase == .active && api.accessAllowed else {
-                if phase == .background || !api.accessAllowed { generation += 1; loaded = false; busy = false; student = nil; rows = []; editName = false; nameDraft = "" }
+                if phase == .background || !api.accessAllowed { generation += 1; loaded = false; busy = false; student = nil; rows = []; messaging = nil; editName = false; nameDraft = "" }
                 return
             }
             // Face ID can briefly make the scene inactive. Keep drafts and the
@@ -263,7 +292,7 @@ struct ClasseraStudentEditor: View {
         detailGroup("Profile") {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 5) {
-                    Text(rows.first?.name ?? student?.displayName ?? "Student")
+                    Text(student?.profileName ?? rows.first?.name ?? student?.displayName ?? "Student")
                         .font(.title3.bold()).foregroundStyle(.white)
                     Text(phone).font(.subheadline).monospacedDigit().textSelection(.enabled)
                         .foregroundStyle(StudentPalette.secondary)
@@ -271,9 +300,9 @@ struct ClasseraStudentEditor: View {
                 }
                 Spacer(minLength: 8)
                 Button("Edit name") {
-                    nameDraft = rows.first(where: \.editable)?.name ?? ""
+                    nameDraft = student?.profileName ?? rows.first(where: \.editable)?.name ?? student?.displayName ?? ""
                     nameError = nil; editName = true
-                }.font(.subheadline).disabled(!canSave || !rows.contains(where: \.editable))
+                }.font(.subheadline).disabled(!canSave)
             }
             Divider()
             HStack {
@@ -291,7 +320,7 @@ struct ClasseraStudentEditor: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("WhatsApp 24-hour window").font(.subheadline.weight(.medium))
             TimelineView(.periodic(from: .now, by: 15)) { _ in
-                if let windows = student?.whatsappWindows, !windows.isEmpty {
+                if let windows = messaging?.whatsappWindows ?? student?.whatsappWindows, !windows.isEmpty {
                     ForEach(windows) { window in
                         let remaining = window.remainingSeconds(since: windowInstant)
                         HStack(alignment: .top) {
@@ -319,49 +348,32 @@ struct ClasseraStudentEditor: View {
                 Text("No subscriptions").foregroundStyle(StudentPalette.secondary)
             }
             ForEach($rows) { $row in
-                DisclosureGroup(isExpanded: Binding(
-                    get: { expandedClasses.contains(row.className) },
-                    set: { if $0 { expandedClasses.insert(row.className) } else { expandedClasses.remove(row.className) } }
-                )) {
-                    VStack(alignment: .leading, spacing: 12) {
-                        if row.editable {
-                            TextField("Student name", text: $row.name).textContentType(.name)
-                                .textFieldStyle(.plain).padding(10)
-                                .background(StudentPalette.alternate, in: RoundedRectangle(cornerRadius: 8))
-                            Picker("AI preference", selection: $row.aiEnabled) {
-                                Text("Not set").tag(nil as Int?)
-                                Text("Enabled").tag(1 as Int?)
-                                Text("Disabled").tag(0 as Int?)
-                            }.disabled(row.status == "waiting_for_class")
-                            Picker("Subscription", selection: $row.status) {
-                                Text("Active").tag("active")
-                                Text("Waiting for class").tag("waiting_for_class")
-                            }.onChange(of: row.status) { _, status in
-                                if status == "waiting_for_class" { row.aiEnabled = nil }
-                            }
-                            Button("Remove this class", role: .destructive) { removeClass = row.className }
-                        } else {
-                            Text("Legacy subscription preserved. This class cannot be edited here.")
-                                .font(.caption).foregroundStyle(StudentPalette.secondary)
-                        }
-                    }.padding(.top, 10).disabled(!canSave)
-                } label: {
+                HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: 5) {
-                        Text(ClasseraClass.title(row.className)).font(.subheadline.weight(.semibold)).foregroundStyle(.white)
-                        HStack(spacing: 8) {
-                            Text(row.status == "active" ? "Active" : "Waiting for class")
-                                .foregroundStyle(row.status == "active" ? StudentPalette.secondary : .yellow)
-                            Text("·")
-                            Text("AI: " + ClasseraSubscriptionSummary.aiLabel(row))
-                        }.font(.caption).foregroundStyle(StudentPalette.secondary)
-                    }.padding(.vertical, 3)
-                }
+                        Text(ClasseraClass.title(row.className)).font(.subheadline.weight(.semibold))
+                        if row.status == "waiting_for_class" { Text("Waiting for class").font(.caption).foregroundStyle(.yellow) }
+                        if !row.editable { Text("Legacy subscription preserved").font(.caption).foregroundStyle(.secondary) }
+                    }
+                    Spacer(minLength: 8)
+                    if row.editable {
+                        Menu {
+                            ForEach(ClasseraSubscriptionMode.allCases) { mode in
+                                Button(mode.rawValue) { row = mode.applying(to: row) }
+                            }
+                        } label: {
+                            HStack(spacing: 5) {
+                                Text(ClasseraSubscriptionMode.current(row)?.rawValue ?? "Choose mode")
+                                Image(systemName: "chevron.up.chevron.down").font(.caption2)
+                            }
+                        }.disabled(!canSave)
+                    }
+                }.padding(.vertical, 5)
                 Divider()
             }
             ForEach(["12F", "12E"].filter { klass in !rows.contains { $0.className == klass } }, id: \.self) { klass in
                 Button {
-                    rows.append(ClasseraSubscription(className: klass, name: rows.first?.name ?? student?.signupSession?.name ?? "",
-                                                     aiEnabled: nil, status: "active"))
+                    rows.append(ClasseraSubscription(className: klass, name: student?.profileName ?? rows.first?.name ?? student?.signupSession?.name ?? "",
+                                                     aiEnabled: nil, status: "disabled"))
                     expandedClasses.insert(klass)
                 } label: { Label("Add " + ClasseraClass.title(klass), systemImage: "plus.circle") }
                     .disabled(!canSave)
@@ -377,6 +389,12 @@ struct ClasseraStudentEditor: View {
     }
     private var messagingSection: some View {
         detailGroup("Messaging") {
+            NavigationLink { ClasseraPlainTextView(api: api, phone: phone) } label: {
+                detailAction("Send plain-text message", icon: "text.bubble")
+            }.disabled(!loaded || busy || student?.activityStatus != .allowed)
+            Text("Available only while the verified WhatsApp 24-hour window is open.")
+                .font(.caption2).foregroundStyle(StudentPalette.secondary)
+            Divider()
             NavigationLink { ClasseraMonitoringView(api: api, initialTab: 1, initialSearch: phone) } label: {
                 detailAction("Delivery history", icon: "doc.text")
             }.disabled(!loaded || busy)
@@ -442,7 +460,38 @@ struct ClasseraStudentEditor: View {
             let result = try await api.loadClasseraStudent(phone: phone)
             guard epoch == generation && api.accessAllowed && !Task.isCancelled else { return }
             student = result; rows = result.subscriptions; windowInstant = .now; loaded = true; message = nil
+            let windows = try? await api.loadClasseraMessaging(phone: phone)
+            if epoch == generation && api.accessAllowed { messaging = windows; windowInstant = .now }
         } catch { if epoch == generation && !ServerAPI.isRefreshCancellation(error) { message = error.localizedDescription } }
+    }
+    private func saveName() async {
+        guard canSave, let current = student else { return }
+        let draft = rows
+        generation += 1; let epoch = generation; busy = true
+        defer { if generation == epoch { busy = false } }
+        do {
+            let result = try await api.renameClasseraStudent(student: current, name: nameDraft)
+            guard epoch == generation && api.accessAllowed else { return }
+            student = result
+            if draft == current.subscriptions { rows = result.subscriptions }
+            else {
+                rows = draft.map { row in
+                    var copy = result.subscriptions.first { $0.className == row.className } ?? row
+                    copy.status = row.status; copy.aiEnabled = row.aiEnabled
+                    if row.editable { copy.name = result.profileName ?? nameDraft.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    return copy
+                }
+            }
+            editName = false; message = "Name saved."
+        } catch {
+            guard epoch == generation && api.accessAllowed else { return }
+            if error is ClasseraDirectoryFailure {
+                if let latest = try? await api.loadClasseraStudent(phone: phone) {
+                    student = latest
+                    nameError = "Latest profile loaded. Review the name before another save."
+                } else { nameError = "The name may have saved. Reload before trying again." }
+            } else { nameError = error.localizedDescription }
+        }
     }
     private func save() async {
         guard canSave, let student else { return }
@@ -504,6 +553,13 @@ struct ClasseraStudentEditor: View {
 }
 
 enum ClasseraPhone {
+    static func normalized(_ input: String) -> String? {
+        let value = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        if value.count == 11 && value.hasPrefix("01") && value.utf8.allSatisfy({ (48...57).contains($0) }) {
+            return "20" + String(value.dropFirst())
+        }
+        return valid(value) ? value : nil
+    }
     static func valid(_ value: String) -> Bool {
         (8...15).contains(value.count) && value.first != "0" && value.utf8.allSatisfy { (48...57).contains($0) }
     }

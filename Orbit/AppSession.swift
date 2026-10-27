@@ -8,15 +8,26 @@ final class AppSession: ObservableObject {
     @Published private(set) var message: String?
     private var generation = 0
     private var automaticUnlockPending = true
+    private var unlockedAt: TimeInterval?
+    private let uptime: () -> TimeInterval
+    static let unlockLifetime: TimeInterval = 300
+    var remainingUnlockTime: TimeInterval? {
+        guard lockEnabled, let unlockedAt else { return nil }
+        return max(0, Self.unlockLifetime - max(0, uptime() - unlockedAt))
+    }
+    func expireIfNeeded() {
+        if isUnlocked, let remainingUnlockTime, remainingUnlockTime <= 0 { lock() }
+    }
     private let authenticate: () async throws -> Void
     private let defaults: UserDefaults
     var lockEnabled: Bool { defaults.object(forKey: "appLock.v4") as? Bool ?? true }
 
-    init(defaults: UserDefaults = .standard, authenticate: @escaping () async throws -> Void = {
+    init(defaults: UserDefaults = .standard, uptime: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }, authenticate: @escaping () async throws -> Void = {
         try await DeviceAuthorization.authorize(reason: "Unlock Orbit to view and manage your server.")
     }) {
         self.authenticate = authenticate
         self.defaults = defaults
+        self.uptime = uptime
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("--ui-preview") &&
             !ProcessInfo.processInfo.arguments.contains("--preview-lock") {
@@ -27,11 +38,13 @@ final class AppSession: ObservableObject {
     }
 
     func activate() async {
+        expireIfNeeded()
         guard automaticUnlockPending else { return }
         await unlock()
     }
 
     func unlock() async {
+        expireIfNeeded()
         guard !isUnlocked && !isAuthenticating else { return }
         if !lockEnabled { isUnlocked = true; automaticUnlockPending = false; return }
         automaticUnlockPending = false
@@ -42,6 +55,7 @@ final class AppSession: ObservableObject {
         do {
             try await authenticate()
             guard generation == attempt else { return }
+            unlockedAt = uptime()
             isUnlocked = true
         } catch {
             guard generation == attempt else { return }
@@ -51,6 +65,7 @@ final class AppSession: ObservableObject {
 
     func lock() {
         generation += 1
+        unlockedAt = nil
         isUnlocked = false
         isAuthenticating = false
         automaticUnlockPending = true
@@ -87,6 +102,11 @@ struct AppRootView: View {
             }
         }
         .task { await activateIfNeeded() }
+        .task(id: session.isUnlocked) {
+            guard session.isUnlocked, let remaining = session.remainingUnlockTime else { return }
+            do { try await Task.sleep(for: .seconds(remaining)) } catch { return }
+            session.expireIfNeeded()
+        }
         .task(id: phase == .active && api.accessAllowed) {
             guard phase == .active && api.accessAllowed else { return }
             await mobile.refresh()
@@ -94,9 +114,9 @@ struct AppRootView: View {
             await mobile.boundedRecovery()
         }
         .onChange(of: phase) { _, phase in
-            privacyCover = phase != .active
+            session.expireIfNeeded()
+            privacyCover = phase != .active && !session.isUnlocked
             if phase == .background {
-                session.lock()
                 DeviceAuthorization.cancelCurrentAuthentication()
                 api.setAccessAllowed(false)
                 mobile.suspend()
@@ -116,6 +136,7 @@ struct AppRootView: View {
     private func activateIfNeeded() async {
         guard phase == .active else { return }
         privacyCover = false
+        session.expireIfNeeded()
         guard !api.accessAllowed else { return }
         await session.activate()
         guard phase == .active && session.isUnlocked && !api.accessAllowed else { return }

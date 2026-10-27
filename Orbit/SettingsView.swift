@@ -70,11 +70,11 @@ struct SettingsView: View {
                 Toggle("Face ID app lock", isOn: Binding(get: { appLock }, set: { proposed in
                     if proposed { appLock = true } else { lockChange = true }
                 })).disabled(lockChangeBusy)
-                Text("When enabled, authenticate on launch and after backgrounding. Sensitive actions always require device authentication.").font(.caption).foregroundStyle(.secondary)
+                Text("When enabled, Face ID unlocks Orbit for five minutes, including app switching. The app stays visible during that session. Sensitive actions still require device authentication.").font(.caption).foregroundStyle(.secondary)
                 Label {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Protected server controls").font(.subheadline.bold())
-                        Text("With app lock enabled, returning from the background requires authentication. Every command needs confirmation and Face ID, Touch ID or your device passcode. Without a device passcode, commands remain locked.")
+                        Text("With app lock enabled, authenticate once for a five-minute session. Returning after that session expires requires authentication. Every command needs confirmation and Face ID, Touch ID or your device passcode. Without a device passcode, commands remain locked.")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 } icon: { Image(systemName: "lock.shield").foregroundStyle(Brand.teal) }

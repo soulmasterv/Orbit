@@ -34,6 +34,42 @@ class Directory:
             with conn: yield conn
         finally: conn.close()
 
+    def migrate(self):
+        with self.connect() as c:
+            c.execute("""CREATE TABLE IF NOT EXISTS orbit_classera_profiles(
+                phone TEXT PRIMARY KEY,name TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL)""")
+
+    @staticmethod
+    def name_value(value):
+        if not isinstance(value,str) or not value.strip() or len(value)>120 or any(ord(c)<32 for c in value):raise Invalid()
+        return value.strip()
+
+    def create(self,data):
+        if not isinstance(data,dict) or set(data)!={"phone","name"}:raise Invalid()
+        phone=phone_value(data["phone"]);name=self.name_value(data["name"])
+        with self.connect() as c:
+            c.execute("BEGIN IMMEDIATE")
+            current=self.record(c,phone)
+            if current["profile_name"] is not None or current["subscriptions"] or current["signup_session"]:raise Conflict()
+            ts=datetime.now(ZoneInfo("Africa/Cairo")).isoformat()
+            c.execute("INSERT INTO orbit_classera_profiles VALUES(?,?,?,?)",(phone,name,ts,ts))
+            return self.record(c,phone)
+
+    def rename(self,phone,data):
+        phone_value(phone)
+        if not isinstance(data,dict) or set(data)!={"name","expected_revision"}:raise Invalid()
+        name=self.name_value(data["name"]);revision=data["expected_revision"]
+        if not isinstance(revision,str) or not re.fullmatch(r"[a-f0-9]{64}",revision):raise Invalid()
+        with self.connect() as c:
+            c.execute("BEGIN IMMEDIATE")
+            current=self.record(c,phone)
+            if not hmac.compare_digest(current["revision"],revision) or current["signup_session"]:raise Conflict()
+            ts=datetime.now(ZoneInfo("Africa/Cairo")).isoformat()
+            c.execute("""INSERT INTO orbit_classera_profiles VALUES(?,?,?,?) ON CONFLICT(phone)
+                DO UPDATE SET name=excluded.name,updated_at=excluded.updated_at""",(phone,name,ts,ts))
+            c.execute("UPDATE subscribers SET name=?,updated_at=? WHERE phone=? AND class_name IN ('12F','12E')",(name,ts,phone))
+            return self.record(c,phone)
+
     def record(self, conn, phone):
         rows = [dict(r) for r in conn.execute(
             "SELECT phone,name,class_name,ai_enabled,status,joined_at,updated_at FROM subscribers WHERE phone=? ORDER BY class_name", (phone,))]
@@ -41,9 +77,16 @@ class Directory:
         session = dict(session) if session else None
         control = conn.execute('SELECT activity_status,updated_at FROM orbit_student_controls WHERE phone=?',(phone,)).fetchone()
         activity = control['activity_status'] if control else 'allowed'
-        raw = json.dumps([phone, rows, session, dict(control) if control else None], ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        profile=conn.execute("SELECT * FROM orbit_classera_profiles WHERE phone=?",(phone,)).fetchone()
+        profile_name=profile["name"] if profile else None
+        if profile:
+            try:
+                latest=max((r for r in rows if r["class_name"] in CLASSES.values()),key=lambda r:r["updated_at"],default=None)
+                if latest and datetime.fromisoformat(latest["updated_at"])>datetime.fromisoformat(profile["updated_at"]):profile_name=latest["name"]
+            except (ValueError,TypeError):pass
+        raw = json.dumps([phone, rows, session, dict(control) if control else None, dict(profile) if profile else None], ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         return {"phone": phone, "subscriptions": rows, "signup_session": session,
-                "activity_status": activity,
+                "activity_status": activity, "profile_name": profile_name,
                 "revision": hashlib.sha256(raw.encode()).hexdigest()}
 
     def get(self, phone):
@@ -55,7 +98,7 @@ class Directory:
     def listing(self):
         with self.connect() as conn:
             conn.execute("BEGIN")
-            phones = conn.execute("SELECT phone FROM (SELECT phone,updated_at FROM subscribers UNION ALL SELECT phone,updated_at FROM signup_sessions UNION ALL SELECT phone,updated_at FROM orbit_student_controls) GROUP BY phone ORDER BY MAX(updated_at) DESC,phone").fetchall()
+            phones = conn.execute("SELECT phone FROM (SELECT phone,updated_at FROM subscribers UNION ALL SELECT phone,updated_at FROM signup_sessions UNION ALL SELECT phone,updated_at FROM orbit_student_controls UNION ALL SELECT phone,updated_at FROM orbit_classera_profiles) GROUP BY phone ORDER BY MAX(updated_at) DESC,phone").fetchall()
             return {"version": 1, "students": [self.record(conn, r["phone"]) for r in phones],
                     "classes": [{"id": k, "class_name": v} for k,v in CLASSES.items()]}
 
@@ -72,8 +115,8 @@ class Directory:
             if klass not in CLASSES.values() or klass in seen: raise Invalid()
             if not isinstance(name, str) or not name.strip() or len(name) > 120 or any(ord(c) < 32 for c in name): raise Invalid()
             if ai is not None and (type(ai) is not int or ai not in (0,1)): raise Invalid()
-            if status not in ("active", "waiting_for_class"): raise Invalid()
-            if status == "waiting_for_class" and ai is not None: raise Invalid()
+            if status not in ("active", "waiting_for_class", "disabled"): raise Invalid()
+            if status in ("waiting_for_class","disabled") and ai is not None: raise Invalid()
             seen.add(klass)
         with self.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
@@ -115,6 +158,7 @@ class Directory:
                 conn.execute('DELETE FROM subscribers WHERE phone=?',(phone,))
                 conn.execute('DELETE FROM signup_sessions WHERE phone=?',(phone,))
                 conn.execute('DELETE FROM orbit_student_controls WHERE phone=?',(phone,))
+                conn.execute('DELETE FROM orbit_classera_profiles WHERE phone=?',(phone,))
                 return {'ok':True}
             conn.execute('INSERT INTO orbit_student_controls(phone,activity_status,updated_at) VALUES(?,?,?) ON CONFLICT(phone) DO UPDATE SET activity_status=excluded.activity_status,updated_at=excluded.updated_at',
                 (phone,status,datetime.now(ZoneInfo('Africa/Cairo')).isoformat()))
@@ -122,6 +166,7 @@ class Directory:
 
 def register(app, owner_token, directory=None):
     directory = directory or Directory()
+    directory.migrate()
 
     def handle(phone=None):
         # Same owner credential as Orbit, supplied at runtime from Keychain.
@@ -131,11 +176,13 @@ def register(app, owner_token, directory=None):
         if request.headers.get("Origin") or request.headers.get("Sec-Fetch-Site") == "cross-site":
             return jsonify(error="owner_not_permitted"), 403
         try:
-            if request.method in ("PUT", "DELETE"):
+            if request.method in ("POST", "PUT", "DELETE"):
                 if request.content_length is None or request.content_length > 8192 or not request.is_json:
                     return jsonify(error="invalid_request"), 422
                 data=request.get_json(silent=True)
-                if request.method=='DELETE' or request.path.endswith('/activity'):
+                if request.method=='POST':result=directory.create(data)
+                elif request.path.endswith('/name'):result=directory.rename(phone,data)
+                elif request.method=='DELETE' or request.path.endswith('/activity'):
                     result=directory.manage(phone,data,remove=request.method=='DELETE')
                 else: result = directory.save(phone,data)
             else: result = directory.get(phone) if phone else directory.listing()
@@ -144,9 +191,13 @@ def register(app, owner_token, directory=None):
         except Conflict: return jsonify(error="review_latest_or_finish_signup"), 409
         except (sqlite3.Error, OSError): return jsonify(error="directory_unavailable"), 503
 
-    app.add_url_rule("/api/classera-students", "classera_student_list", handle, methods=["GET"])
+    app.add_url_rule("/api/classera-students", "classera_student_list", handle, methods=["GET","POST"])
     app.add_url_rule("/api/classera-students/<phone>", "classera_student_detail", handle, methods=["GET", "PUT", "DELETE"])
     app.add_url_rule("/api/classera-students/<phone>/activity", "classera_student_activity", handle, methods=["PUT"])
+
+    app.add_url_rule("/api/classera-students/<phone>/name", "classera_student_name", handle, methods=["PUT"])
+    from classera_messaging import register as register_messaging
+    register_messaging(app,owner_token,directory)
 
     from classera_monitoring_api import register as register_monitoring
     register_monitoring(app, owner_token)
