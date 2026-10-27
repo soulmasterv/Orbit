@@ -244,7 +244,7 @@ struct ClasseraStudentEditor: View {
             NavigationStack {
                 Form {
                     Section("Student name") {
-                        TextField("Name", text: $nameDraft).textContentType(.name)
+                        TextField("Name", text: $nameDraft).textContentType(.name).disabled(busy)
                             .accessibilityIdentifier("classera.editName")
                         if let nameError { Text(nameError).foregroundStyle(.yellow) }
                     }
@@ -252,8 +252,9 @@ struct ClasseraStudentEditor: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }.scrollContentBackground(.hidden).modifier(StudentAppearance())
                     .navigationTitle("Edit name").navigationBarTitleDisplayMode(.inline)
+                    .interactiveDismissDisabled(busy)
                     .toolbar {
-                        ToolbarItem(placement: .cancellationAction) { Button("Cancel") { editName = false } }
+                        ToolbarItem(placement: .cancellationAction) { Button("Cancel") { editName = false }.disabled(busy) }
                         ToolbarItem(placement: .confirmationAction) {
                             Button("Save name") { Task { await saveName() } }.disabled(!canSave)
                         }

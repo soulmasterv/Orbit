@@ -97,7 +97,7 @@ struct ClasseraMonitoringView: View {
                 stamp(response.updated_at)
                 Text(response.notice).font(.caption).foregroundStyle(.secondary)
                 if !response.sending_enabled {
-                    Label("Sending disabled — template contract must be verified", systemImage: "lock.fill")
+                    Label("Class-ready invitations disabled — template contract unverified", systemImage: "lock.fill")
                         .font(.subheadline).foregroundStyle(.yellow)
                 }
                 if response.classes.isEmpty { empty("No waiting classes", "Waiting registrations will appear here.") }
