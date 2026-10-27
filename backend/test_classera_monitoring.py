@@ -208,3 +208,27 @@ class ClasseraMonitoringTests(unittest.TestCase):
         self.assertEqual(preview["waiting_count"],3)
         self.assertEqual(preview["eligible_count"],2)
         self.assertFalse(next(s for s in preview["students"] if s["phone"]=="bad-phone")["eligible"])
+
+    def test_template_totals_use_actual_payload_and_keep_missing_history_separate(self):
+        with sqlite3.connect(self.db) as c:
+            c.execute("INSERT INTO deliveries VALUES('missing','12F 26_10_26','201000000003','delivered','legacy','2026-10-26','classera-1')")
+        self.store.migrate()
+        run=self.store.begin("12F 26_10_26","12F",["201000000001","201000000002"])
+        first=self.store.attempt(run,"201000000001","classera_v9")
+        self.store.result(first,"accepted","known-1")
+        self.store.event("known-1","read",1793010002)
+        second=self.store.attempt(run,"201000000002","classera_no_ai")
+        self.store.result(second,"failed")
+        other=self.store.begin("12E 26_10_26","12E",["201000000001"])
+        self.store.attempt(other,"201000000001","different_class")
+        outside=self.store.begin("12F 25_10_26","12F",["201000000001"])
+        self.store.attempt(outside,"201000000001","outside_range")
+        stats=self.store.statistics({"from":"2026-10-26","to":"2026-10-26","class_id":"12F"})
+        groups={r["template"]:r for r in stats["templates"]}
+        self.assertEqual(set(groups),{None,"classera_v9","classera_no_ai"})
+        self.assertEqual(groups["classera_v9"]["counts"]["read"],1)
+        self.assertEqual(groups["classera_v9"]["counts"]["accepted"],0)
+        self.assertEqual(groups[None]["counts"]["delivered"],1)
+        self.assertEqual(sum(r["attempts"] for r in groups.values()),stats["attempts"])
+        self.assertEqual(sum(r["counts"]["failed"] for r in groups.values()),stats["counts"]["failed"])
+        self.assertEqual(self.store.statistics({"from":"2025-01-01","to":"2025-01-02"})["templates"],[])

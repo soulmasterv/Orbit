@@ -103,12 +103,20 @@ struct ClasseraDailyRow: Decodable, Identifiable {
     let skipped: Int?
     let delivery_rate: Double?
 }
+struct ClasseraTemplateStatistics: Decodable, Identifiable {
+    let id: String
+    let template: String?
+    let attempts: Int
+    let counts: [String: Int]
+    var title: String { template?.isEmpty == false ? template! : "Not recorded" }
+}
 struct ClasseraStatisticsResponse: ClasseraVersioned {
     let version: Int
     let from: String
     let to: String
     let updated_at: Int
     let reports: [ClasseraDailyRow]
+    let templates: [ClasseraTemplateStatistics]?
     let counts: [String: Int]
     let attempts: Int
     let expected: Int?

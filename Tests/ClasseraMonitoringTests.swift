@@ -37,8 +37,34 @@ final class ClasseraMonitoringTests: XCTestCase {
     }
     private func statistics() -> Data {
         Data("""
-        {"version":1,"from":"2026-10-20","to":"2026-10-26","updated_at":1793010000,"reports":[{"id":"row","date":"2026-10-26","class_id":"12F","report":"Daily report","counts":\(counts),"attempts":1,"expected":null,"delivered_targets":null,"not_attempted":null,"skipped":null,"delivery_rate":null}],"counts":\(counts),"attempts":1,"expected":null,"delivered_targets":null,"not_attempted":null,"skipped":null,"delivery_rate":null,"unknown_date_records":0,"limitations":["Historical delivery rates are unavailable without expected-recipient snapshots."]}
+        {"version":1,"from":"2026-10-20","to":"2026-10-26","updated_at":1793010000,"templates":[{"id":"__not_recorded__","template":null,"attempts":1,"counts":\(counts)}],"reports":[{"id":"row","date":"2026-10-26","class_id":"12F","report":"Daily report","counts":\(counts),"attempts":1,"expected":null,"delivered_targets":null,"not_attempted":null,"skipped":null,"delivery_rate":null}],"counts":\(counts),"attempts":1,"expected":null,"delivered_targets":null,"not_attempted":null,"skipped":null,"delivery_rate":null,"unknown_date_records":0,"limitations":["Historical delivery rates are unavailable without expected-recipient snapshots."]}
         """.utf8)
+    }
+    func testTemplateStatsPreserveMissingMetadataAndOldBackendCompatibility() throws {
+        var legacy = try XCTUnwrap(JSONSerialization.jsonObject(with: statistics()) as? [String: Any])
+        legacy.removeValue(forKey: "templates")
+        let old = try JSONDecoder().decode(ClasseraStatisticsResponse.self, from: JSONSerialization.data(withJSONObject: legacy))
+        XCTAssertNil(old.templates)
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: statistics()) as? [String: Any])
+        object["templates"] = [
+            ["id": "__not_recorded__", "template": NSNull(), "attempts": 1, "counts": ["delivered": 1]],
+            ["id": "classera_v9", "template": "classera_v9", "attempts": 2, "counts": ["read": 2]]
+        ]
+        let response = try JSONDecoder().decode(ClasseraStatisticsResponse.self, from: JSONSerialization.data(withJSONObject: object))
+        XCTAssertEqual(response.templates?.first?.title, "Not recorded")
+        XCTAssertEqual(response.templates?.last?.title, "classera_v9")
+        XCTAssertEqual(response.templates?.last?.counts["read"], 2)
+    }
+    func testTemplateSectionUsesReadOnlyStatisticsRoute() async throws {
+        let data = statistics()
+        MockURLProtocol.handler = { _ in (200, data) }
+        let store = ClasseraMonitoringStore(loadPending: { nil }, savePending: { _ in })
+        await store.load(api: api(), tab: 3, query: ["class_id": "12F", "from": "2026-10-20", "to": "2026-10-26"])
+        let request = try XCTUnwrap(MockURLProtocol.requests.first)
+        XCTAssertEqual(request.httpMethod, "GET")
+        XCTAssertEqual(request.url?.path, "/api/classera/daily-statistics")
+        XCTAssertNotNil(store.statistics)
+        XCTAssertEqual(MockURLProtocol.requests.count, 1)
     }
     private func operation(_ id: String) -> Data {
         Data("""
@@ -153,7 +179,7 @@ final class ClasseraMonitoringTests: XCTestCase {
             return(200,h)
         }
         let scene=try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap{$0 as? UIWindowScene}.first)
-        for index in 0...2 {
+        for index in 0...3 {
             let store=ClasseraMonitoringStore(loadPending:{nil},savePending:{_ in})
             let window=UIWindow(windowScene:scene);window.frame=scene.coordinateSpace.bounds
             window.rootViewController=UIHostingController(rootView:NavigationStack {

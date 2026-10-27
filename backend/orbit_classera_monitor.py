@@ -218,12 +218,21 @@ class Store:
               "not_attempted":len(expected-attempted-skipped) if known else None,
               "skipped":len(expected & skipped) if known else None,
               "delivery_rate":round(100*len(delivered & expected)/len(expected),2) if known and expected else None})
+        templates=[]
+        for name in sorted({v["template"] for v in a if v["template"]}):
+            rows=[v for v in a if v["template"]==name]
+            templates.append({"id":name,"template":name,"attempts":len(rows),
+                              "counts":{state:sum(v["status"]==state for v in rows) for state in STATES}})
+        missing=[v for v in a if not v["template"]]
+        if missing:
+            templates.append({"id":"__not_recorded__","template":None,"attempts":len(missing),
+                              "counts":{state:sum(v["status"]==state for v in missing) for state in STATES}})
         counts={s:sum(v["counts"][s] for v in reports) for s in STATES}
         complete=bool(reports) and all(v["expected"] is not None for v in reports)
         denominator=sum(v["expected"] for v in reports) if complete else None
         numerator=sum(v["delivered_targets"] for v in reports) if complete else None
         return {"version":1,"from":start.isoformat(),"to":end.isoformat(),"updated_at":int(time.time()),
-          "reports":reports,"counts":counts,"attempts":sum(v["attempts"] for v in reports),
+          "reports":reports,"templates":templates,"counts":counts,"attempts":sum(v["attempts"] for v in reports),
           "expected":denominator,"delivered_targets":numerator,
           "not_attempted":sum(v["not_attempted"] for v in reports) if complete else None,
           "skipped":sum(v["skipped"] for v in reports) if complete else None,"delivery_rate":round(100*numerator/denominator,2) if denominator else None,

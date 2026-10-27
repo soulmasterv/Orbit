@@ -180,3 +180,8 @@ Required reloads: only ios-server-control and Classera-webhook, so the new route
 Backend tests use temporary databases, fake senders and mocked provider responses. iOS tests verify owner-only headers, preview-only reads, canonical request bodies, authorization before POST, persistence before POST, no automatic POST retry, status-only recovery, safe errors, backward-compatible missing metadata, app-lock cleanup and stale-refresh rejection.
 
 Physical iPhone layout, production template contract, Subscribe now callback and real delivery remain separate verification steps. Production sending must stay disabled until the exact approved template components and opt-in callback are verified and a reviewed server adapter is deliberately installed.
+
+## Separate daily reports and template statistics
+The monitoring screen separates Daily Reports (unique class/date/report totals, attempts, outcomes and charts) from Template Stats (actual payload template names and latest-state counts). Class-ready invitations remain separate and disabled.
+The existing daily-statistics response adds optional `templates`: array of {id, template: string|null, attempts, counts}. Groups use the same date and class filters and each attempt appears in exactly one group. A missing historical name is returned as null and displayed as “Not recorded”; it is never inferred from current configuration. Missing report dates are still excluded from period statistics and explained, with unfiltered Delivery History available.
+Older responses without templates decode safely and show an update-required message. The app uses GET only for these statistics. No sender, schedule, authentication, provider template or subscription behavior changes.

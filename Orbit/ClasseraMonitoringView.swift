@@ -24,7 +24,7 @@ struct ClasseraMonitoringView: View {
         _tab = State(initialValue: initialTab); _search = State(initialValue: initialSearch)
     }
     private var query: [String: String] {
-        if tab == 2 {
+        if tab >= 2 {
             return ["from": Self.day(Self.periodStart(days)), "to": Self.day(Date()), "class_id": classID]
         }
         return ["search": search, "class_id": classID, "template": template, "status": status,
@@ -38,8 +38,8 @@ struct ClasseraMonitoringView: View {
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 16) {
-                HStack(spacing: 6) {
-                    ForEach(Array(["Waiting List", "Delivery History", "Daily Statistics"].enumerated()), id: \.offset) { index, title in
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 6) {
+                    ForEach(Array(["Waiting List", "Delivery History", "Daily Reports", "Template Stats"].enumerated()), id: \.offset) { index, title in
                         Button { tab = index; offset = 0 } label: {
                             Text(title).font(.subheadline.weight(.medium)).multilineTextAlignment(.center)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -56,7 +56,8 @@ struct ClasseraMonitoringView: View {
                 switch tab {
                 case 0: waiting
                 case 1: history
-                default: statistics
+                case 2: statistics
+                default: templateStatistics
                 }
             }.padding(16)
         }.modifier(StudentAppearance())
@@ -204,6 +205,14 @@ struct ClasseraMonitoringView: View {
                 .background(StudentPalette.surface, in: RoundedRectangle(cornerRadius: 9))
             if let data = store.statistics {
                 stamp(data.updated_at)
+                Text("Classera daily reports").font(.title3.bold())
+                Text("Daily report deliveries only. Class-ready invitations are tracked separately.")
+                    .font(.caption).foregroundStyle(.secondary)
+                HStack(spacing: 12) {
+                    reportTotal("Reports", count: data.reports.count)
+                    reportTotal("Classera 1 (F)", count: data.reports.filter { $0.class_id == "12F" }.count)
+                    reportTotal("Classera 2 (E)", count: data.reports.filter { $0.class_id == "12E" }.count)
+                }
                 metrics(data)
                 if data.reports.isEmpty { empty("No reports in this period", "No example counts are substituted for missing data.") }
                 if !data.reports.isEmpty {
@@ -273,6 +282,50 @@ struct ClasseraMonitoringView: View {
                         .font(.caption).foregroundStyle(.yellow)
                 }
                 ForEach(data.limitations, id: \.self) { Text($0).font(.caption).foregroundStyle(.secondary) }
+            }
+        }
+    }
+    private func reportTotal(_ title: String, count: Int) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(String(count)).font(.title2.bold()).monospacedDigit()
+            Text(title).font(.caption).foregroundStyle(.secondary)
+        }.frame(maxWidth: .infinity, alignment: .leading).padding(10)
+            .background(StudentPalette.surface, in: RoundedRectangle(cornerRadius: 10))
+    }
+    private var templateStatistics: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Report templates").font(.title3.bold())
+            Text("Template names come from the actual send payload. Missing historical names cannot be reconstructed.")
+                .font(.caption).foregroundStyle(.secondary)
+            Picker("Period", selection: $days) { Text("7 days").tag(7); Text("30 days").tag(30) }.pickerStyle(.segmented)
+            TextField("Class code — all", text: $classID)
+                .textInputAutocapitalization(.characters).textFieldStyle(.plain).padding(10)
+                .background(StudentPalette.surface, in: RoundedRectangle(cornerRadius: 9))
+            if let data = store.statistics {
+                stamp(data.updated_at)
+                if let templates = data.templates {
+                    if templates.isEmpty { empty("No template records in this period", "Try 30 days or another class.") }
+                    ForEach(templates) { row in
+                        VStack(alignment: .leading, spacing: 9) {
+                            Text(row.title).font(.headline).textSelection(.enabled)
+                            if row.template == nil {
+                                Text("These historical records did not store a template name. This does not indicate a delivery failure.")
+                                    .font(.caption).foregroundStyle(.yellow)
+                            }
+                            LabeledContent("Recorded attempts", value: String(row.attempts))
+                            ForEach(ClasseraDeliveryState.all, id: \.self) { state in
+                                LabeledContent(ClasseraDeliveryState.title(state), value: String(row.counts[state] ?? 0))
+                            }
+                        }.font(.subheadline).padding(14)
+                            .background(StudentPalette.surface, in: RoundedRectangle(cornerRadius: 12))
+                    }
+                } else {
+                    empty("Template statistics unavailable", "The backend needs the template statistics update. Historical template names will remain unavailable.")
+                }
+                if data.unknown_date_records > 0 {
+                    Text("\(data.unknown_date_records) historical records have no reliable report date and are excluded from this period. View them in Delivery History without date filters.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
             }
         }
     }
