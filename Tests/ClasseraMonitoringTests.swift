@@ -166,9 +166,20 @@ final class ClasseraMonitoringTests: XCTestCase {
             window.layoutIfNeeded()
             let picture=UIGraphicsImageRenderer(bounds:window.bounds).image{_ in window.drawHierarchy(in:window.bounds,afterScreenUpdates:true)}
             let attachment=XCTAttachment(image:picture);attachment.name="classera-monitoring-\(index)";attachment.lifetime = .keepAlways;add(attachment)
+            if index == 2, let scroll = verticalScroll(window.rootViewController!.view) {
+                scroll.setContentOffset(CGPoint(x: 0, y: min(600, max(0, scroll.contentSize.height-scroll.bounds.height))), animated: false)
+                window.layoutIfNeeded()
+                let lower=UIGraphicsImageRenderer(bounds:window.bounds).image{_ in window.drawHierarchy(in:window.bounds,afterScreenUpdates:true)}
+                let charts=XCTAttachment(image:lower);charts.name="classera-monitoring-charts";charts.lifetime = .keepAlways;add(charts)
+            }
             window.isHidden=true
         }
         XCTAssertFalse(MockURLProtocol.requests.contains{$0.httpMethod=="POST"})
+    }
+    private func verticalScroll(_ view: UIView) -> UIScrollView? {
+        if let scroll=view as? UIScrollView, scroll.contentSize.height > scroll.bounds.height + 100 { return scroll }
+        for child in view.subviews { if let found=verticalScroll(child) { return found } }
+        return nil
     }
     private func requestData(_ request: URLRequest) throws -> Data {
         if let body=request.httpBody{return body}

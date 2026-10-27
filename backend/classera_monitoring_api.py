@@ -43,7 +43,7 @@ class ClassReady:
             previous=conn.execute("SELECT operation_id,status FROM orbit_class_ready_recipients WHERE enrollment_key=?",(key,)).fetchone()
             r["enrollment_key"]=key
             r["notification_status"]=previous["status"] if previous else "not_notified"
-            r["eligible"]=bool(info["supported"] and r["activity_status"]=="allowed" and not r["signup"] and previous is None)
+            r["eligible"]=bool(info["supported"] and re.fullmatch(r"[1-9][0-9]{7,14}",r["phone"]) and r["activity_status"]=="allowed" and not r["signup"] and previous is None)
         safe_info={"id":info["id"],"name":info["name"],"supported":bool(info["supported"])}
         revision=hashlib.sha256(json.dumps([safe_info,rows],sort_keys=True,ensure_ascii=False).encode()).hexdigest()
         count=sum(r["eligible"] for r in rows)
@@ -139,7 +139,7 @@ class ClassReady:
                 key=hashlib.sha256(json.dumps([row["phone"],op["class_id"],student["joined_at"] if student else None]).encode()).hexdigest()
                 info=next((v for v in self.catalog() if v["id"]==op["class_id"]),{})
                 state,message,code="failed",None,"eligibility_changed"
-                if student and key==row["enrollment_key"] and info.get("supported") and info.get("template_verified") and self.sender:
+                if student and re.fullmatch(r"[1-9][0-9]{7,14}",row["phone"]) and key==row["enrollment_key"] and info.get("supported") and info.get("template_verified") and self.sender:
                     state,code="unknown",None
                     try:
                         result=self.sender(op["class_id"],row["phone"])

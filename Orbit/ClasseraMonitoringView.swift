@@ -38,11 +38,16 @@ struct ClasseraMonitoringView: View {
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 16) {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack {
-                        ForEach(Array(["Waiting List", "Delivery History", "Daily Statistics"].enumerated()), id: \.offset) { index, title in
-                            StudentFilterChip(title: title, selected: tab == index) { tab = index; offset = 0 }
-                        }
+                HStack(spacing: 6) {
+                    ForEach(Array(["Waiting List", "Delivery History", "Daily Statistics"].enumerated()), id: \.offset) { index, title in
+                        Button { tab = index; offset = 0 } label: {
+                            Text(title).font(.subheadline.weight(.medium)).multilineTextAlignment(.center)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .frame(maxWidth: .infinity, minHeight: 42)
+                                .padding(.horizontal, 5).padding(.vertical, 7)
+                                .foregroundStyle(.white)
+                                .background(tab == index ? StudentPalette.accent : StudentPalette.surface, in: RoundedRectangle(cornerRadius: 9))
+                        }.buttonStyle(.plain).accessibilityAddTraits(tab == index ? .isSelected : [])
                     }
                 }
                 if store.loading { ProgressView("Refreshing…").font(.caption) }
@@ -125,11 +130,15 @@ struct ClasseraMonitoringView: View {
     }
     private var history: some View {
         VStack(alignment: .leading, spacing: 13) {
-            StudentSearchField(text: $search)
+            StudentSearchField(text: $search).textFieldStyle(.plain)
                 .onChange(of: search) { _, _ in offset = 0 }
-            TextField("Class code — all", text: $classID).textInputAutocapitalization(.characters)
+            TextField("Class code — all", text: $classID, prompt: Text("Class code — all").foregroundStyle(StudentPalette.secondary))
+                .textInputAutocapitalization(.characters).textFieldStyle(.plain).padding(10)
+                .background(StudentPalette.surface, in: RoundedRectangle(cornerRadius: 9))
                 .onChange(of: classID) { _, _ in offset = 0 }
-            TextField("Template — all", text: $template).textInputAutocapitalization(.never)
+            TextField("Template — all", text: $template, prompt: Text("Template — all").foregroundStyle(StudentPalette.secondary))
+                .textInputAutocapitalization(.never).textFieldStyle(.plain).padding(10)
+                .background(StudentPalette.surface, in: RoundedRectangle(cornerRadius: 9))
                 .onChange(of: template) { _, _ in offset = 0 }
             HStack {
                 Picker("Status", selection: $status) {
@@ -157,7 +166,7 @@ struct ClasseraMonitoringView: View {
             }
             if let response = store.history {
                 stamp(response.updated_at)
-                Text("\(response.total) records").font(.caption).foregroundStyle(.secondary)
+                Text("\(response.total) \(response.total == 1 ? "record" : "records")").font(.caption).foregroundStyle(.secondary)
                 if response.records.isEmpty { empty("No delivery records", "Try another class, date, template or search.") }
                 ForEach(response.records) { row in
                     NavigationLink { ClasseraDeliveryDetail(record: row) } label: {
@@ -185,12 +194,14 @@ struct ClasseraMonitoringView: View {
                 }
                 ForEach(response.limitations, id: \.self) { Text($0).font(.caption).foregroundStyle(.secondary) }
             }
-        }.textFieldStyle(.roundedBorder)
+        }
     }
     private var statistics: some View {
         VStack(alignment: .leading, spacing: 14) {
             Picker("Period", selection: $days) { Text("7 days").tag(7); Text("30 days").tag(30) }.pickerStyle(.segmented)
-            TextField("Class code — all", text: $classID).textInputAutocapitalization(.characters).textFieldStyle(.roundedBorder)
+            TextField("Class code — all", text: $classID, prompt: Text("Class code — all").foregroundStyle(StudentPalette.secondary))
+                .textInputAutocapitalization(.characters).textFieldStyle(.plain).padding(10)
+                .background(StudentPalette.surface, in: RoundedRectangle(cornerRadius: 9))
             if let data = store.statistics {
                 stamp(data.updated_at)
                 metrics(data)
@@ -231,7 +242,14 @@ struct ClasseraMonitoringView: View {
                     Text("Reports — tap to inspect recipients").font(.headline)
                     ScrollView(.horizontal) {
                         VStack(alignment: .leading, spacing: 8) {
-                            Text("Date   Class   Expected   Accepted   Sent   Delivered   Read   Failed   Unknown").font(.caption.bold())
+                            HStack(spacing: 14) {
+                                Text("Date").frame(width: 86, alignment: .leading)
+                                Text("Class").frame(width: 45, alignment: .leading)
+                                Text("Expected").frame(width: 80)
+                                ForEach(["Accepted","Sent","Delivered","Read","Failed","Unknown"], id: \.self) { title in
+                                    Text(title).frame(width: 68)
+                                }
+                            }.font(.caption.bold())
                             ForEach(data.reports) { row in
                                 Button {
                                     report = row.report; classID = row.class_id; fromDate = Self.date(row.date)

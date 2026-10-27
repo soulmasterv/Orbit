@@ -200,3 +200,11 @@ class ClasseraMonitoringTests(unittest.TestCase):
             self.assertEqual(c.execute("SELECT COUNT(*) FROM orbit_class_ready_operations").fetchone()[0],1)
             self.assertEqual(c.execute("SELECT COUNT(*) FROM orbit_class_ready_recipients").fetchone()[0],2)
         self.assertEqual(self.calls,[])
+
+    def test_malformed_database_phone_is_never_eligible(self):
+        with sqlite3.connect(self.people) as c:
+            c.execute("INSERT INTO subscribers VALUES ('bad-phone','Invalid','12F',NULL,'waiting_for_class','old','now')")
+        preview=self.service.preview("12F")
+        self.assertEqual(preview["waiting_count"],3)
+        self.assertEqual(preview["eligible_count"],2)
+        self.assertFalse(next(s for s in preview["students"] if s["phone"]=="bad-phone")["eligible"])
