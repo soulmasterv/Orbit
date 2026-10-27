@@ -54,6 +54,14 @@ final class ClasseraUXTests: XCTestCase {
             return (200, status)
         }
         let server = api()
+        let dashboard = try JSONEncoder().encode(PreviewFixtures.dashboard)
+        MockURLProtocol.handler = { request in
+            if request.url?.path == "/api/dashboard" { return (200, dashboard) }
+            if request.httpMethod == "POST" { return (200, Data(#"{\"ok\":true}"#.utf8)) }
+            return (200, status)
+        }
+        await server.loadDashboard()
+        XCTAssertTrue(server.canControl)
         await server.loadServices()
         await server.serviceAction(ServiceCommand(kind: .testGeminiKey, id: "key-12", name: "Gemini 12"))
         XCTAssertEqual(MockURLProtocol.requests.filter { $0.httpMethod == "POST" }.count, 1)
