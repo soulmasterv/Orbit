@@ -49,15 +49,11 @@ final class ClasseraUXTests: XCTestCase {
     }
     func testGeminiAdditionalKeyCanBeTestedOnlyWhenServerPermits() async throws {
         let status = Data(#"{"gemini":[{"id":"key-12","name":"Gemini 12","status":"Working","canTest":true}],"classera":[],"padel":[]}"#.utf8)
-        MockURLProtocol.handler = { request in
-            if request.httpMethod == "POST" { return (200, Data(#"{"ok":true}"#.utf8)) }
-            return (200, status)
-        }
         let server = api()
         let dashboard = try JSONEncoder().encode(PreviewFixtures.dashboard)
         MockURLProtocol.handler = { request in
             if request.url?.path == "/api/dashboard" { return (200, dashboard) }
-            if request.httpMethod == "POST" { return (200, Data(#"{\"ok\":true}"#.utf8)) }
+            if request.httpMethod == "POST" { return (200, Data(#"{"ok":true}"#.utf8)) }
             return (200, status)
         }
         await server.loadDashboard()
@@ -66,6 +62,8 @@ final class ClasseraUXTests: XCTestCase {
         await server.serviceAction(ServiceCommand(kind: .testGeminiKey, id: "key-12", name: "Gemini 12"))
         XCTAssertEqual(MockURLProtocol.requests.filter { $0.httpMethod == "POST" }.count, 1)
         XCTAssertEqual(MockURLProtocol.requests.first { $0.httpMethod == "POST" }?.url?.path, "/api/services/gemini/key-12/test")
+        await server.serviceAction(ServiceCommand(kind: .testGeminiKey, id: "key-13", name: "Gemini 13"))
+        XCTAssertEqual(MockURLProtocol.requests.filter { $0.httpMethod == "POST" }.count, 1)
     }
     func testEgyptianPhoneNormalization() {
         XCTAssertEqual(ClasseraPhone.normalized("01011288486"), "201011288486")
