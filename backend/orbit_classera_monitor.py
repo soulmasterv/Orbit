@@ -144,6 +144,7 @@ class Store:
             if not row: continue
             if levels[status] < levels.get(row["status"],0): continue
             if row["status"] in ("delivered","read") and status=="failed": continue
+            if row["status"]=="failed" and status in ("reserved","unknown","accepted","sent"): continue
             if table=="orbit_delivery_attempts":
                 c.execute("UPDATE "+table+" SET status=?,updated_at=MAX(updated_at,?) WHERE message_id=?", (status,when,message_id))
             else: c.execute("UPDATE "+table+" SET status=? WHERE message_id=?", (status,message_id))
@@ -158,7 +159,7 @@ class Store:
 
     def history(self, query):
         clauses=[];args=[]
-        for key,column in [("class_id","class_id"),("report","report"),("template","template"),("status","status"),("phone","phone")]:
+        for key,column in [("class_id","class_id"),("report","report"),("template","template"),("status","status"),("phone","phone"),("record_id","id")]:
             if query.get(key):
                 if len(query[key])>300:raise ValueError("invalid_filter")
                 if key=="status" and query[key] not in STATES:raise ValueError("invalid_status")

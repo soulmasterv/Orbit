@@ -34,6 +34,7 @@ struct AdminMessage: Codable {
     let created_at: Int
     let updated_at: Int
     let pricing: MessagePricing?
+    var awaitsReadReceipt: Bool { !["read", "failed", "cancelled"].contains(status) }
     var needsRecovery: Bool { ["pending", "unknown", "accepted", "sent"].contains(status) }
     var needsReview: Bool { !["accepted", "sent", "delivered", "read", "failed", "cancelled"].contains(status) }
     var explanation: String {

@@ -168,7 +168,15 @@ struct MessageOutboxView: View {
             } else { Text("No saved message operation.") }
             MobileResultSection()
         }.navigationTitle("Message Status")
-        .task(id: phase == .active) { if phase == .active { await mobile.boundedRecovery() } }
+        .task(id: "\(phase == .active)-\(mobile.state?.outbox?.requestID.uuidString ?? "none")") {
+            guard phase == .active else { return }
+            while !Task.isCancelled {
+                await mobile.recover()
+                guard mobile.state?.outbox?.result?.awaitsReadReceipt != false else { return }
+                do { try await Task.sleep(for: .seconds(15)) } catch { return }
+                guard phase == .active && mobile.state?.outbox != nil else { return }
+            }
+        }
         .confirmationDialog("Review completed?", isPresented: $review, titleVisibility: .visible) {
             Button("Keep draft and start a new intentional action", role: .destructive) { mobile.reviewAndStartNew() }
             Button("Keep saved operation", role: .cancel) {}

@@ -75,6 +75,11 @@ struct ClasseraMonitoringView: View {
             store.restore()
             do { try await Task.sleep(for: .milliseconds(300)) } catch { return }
             await refresh()
+            while !Task.isCancelled {
+                do { try await Task.sleep(for: .seconds(15)) } catch { return }
+                guard phase == .active && api.accessAllowed else { return }
+                if !store.loading && !store.mutationBusy { await refresh() }
+            }
         }
         .onChange(of: sort) { _, _ in offset = 0 }
         .onChange(of: ascending) { _, _ in offset = 0 }
@@ -170,7 +175,7 @@ struct ClasseraMonitoringView: View {
                 Text("\(response.total) \(response.total == 1 ? "record" : "records")").font(.caption).foregroundStyle(.secondary)
                 if response.records.isEmpty { empty("No delivery records", "Try another class, date, template or search.") }
                 ForEach(response.records) { row in
-                    NavigationLink { ClasseraDeliveryDetail(record: row) } label: {
+                    NavigationLink { ClasseraDeliveryDetail(api: api, record: row) } label: {
                         VStack(alignment: .leading, spacing: 5) {
                             HStack {
                                 Text(row.student ?? "Subscriber name unavailable").font(.subheadline.weight(.semibold))
@@ -469,10 +474,17 @@ private struct ClasseraOperationPanel: View {
     }
 }
 
-private struct ClasseraDeliveryDetail: View {
-    let record: ClasseraDeliveryRecord
+struct ClasseraDeliveryDetail: View {
+    @ObservedObject var api: ServerAPI
+    @Environment(\.scenePhase) private var phase
+    @State private var record: ClasseraDeliveryRecord
+    @State private var failure: String?
+    init(api: ServerAPI, record: ClasseraDeliveryRecord) {
+        self.api = api; _record = State(initialValue: record)
+    }
     var body: some View {
         Form {
+            if let failure { Text(failure).font(.caption).foregroundStyle(.orange) }
             Section("Report delivery") {
                 LabeledContent("Student", value: record.student ?? "Unavailable")
                 LabeledContent("Phone", value: record.phone).textSelection(.enabled)
@@ -489,5 +501,28 @@ private struct ClasseraDeliveryDetail: View {
                 .font(.caption).foregroundStyle(.secondary)
         }.scrollContentBackground(.hidden).modifier(StudentAppearance())
             .navigationTitle("Delivery record").navigationBarTitleDisplayMode(.inline)
+            .task(id: phase == .active && api.accessAllowed) {
+                guard phase == .active && api.accessAllowed else { return }
+                while !Task.isCancelled {
+                    await refresh()
+                    do { try await Task.sleep(for: .seconds(15)) } catch { return }
+                    guard phase == .active && api.accessAllowed else { return }
+                }
+            }
+            .refreshable { await refresh() }
+    }
+    private func refresh() async {
+        guard api.accessAllowed && phase == .active else { return }
+        do {
+            let response = try await api.classeraDeliveryHistory(["record_id": record.id, "limit": "1"])
+            guard api.accessAllowed && phase == .active && !Task.isCancelled else { return }
+            if let latest = response.records.first(where: { $0.id == record.id }) {
+                record = latest; failure = nil
+            } else { failure = "This delivery record is no longer available." }
+        } catch {
+            if api.accessAllowed && !ServerAPI.isRefreshCancellation(error) {
+                failure = "Could not refresh delivery status. Showing the last confirmed record."
+            }
+        }
     }
 }

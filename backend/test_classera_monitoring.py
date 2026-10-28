@@ -232,3 +232,22 @@ class ClasseraMonitoringTests(unittest.TestCase):
         self.assertEqual(sum(r["attempts"] for r in groups.values()),stats["attempts"])
         self.assertEqual(sum(r["counts"]["failed"] for r in groups.values()),stats["counts"]["failed"])
         self.assertEqual(self.store.statistics({"from":"2025-01-01","to":"2025-01-02"})["templates"],[])
+
+    def test_delivery_record_identity_filter_tracks_updated_state(self):
+        run=self.store.begin("12F 26_10_26","12F",["201000000001"])
+        identifier=self.store.attempt(run,"201000000001","classera_v9")
+        self.store.result(identifier,"sent","identity-message")
+        other=self.store.attempt(run,"201000000002","classera_v9")
+        self.store.result(other,"sent","other-message")
+        self.store.event("identity-message","read",1793010002)
+        response=self.store.history({"record_id":identifier,"limit":"1"})
+        self.assertEqual(response["total"],1);self.assertEqual(response["records"][0]["id"],identifier)
+        self.assertEqual(response["records"][0]["status"],"read")
+        self.assertEqual(self.store.history({"record_id":"' OR 1=1 --"})["total"],0)
+    def test_failed_receipt_is_not_regressed_by_older_sent_status(self):
+        run=self.store.begin("12F 26_10_26","12F",["201000000001"])
+        identifier=self.store.attempt(run,"201000000001","classera_v9")
+        self.store.result(identifier,"accepted","failed-message")
+        self.store.event("failed-message","failed",1793010002)
+        self.store.event("failed-message","sent",1793010003)
+        self.assertEqual(self.store.history({"record_id":identifier})["records"][0]["status"],"failed")

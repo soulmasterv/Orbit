@@ -568,7 +568,7 @@ final class ServerAPI: ObservableObject {
         actionBusy = true; actionProgress = "Updating Classera student…"
         defer { actionBusy = false; actionProgress = "" }
         let epoch = studentsAccessGeneration
-        try await authorize("\(action.title) for this Classera student. This affects replies and daily reports.")
+        try await authorizeConfirmed("\(action.title) for this Classera student. This affects replies and daily reports.")
         guard accessAllowed && epoch == studentsAccessGeneration && !Task.isCancelled else { throw CancellationError() }
         let payload = ClasseraManagementPayload(expectedRevision: student.revision, activityStatus: action.activityStatus?.rawValue)
         let path = "/api/classera-students/\(student.phone)" + (action == .remove ? "" : "/activity")
@@ -650,7 +650,7 @@ final class ServerAPI: ObservableObject {
               accessAllowed, !actionBusy, !Task.isCancelled else { throw CancellationError() }
         actionBusy = true; defer { actionBusy = false }
         let epoch = studentsAccessGeneration
-        try await authorize("Send this confirmed plain-text WhatsApp message to ONE person.")
+        try await authorizeConfirmed("Send this confirmed plain-text WhatsApp message to ONE person.")
         guard accessAllowed && epoch == studentsAccessGeneration && !Task.isCancelled else { throw CancellationError() }
         try persist()
         let data = try await classeraDirectoryData(path: "/api/classera-students/\(phone)/messaging", method: "POST",
@@ -691,13 +691,19 @@ final class ServerAPI: ObservableObject {
         return data
     }
 
+    private func authorizeConfirmed(_ reason: String) async throws {
+        try await DeviceAuthorization.$confirmationProvided.withValue(true) {
+            try await authorize(reason)
+        }
+    }
+
     func authorizeMobileSend(reason: String = "Send this confirmed plain-text message to one student.", progress: String = "Authorize one plain-text message…") async throws {
         guard accessAllowed && !actionBusy && !previewMode else { throw StudentMutationFailure.notSent }
         let epoch = studentsAccessGeneration
         actionBusy = true
         actionProgress = progress
         defer { actionBusy = false; actionProgress = "" }
-        try await authorize(reason)
+        try await authorizeConfirmed(reason)
         guard accessAllowed && epoch == studentsAccessGeneration else { throw StudentMutationFailure.notSent }
     }
 
@@ -782,7 +788,7 @@ final class ServerAPI: ObservableObject {
         defer { actionBusy = false; actionProgress = "" }
         let epoch = studentsAccessGeneration
         do {
-            try await authorize("\(action.title) in the Students directory. \(action.explanation)")
+            try await authorizeConfirmed("\(action.title) in the Students directory. \(action.explanation)")
         } catch {
             if DeviceAuthorization.isCancellation(error) || Self.isRefreshCancellation(error) { throw StudentMutationFailure.notSent }
             throw StudentMutationFailure.authorizationFailed
@@ -848,7 +854,7 @@ final class ServerAPI: ObservableObject {
         var commandStarted = false
         let generation = refreshGeneration
         do {
-            try await authorize(authorizationReason ?? "\(action.title) \(name) on your server.")
+            try await authorizeConfirmed(authorizationReason ?? "\(action.title) \(name) on your server.")
             guard accessAllowed && generation == refreshGeneration else { throw CancellationError() }
             var command = try request(path: path, method: "POST")
             if let body {
@@ -1043,7 +1049,7 @@ extension ServerAPI {
         actionBusy = true; actionProgress = "Authorize class notification…"
         defer { actionBusy = false; actionProgress = "" }
         let epoch = studentsAccessGeneration
-        do { try await authorize("Invite \(payload.expected_eligible_count) waiting students in \(payload.class_id) to opt in. This sends WhatsApp notifications.") }
+        do { try await authorizeConfirmed("Invite \(payload.expected_eligible_count) waiting students in \(payload.class_id) to opt in. This sends WhatsApp notifications.") }
         catch { throw ClasseraMonitoringFailure.notSent }
         guard accessAllowed && epoch == studentsAccessGeneration && !Task.isCancelled else { throw ClasseraMonitoringFailure.notSent }
         try beforeSubmit() // Persist identity before the only POST. Failure aborts the send.

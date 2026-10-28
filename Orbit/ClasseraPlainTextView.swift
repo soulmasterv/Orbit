@@ -107,6 +107,15 @@ struct ClasseraPlainTextView: View {
             catch { vaultReady = false; self.error = error.localizedDescription }
             await refresh()
         }
+        .task(id: "\(phase == .active && api.accessAllowed)-\(pending?.id ?? "none")") {
+            guard phase == .active && api.accessAllowed && pending != nil else { return }
+            while !Task.isCancelled {
+                do { try await Task.sleep(for: .seconds(15)) } catch { return }
+                guard phase == .active && api.accessAllowed && pending != nil else { return }
+                if !busy { await checkStatus() }
+                if let state = operation?.status, ["read", "failed"].contains(state) { return }
+            }
+        }
         .onDisappear { generation += 1; text = ""; response = nil }
         .confirmationDialog("Send this message to ONE person?", isPresented: $confirm, titleVisibility: .visible) {
             Button("Send message") { Task { await send() } }
