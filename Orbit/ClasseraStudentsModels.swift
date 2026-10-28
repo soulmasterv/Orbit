@@ -129,6 +129,13 @@ struct ClasseraWhatsAppWindow: Codable, Identifiable {
         let duration = max(0, Double(elapsed.seconds) + Double(elapsed.attoseconds) / 1e18)
         return max(0, Double(seconds) - duration)
     }
+    func displayLabel(since received: ContinuousClock.Instant, at now: ContinuousClock.Instant = .now, timeZone: TimeZone = .current) -> String {
+        guard let seconds = remainingSeconds(since: received, at: now) else { return "Unavailable" }
+        guard seconds > 0 else { return "Closed" }
+        guard let inbound = lastInboundAt,
+              let clock = WindowClock.time(Date(timeIntervalSince1970: Double(inbound) + 86400), timeZone: timeZone) else { return "Open · closing time unavailable" }
+        return "Open until " + clock
+    }
     func label(since received: ContinuousClock.Instant, at now: ContinuousClock.Instant = .now) -> String {
         guard let seconds = remainingSeconds(since: received, at: now) else { return "Unavailable" }
         guard seconds > 0 else { return "Closed" }

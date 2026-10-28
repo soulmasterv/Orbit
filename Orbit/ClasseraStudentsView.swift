@@ -311,7 +311,7 @@ struct ClasseraStudentEditor: View {
                             HStack(spacing: 6) {
                                 Circle().fill(remaining == nil ? Color.gray : remaining! > 0 ? Color.green : Color.gray)
                                     .frame(width: 6, height: 6)
-                                Text(window.label(since: windowInstant)).monospacedDigit()
+                                Text(window.displayLabel(since: windowInstant)).monospacedDigit()
                             }
                         }.font(.caption)
                     }

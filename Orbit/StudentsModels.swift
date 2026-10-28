@@ -74,6 +74,13 @@ struct StudentsSnapshot {
         return max(0, Double(max(0, student.secondsLeft)) - max(0, seconds))
     }
     func isWindowOpen(for student: Student, at now: ContinuousClock.Instant = ContinuousClock.now) -> Bool { remainingSeconds(for: student, at: now) > 0 }
+    func windowLabel(for student: Student, at now: ContinuousClock.Instant = .now, timeZone: TimeZone = .current) -> String {
+        guard isWindowOpen(for: student, at: now) else { return "Window closed" }
+        let deadline = student.lastInboundDate?.addingTimeInterval(86400)
+            ?? receivedAt.addingTimeInterval(Double(max(0, student.secondsLeft)))
+        guard let clock = WindowClock.time(deadline, timeZone: timeZone) else { return "Window open · closing time unavailable" }
+        return "Open until " + clock
+    }
     func countdown(for student: Student, at now: ContinuousClock.Instant = ContinuousClock.now) -> String {
         let minutes = min(ceil(remainingSeconds(for: student, at: now) / 60), Double(Int.max / 60))
         let total = Int(minutes)
@@ -173,3 +180,15 @@ enum StudentMutationFailure: Error { case notSent, authorizationFailed, uncertai
 
 
 
+
+enum WindowClock {
+    static func time(_ date: Date, timeZone: TimeZone = .current) -> String? {
+        guard date.timeIntervalSince1970.isFinite, (0...253402300799).contains(date.timeIntervalSince1970) else { return nil }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.timeZone = timeZone
+        formatter.dateFormat = "h:mm a"
+        return formatter.string(from: date)
+    }
+}

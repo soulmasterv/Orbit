@@ -155,7 +155,7 @@ struct StudentDirectoryCard: View {
         StudentCompactRow(name: student.displayName, phone: student.phone,
             chips: [student.state == "active" ? student.gradeLabel : student.stateLabel],
             status: student.activityStatus,
-            note: snapshot.isWindowOpen(for: student, at: now) ? "Window open · \(snapshot.countdown(for: student, at: now))" : "Window closed",
+            note: snapshot.windowLabel(for: student, at: now),
             alternate: alternate)
     }
 }
@@ -169,7 +169,7 @@ private struct StudentWindowStatus: View {
     var body: some View {
         HStack(spacing: 5) {
             Circle().fill(open ? StudentPalette.accent : Color.gray).frame(width: 7, height: 7)
-            Text(open ? "Window open · \(snapshot.countdown(for: student, at: now))" : "Window closed")
+            Text(snapshot.windowLabel(for: student, at: now))
                 .font(.caption.weight(.semibold)).monospacedDigit().foregroundStyle(.secondary)
         }
         .accessibilityElement(children: .ignore)

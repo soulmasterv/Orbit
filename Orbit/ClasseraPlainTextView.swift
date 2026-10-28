@@ -65,7 +65,7 @@ struct ClasseraPlainTextView: View {
                     }
                 }.disabled(busy || pending != nil)
                 TimelineView(.periodic(from: .now, by: 15)) { _ in
-                    Text(window?.label(since: received) ?? "Window unavailable").font(.subheadline)
+                    Text(window?.displayLabel(since: received) ?? "Window unavailable").font(.subheadline)
                 }
                 Button("Refresh window") { Task { await refresh() } }.disabled(busy)
             }

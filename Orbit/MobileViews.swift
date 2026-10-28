@@ -119,7 +119,7 @@ struct StudentMessageComposer: View {
                 Text("Manual plain text only. The server makes the final window and restriction check. No template fallback or automatic reminder.").font(.caption)
                 if let snapshot = students.snapshot, let student = snapshot.students.first(where: { $0.phone == phone }) {
                     TimelineView(.periodic(from: .now, by: 1)) { _ in
-                        Text("Window remaining: \(snapshot.countdown(for: student)) (advisory)").font(.caption).monospacedDigit()
+                        Text(snapshot.windowLabel(for: student) + " (advisory)").font(.caption).monospacedDigit()
                     }
                 }
                 TextEditor(text: $text).frame(minHeight: 150).disabled(mobile.busy)
