@@ -100,6 +100,21 @@ struct HomeView: View {
                         }
                     }
                 }.buttonStyle(.plain)
+                NavigationLink {
+                    AIKeyUsageView(api: api)
+                } label: {
+                    Panel {
+                        HStack(spacing: 12) {
+                            Image(systemName: "chart.bar").foregroundStyle(Brand.accent)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("AI Key Usage").font(.headline).foregroundStyle(.primary)
+                                Text("Classera Gemini requests and unused keys").font(.caption).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right").foregroundStyle(.secondary)
+                        }
+                    }
+                }.buttonStyle(.plain)
                 if !favorites.isEmpty {
                     SectionHeading(title: "Favorites")
                     LazyVGrid(columns: columns, spacing: 10) { ForEach(favorites) { tile($0) } }
@@ -177,6 +192,7 @@ extension DockerContainer {
     var displayStatus: String { isUnhealthy ? "Unhealthy" : (isRunning ? "Running" : (state?.capitalized ?? "Unknown")) }
 }
 extension PadelComponent { var isWhatsApp: Bool { id.lowercased() == "whatsapp" || name.lowercased().contains("whatsapp") } }
+
 
 
 
