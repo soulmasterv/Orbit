@@ -61,8 +61,38 @@ def apply(stage):
         tmp=target.with_suffix(".py.tmp");tmp.write_text(text);os.replace(tmp,target)
     print("Receipt-only hooks and monotonic updates installed with private backups; no messages sent.")
 
+def patch_summary(source):
+    ast.parse(source);lines=source.splitlines(keepends=True)
+    functions=[n for n in ast.walk(ast.parse(source)) if isinstance(n,ast.FunctionDef) and n.name=="read_classera_delivery_status"]
+    if len(functions)!=1:raise RuntimeError("Delivery summary function changed")
+    node=functions[0];edits=[]
+    for assignment in ast.walk(node):
+        if not isinstance(assignment,ast.Assign) or not isinstance(assignment.value,ast.Call):continue
+        for target in assignment.targets:
+            if isinstance(target,ast.Subscript) and isinstance(target.slice,ast.Constant) and target.slice.value=="whatsappStatus":
+                if ast.unparse(assignment.value)!="labels.get(selected, 'Unknown')":raise RuntimeError("Summary selection changed")
+                indent=" "*assignment.col_offset
+                edits.append((assignment.lineno-1,assignment.end_lineno,
+                    indent+"from orbit_delivery_receipts import summary_status\n"+indent+'result["whatsappStatus"] = summary_status(statuses)\n'))
+    if len(edits)!=1:raise RuntimeError("Expected one delivery badge assignment")
+    for start,end,text in sorted(edits,reverse=True):lines[start:end]=[text]
+    result="".join(lines);ast.parse(result);return result
+
+def apply_summary(stage):
+    root=Path("/home/local/ios-swift-app");target=root/"server_control.py"
+    source=target.read_text();result=patch_summary(source)
+    backup=Path("/home/local/.local/state/orbit-fixes")/("delivery-summary-"+time.strftime("%Y%m%dT%H%M%SZ",time.gmtime()))
+    backup.mkdir(mode=0o700,parents=True,exist_ok=False);shutil.copy2(target,backup/target.name);os.chmod(backup/target.name,0o600)
+    for destination in [root/"orbit_delivery_receipts.py",Path("/home/local/classera/shared/orbit_delivery_receipts.py")]:
+        if destination.exists():shutil.copy2(destination,backup/(destination.parent.name+"-receipts.py"))
+        text=(stage/"orbit_delivery_receipts.py").read_text();compile(text,"receipts","exec")
+        tmp=destination.with_suffix(".py.tmp");tmp.write_text(text);os.replace(tmp,destination)
+    tmp=target.with_suffix(".py.tmp");tmp.write_text(result);os.replace(tmp,target)
+    print("Aggregate delivery badge now distinguishes partial progress; counters unchanged.")
+
 if __name__=="__main__":
     import argparse
-    p=argparse.ArgumentParser();p.add_argument("--apply",action="store_true");args=p.parse_args()
-    if args.apply:apply(Path(__file__).parent)
+    p=argparse.ArgumentParser();p.add_argument("--apply",action="store_true");p.add_argument("--summary-only",action="store_true");args=p.parse_args()
+    if args.summary_only:apply_summary(Path(__file__).parent)
+    elif args.apply:apply(Path(__file__).parent)
     else:raise SystemExit("Explicit --apply required")

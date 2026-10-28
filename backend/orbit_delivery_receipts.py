@@ -65,3 +65,14 @@ def replay_recorded_receipts(logfile,known_ids,update):
                 update(identifier,status,event_at=when)
                 counts[status]+=1;matched.add(identifier)
     return {"receipt_events":dict(counts),"matched_message_count":len(matched)}
+
+def summary_status(statuses):
+    states={str(s).lower() for s in statuses}
+    if not states:return "No tracked sends"
+    if "failed" in states:return "Failed" if states=={"failed"} else "Partially failed"
+    if "unknown" in states:return "Unknown" if states=={"unknown"} else "Partially unknown"
+    for state,title in [("read","Read"),("delivered","Delivered"),("sent","Sent")]:
+        if state in states:return title if states=={state} else "Partially "+state
+    if "sending" in states or "reserved" in states:return "Sending"
+    if "accepted" in states:return "Accepted"
+    return "Unknown"

@@ -1,7 +1,7 @@
 import ast,sqlite3,tempfile,unittest
 from pathlib import Path
-from orbit_delivery_receipts import route_kapso_receipt,advance_legacy,replay_recorded_receipts
-from install_delivery_receipts import patch_webhook,patch_guard
+from orbit_delivery_receipts import route_kapso_receipt,advance_legacy,replay_recorded_receipts,summary_status
+from install_delivery_receipts import patch_webhook,patch_guard,patch_summary
 
 class ReceiptTests(unittest.TestCase):
     def test_outbound_delivery_envelopes_never_enter_inbound_or_send(self):
@@ -59,3 +59,23 @@ class ReceiptTests(unittest.TestCase):
             self.assertEqual(result["receipt_events"],{"read":1,"delivered":1})
     def test_installer_refuses_changed_guard(self):
         with self.assertRaises(RuntimeError):patch_guard("def update_by_message_id(a,b):\n    return False\n")
+
+    def test_aggregate_badge_does_not_hide_delivered_or_read_behind_sent(self):
+        self.assertEqual(summary_status(["sent","delivered","read"]),"Partially read")
+        self.assertEqual(summary_status(["sent","delivered"]),"Partially delivered")
+        self.assertEqual(summary_status(["read","read"]),"Read")
+        self.assertEqual(summary_status(["delivered"]),"Delivered")
+        self.assertEqual(summary_status(["failed","read"]),"Partially failed")
+        self.assertEqual(summary_status([]),"No tracked sends")
+    def test_summary_patch_changes_only_final_badge_selection(self):
+        source="""def read_classera_delivery_status(classera_id):
+    statuses = {'sent', 'read'}
+    result = {'readCount': 1}
+    labels = {'read': 'Read'}
+    selected = 'sent'
+    result['whatsappStatus'] = labels.get(selected, 'Unknown')
+    return result
+"""
+        scope={};exec(patch_summary(source),scope)
+        result=scope["read_classera_delivery_status"]("classera-1")
+        self.assertEqual(result["whatsappStatus"],"Partially read");self.assertEqual(result["readCount"],1)

@@ -30,3 +30,7 @@ No detailed-report/Get Detailed View button changes: the user withdrew that requ
 No School backend changes, no webhook configuration changes, no schedules or credentials changed, and no real WhatsApp send or resend.
 Tests cover outbound/inbound/test separation, raw Meta body preservation, out-of-order updates, failed-state ordering, safe recorded-receipt replay, exact record lookup, read-only refresh, continuing after Delivered and confirmation-vs-device-auth policy.
 Production read-only checks and physical iPhone checks must be reported separately from fixture tests.
+
+## Aggregate Classera badge
+A second verified issue was summary priority: any Sent row masked Delivered/Read rows. Live Classera1 had5Sent9Delivered15Read but badge Sent; Classera2 had5Sent16Delivered10Read but badge Sent.
+The summary now reports mixed progress explicitly (Partially read / Partially delivered / Partially sent; failures/unknowns remain explicit). Uniform states remain Read/Delivered/Sent. All individual counts stay unchanged. The summary-only installer patches only final badge selection with a private source backup. A live authenticated read verified Partially read for the mixed classes. This backend fix is visible to the existing installed app after refreshing.
