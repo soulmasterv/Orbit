@@ -88,18 +88,14 @@ struct AppRootView: View {
     }
 
     var body: some View {
-        ZStack {
-            if session.isUnlocked {
-                ContentView(api: api, mobile: mobile)
-                    .environmentObject(mobile)
-                    .disabled(privacyCover)
-                    .accessibilityHidden(privacyCover)
-            }
-            if session.lockEnabled && (!session.isUnlocked || privacyCover) {
+        RetainedProtectedContent(visible: session.isUnlocked && !privacyCover) {
+            ContentView(api: api, mobile: mobile)
+                .environmentObject(mobile)
+        } cover: {
+            if session.lockEnabled {
                 LockScreen(session: session, privacyOnly: session.isUnlocked)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Brand.background.ignoresSafeArea())
-                    .zIndex(1)
             }
         }
         .task { await activateIfNeeded() }
@@ -126,6 +122,7 @@ struct AppRootView: View {
             }
         }
         .onChange(of: session.isUnlocked) { _, unlocked in
+            if !unlocked { DeviceAuthorization.cancelCurrentAuthentication() }
             let wasAllowed = api.accessAllowed
             api.setAccessAllowed(unlocked && phase == .active)
             if unlocked && phase == .active && !wasAllowed {
@@ -153,6 +150,7 @@ struct LockScreen: View {
         VStack(spacing: 24) {
             BrandMark(size: 80)
             Text("Orbit").font(.largeTitle.bold())
+            Text(OrbitBuildInfo().label).font(.caption).foregroundStyle(.secondary)
             if !privacyOnly {
                 if session.isAuthenticating { ProgressView("Authenticating…") }
                 else {
@@ -170,6 +168,7 @@ struct LockScreen: View {
         }.padding(32)
     }
 }
+
 
 
 

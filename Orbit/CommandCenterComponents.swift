@@ -30,7 +30,7 @@ struct StatusBadge: View {
 }
 struct Panel<Content: View>: View {
     @ViewBuilder let content: () -> Content
-    var body: some View { content().padding(12).background(Brand.surface, in: RoundedRectangle(cornerRadius: 16)) }
+    var body: some View { content().padding(12).background(Brand.surface, in: RoundedRectangle(cornerRadius: 12)) }
 }
 struct FavoriteButton: View {
     @EnvironmentObject private var library: HomelabStore
@@ -78,6 +78,7 @@ struct ActivityRow: View {
 struct ActivityView: View {
     @EnvironmentObject private var library: HomelabStore
     @State private var clearConfirmation = false
+    @Environment(\.orbitAccessAllowed) private var accessAllowed
     var body: some View {
         List {
             Section {
@@ -89,9 +90,11 @@ struct ActivityView: View {
                 ForEach(library.events) { ActivityRow(event: $0) }
             }
         }.navigationTitle("Activity").navigationBarTitleDisplayMode(.inline)
+        .onChange(of: accessAllowed) { _, allowed in if !allowed { clearConfirmation = false } }
         .toolbar { ToolbarItem(placement: .topBarTrailing) { if !library.events.isEmpty { Button("Clear", role: .destructive) { clearConfirmation = true } } } }
         .confirmationDialog("Clear activity on this iPhone?", isPresented: $clearConfirmation, titleVisibility: .visible) {
             Button("Clear local history", role: .destructive) { library.clearHistory() }
         } message: { Text("This removes the local action history. Server records are unaffected.") }
     }
 }
+

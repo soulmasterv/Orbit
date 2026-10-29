@@ -20,7 +20,7 @@ final class WindowClockTests: XCTestCase {
         XCTAssertEqual(window.remainingSeconds(since: start, at: start), 5400)
         XCTAssertEqual(window.displayLabel(since: start, at: start.advanced(by: .seconds(5400)), timeZone: utc), "Closed")
         let missing = ClasseraWhatsAppWindow(className: "12F", windowOpen: nil, secondsLeft: nil, lastInboundAt: nil)
-        XCTAssertEqual(missing.displayLabel(since: start, at: start, timeZone: utc), "Unavailable")
+        XCTAssertEqual(missing.displayLabel(since: start, at: start, timeZone: utc), "Unknown")
     }
     func testSchoolClosingClockUsesServerSnapshotAndDoesNotAlterEligibility() throws {
         let data = Data(#"{"phone":"201000000001","name":"Student","grade":"12","state":"active","window_open":true,"seconds_left":5400}"#.utf8)
@@ -33,3 +33,4 @@ final class WindowClockTests: XCTestCase {
         XCTAssertEqual(snapshot.windowLabel(for: student, at: start.advanced(by: .seconds(5400)), timeZone: utc), "Window closed")
     }
 }
+

@@ -11,7 +11,7 @@ struct SettingsView: View {
     @AppStorage("appLock.v4") private var appLock = true
     @State private var lockChange = false
     @State private var lockChangeBusy = false
-    @AppStorage("appearance.v2") private var appearance = AppAppearance.system.rawValue
+    @AppStorage("appearance.v2") private var appearance = AppAppearance.dark.rawValue
 
     var body: some View {
         Form {
@@ -21,8 +21,8 @@ struct SettingsView: View {
                     VStack(alignment: .leading, spacing: 5) {
                         Text("Orbit").font(.title3.bold())
                         Text("Homelab Command Center").font(.caption).foregroundStyle(.secondary)
-                        Text("Version \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "4.0.0") • Build \(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1")")
-                            .font(.caption2).foregroundStyle(.secondary)
+                        Text(OrbitBuildInfo().label)
+                            .font(.subheadline).foregroundStyle(.secondary)
                     }.padding(.vertical, 8)
                 }
             }
@@ -87,6 +87,11 @@ struct SettingsView: View {
                     ForEach(AppAppearance.allCases) { option in Text(option.title).tag(option.rawValue) }
                 }
             }
+            Section("App updates") {
+                NavigationLink { OrbitChangelogView() } label: {
+                    Label("What’s new", systemImage: "text.bubble")
+                }
+            }
             Section("Students") {
                 NavigationLink {
                     StudentsSettingsView(api: api)
@@ -112,10 +117,14 @@ struct SettingsView: View {
             } header: { Text("About") }
         }
         .navigationTitle("Settings").navigationBarTitleDisplayMode(.inline)
+        .scrollContentBackground(.hidden).background(Brand.background)
         .onAppear {
             serverURL = api.baseURL
         }
         .onDisappear { token = "" }
+        .onChange(of: api.accessAllowed) { _, allowed in
+            if !allowed { token = ""; removeConfirmation = false; lockChange = false }
+        }
         .confirmationDialog("Disable app lock on this iPhone?", isPresented: $lockChange, titleVisibility: .visible) {
             Button("Disable app lock", role: .destructive) {
                 lockChangeBusy = true
@@ -143,6 +152,7 @@ struct SettingsView: View {
         } message: { Text("This disconnects the app. It does not change or revoke the token on Ubuntu.") }
     }
 }
+
 
 
 

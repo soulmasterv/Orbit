@@ -343,7 +343,9 @@ struct JarvisView: View {
             await next.connect()
         }
         .onDisappear { connection?.suspend(); session.detach() }
-        .onChange(of: api.accessAllowed) { _, allowed in if !allowed { connection?.suspend() } }
+        .onChange(of: api.accessAllowed) { _, allowed in
+            if !allowed { session.finishConfirmation(false); connection?.suspend() }
+        }
         .onChange(of: phase) { _, value in
             if value == .background { connection?.suspend(); session.stop("Paused in background. Tap Start voice when ready.", background: true) }
             else if value == .active { session.activate() }
@@ -385,3 +387,4 @@ private struct JarvisConnectionOverlay: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
+

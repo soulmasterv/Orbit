@@ -122,25 +122,35 @@ struct ClasseraWhatsAppWindow: Codable, Identifiable {
         case secondsLeft = "seconds_left", lastInboundAt = "last_inbound_at", canSendPlaintext = "can_send_plaintext"
     }
     func remainingSeconds(since received: ContinuousClock.Instant, at now: ContinuousClock.Instant = .now) -> TimeInterval? {
-        guard let open = windowOpen, let seconds = secondsLeft, (0...86400).contains(seconds),
-              let inbound = lastInboundAt, inbound > 0 else { return nil }
-        if !open { return seconds == 0 ? 0 : nil }
         let elapsed = received.duration(to: now).components
         let duration = max(0, Double(elapsed.seconds) + Double(elapsed.attoseconds) / 1e18)
-        return max(0, Double(seconds) - duration)
+        return WhatsAppWindowState.evidence(open: windowOpen, seconds: secondsLeft, elapsed: duration).remaining
     }
-    func displayLabel(since received: ContinuousClock.Instant, at now: ContinuousClock.Instant = .now, timeZone: TimeZone = .current) -> String {
-        guard let seconds = remainingSeconds(since: received, at: now) else { return "Unavailable" }
+    func displayLabel(since received: ContinuousClock.Instant, at now: ContinuousClock.Instant = .now, receivedAt: Date? = nil, timeZone: TimeZone = .current) -> String {
+        guard let seconds = remainingSeconds(since: received, at: now) else { return "Unknown" }
         guard seconds > 0 else { return "Closed" }
-        guard let inbound = lastInboundAt,
-              let clock = WindowClock.time(Date(timeIntervalSince1970: Double(inbound) + 86400), timeZone: timeZone) else { return "Open · closing time unavailable" }
+        let deadline = lastInboundAt.flatMap { $0 > 0 ? Date(timeIntervalSince1970: Double($0) + 86400) : nil }
+            ?? receivedAt.map { $0.addingTimeInterval(Double(secondsLeft ?? 0)) }
+        guard let deadline, let clock = WindowClock.time(deadline, timeZone: timeZone) else { return "Open · closing time unavailable" }
         return "Open until " + clock
     }
     func label(since received: ContinuousClock.Instant, at now: ContinuousClock.Instant = .now) -> String {
-        guard let seconds = remainingSeconds(since: received, at: now) else { return "Unavailable" }
+        guard let seconds = remainingSeconds(since: received, at: now) else { return "Unknown" }
         guard seconds > 0 else { return "Closed" }
         let minutes = Int(ceil(seconds / 60))
         return String(format: "Open · %02ld:%02ld", minutes / 60, minutes % 60)
+    }
+}
+
+extension ClasseraWhatsAppWindow {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        className = try c.decode(String.self, forKey: .className)
+        // Malformed/missing window evidence is unknown; it never authorizes sending.
+        windowOpen = try? c.decodeIfPresent(Bool.self, forKey: .windowOpen)
+        secondsLeft = try? c.decodeIfPresent(Int.self, forKey: .secondsLeft)
+        lastInboundAt = try? c.decodeIfPresent(Int.self, forKey: .lastInboundAt)
+        canSendPlaintext = try? c.decodeIfPresent(Bool.self, forKey: .canSendPlaintext)
     }
 }
 
@@ -169,7 +179,11 @@ struct ClasseraMessagingResponse: Decodable {
     let version: Int
     let phone: String
     let whatsappWindows: [ClasseraWhatsAppWindow]
-    enum CodingKeys: String, CodingKey { case version, phone; case whatsappWindows = "whatsapp_windows" }
+    let updatedAt: Int?
+    init(version: Int, phone: String, whatsappWindows: [ClasseraWhatsAppWindow], updatedAt: Int? = nil) {
+        self.version = version; self.phone = phone; self.whatsappWindows = whatsappWindows; self.updatedAt = updatedAt
+    }
+    enum CodingKeys: String, CodingKey { case version, phone; case whatsappWindows = "whatsapp_windows", updatedAt = "updated_at" }
 }
 struct ClasseraTextPayload: Codable {
     let requestID: String
@@ -198,3 +212,4 @@ struct ClasseraTextRejection: Error, LocalizedError {
         }
     }
 }
+

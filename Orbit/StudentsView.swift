@@ -12,6 +12,13 @@ struct StudentsView: View {
     private let embedded: Bool
     @State private var selectedGrade = ""
     @State private var refreshOwner = UUID()
+    @Environment(\.orbitNavigation) private var navigation
+    @State private var localAnchor: String?
+    private var scrollAnchor: Binding<String?> {
+        Binding(get: { navigation?.anchor(for: "school-directory") ?? localAnchor }, set: { value in
+            if let value { localAnchor = value; navigation?.remember(value, for: "school-directory") }
+        })
+    }
 
     init(api: ServerAPI, store: StudentsStore? = nil, embedded: Bool = false) {
         self.embedded = embedded
@@ -52,6 +59,10 @@ struct StudentsView: View {
             }.frame(maxWidth: .infinity, alignment: .leading)
         }
         .modifier(StudentAppearance())
+        .scrollPosition(id: scrollAnchor, anchor: .top)
+        .navigationDestination(for: SchoolStudentRoute.self) { route in
+            StudentDetailView(api: api, store: store, phone: route.phone)
+        }
         .navigationTitle(embedded ? "Orbit" : "Students").navigationBarTitleDisplayMode(.inline)
         .scrollDismissesKeyboard(.interactively)
         .toolbar {
@@ -133,11 +144,12 @@ struct StudentsView: View {
                     .frame(maxWidth: .infinity).padding(.vertical, 20)
             }
             ForEach(Array(rows.enumerated()), id: \.element.id) { index, student in
-                NavigationLink { StudentDetailView(api: api, store: store, phone: student.phone) } label: {
-                    StudentDirectoryCard(snapshot: snapshot, student: student, now: now, alternate: !index.isMultiple(of: 2))
-                }.buttonStyle(.plain)
+                NavigationLink(value: SchoolStudentRoute(phone: student.phone)) {
+                    StudentDirectoryCard(snapshot: snapshot, student: student, now: now,
+                        alternate: !index.isMultiple(of: 2), verified: store.error == nil)
+                }.buttonStyle(.plain).id(student.phone)
             }
-        }.frame(maxWidth: .infinity, alignment: .leading)
+        }.frame(maxWidth: .infinity, alignment: .leading).scrollTargetLayout()
     }
 
     private func resultCount(_ count: Int, total: Int) -> some View {
@@ -151,11 +163,13 @@ struct StudentDirectoryCard: View {
     let student: Student
     let now: ContinuousClock.Instant
     var alternate = false
+    var verified = true
     var body: some View {
         StudentCompactRow(name: student.displayName, phone: student.phone,
             chips: [student.state == "active" ? student.gradeLabel : student.stateLabel],
             status: student.activityStatus,
-            note: snapshot.windowLabel(for: student, at: now),
+            note: verified ? snapshot.windowLabel(for: student, at: now) : "Window unknown · Refresh failed",
+            noteColor: !verified || snapshot.windowState(for: student, at: now) == .unknown ? .orange : StudentPalette.secondary,
             alternate: alternate)
     }
 }
@@ -164,16 +178,19 @@ private struct StudentWindowStatus: View {
     let snapshot: StudentsSnapshot
     let student: Student
     let now: ContinuousClock.Instant
-    private var open: Bool { snapshot.isWindowOpen(for: student, at: now) }
+    var verified = true
+    private var state: WhatsAppWindowState { verified ? snapshot.windowState(for: student, at: now) : .unknown }
+    private var open: Bool { state.isOpen }
 
     var body: some View {
         HStack(spacing: 5) {
-            Circle().fill(open ? StudentPalette.accent : Color.gray).frame(width: 7, height: 7)
-            Text(snapshot.windowLabel(for: student, at: now))
+            Circle().fill(state == .unknown ? Color.orange : open ? StudentPalette.accent : Color.gray).frame(width: 7, height: 7)
+            Text(verified ? snapshot.windowLabel(for: student, at: now) : "Window unknown")
                 .font(.caption.weight(.semibold)).monospacedDigit().foregroundStyle(.secondary)
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(open ? "Window open, \(snapshot.countdown(for: student, at: now)) remaining" : "Window closed")
+        .accessibilityLabel(open ? "Window open, \(snapshot.countdown(for: student, at: now)) remaining" :
+            state == .unknown ? "Window unknown" : "Window closed")
     }
 }
 
@@ -186,6 +203,14 @@ struct StudentDetailView: View {
     @State private var visible = false
     @State private var refreshOwner = UUID()
     @State private var pending: StudentManagementAction?
+    @Environment(\.orbitNavigation) private var navigation
+    @State private var localAnchor: String?
+    private var scrollAnchor: Binding<String?> {
+        let key = "school-detail-" + phone
+        return Binding(get: { navigation?.anchor(for: key) ?? localAnchor }, set: { value in
+            if let value { localAnchor = value; navigation?.remember(value, for: key) }
+        })
+    }
     private var refreshEnabled: Bool { visible && scenePhase == .active && api.accessAllowed }
 
     var body: some View {
@@ -200,7 +225,7 @@ struct StudentDetailView: View {
                     } else {
                         LabeledContent("State", value: student.stateLabel)
                     }
-                }
+                }.id("student")
                 Section("Activity") {
                     LabeledContent("First seen", value: timestamp(student.firstSeenDate))
                     LabeledContent("Last message", value: timestamp(student.lastInboundDate))
@@ -208,10 +233,13 @@ struct StudentDetailView: View {
                         HStack {
                             Text("Messaging window")
                             Spacer()
-                            StudentWindowStatus(snapshot: snapshot, student: student, now: ContinuousClock.now)
+                            StudentWindowStatus(snapshot: snapshot, student: student, now: ContinuousClock.now, verified: store.error == nil)
                         }
                     }
-                }
+                    if store.loading { ProgressView("Checking window status…").font(.caption) }
+                    Button("Refresh window status") { Task { await store.refresh() } }
+                        .disabled(store.loading || store.mutationBusy || !api.accessAllowed)
+                }.id("activity")
                 Section("Bot reply activity") {
                     StudentActivityBadge(status: student.activityStatus)
                     Text("Suspend pauses outgoing messages from the school assistant until Resume. Your profile and onboarding remain. Messages already submitted to WhatsApp cannot be recalled. Classera has separate controls.")
@@ -224,19 +252,19 @@ struct StudentDetailView: View {
                             pending = action
                         }.disabled(store.managementUnavailableReason(for: student) != nil)
                     }
-                }
+                }.id("reply-access")
                 Section("Subjects") {
                     NavigationLink { SubjectEditorView(api: api, phone: phone) } label: {
                         Label("Edit optional subjects", systemImage: "checklist")
                     }.disabled(store.mutationBusy || !api.accessAllowed)
                     Text("Review required and optional subjects. Changes are saved together and do not send a message.").font(.caption).foregroundStyle(.secondary)
-                }
+                }.id("subjects")
                 Section("Manual message") {
                     NavigationLink("Compose plain text to this student") {
                         StudentMessageComposer(api: api, students: store, phone: phone)
                     }.disabled(!MobileRules.canSend(student, snapshot: snapshot) || store.requiresVerification || store.mutationBusy)
                     Text("Requires active onboarding, Allowed activity and an open 24-hour window. Server support is checked before sending.").font(.caption).foregroundStyle(.secondary)
-                }
+                }.id("messaging")
             } else {
                 Text("Student details are unavailable. Return to Students and refresh.")
             }
@@ -250,6 +278,8 @@ struct StudentDetailView: View {
                 }
             }
         }.scrollContentBackground(.hidden).modifier(StudentAppearance())
+        .scrollPosition(id: scrollAnchor, anchor: .top)
+        .onChange(of: api.accessAllowed) { _, allowed in if !allowed { pending = nil } }
         .navigationTitle("Student Details").navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(store.mutationBusy)
         .onAppear { store.claimVisibility(refreshOwner); visible = true }
@@ -290,6 +320,7 @@ private struct StudentActivityBadge: View {
     let status: StudentActivityStatus
     var body: some View { StudentStatusPill(status: status) }
 }
+
 
 
 

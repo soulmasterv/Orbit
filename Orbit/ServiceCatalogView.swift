@@ -33,6 +33,7 @@ struct ServiceDetailView: View {
             ToolbarItem(placement: .topBarTrailing) { RefreshIndicator(loading: api.servicesLoading) { Task { await api.loadServices() } } }
         }
         .task { await api.ensureServicesFresh() }.refreshable { await api.loadServices() }
+        .onChange(of: api.accessAllowed) { _, allowed in if !allowed { pending = nil; recipientSheet = nil } }
         .sheet(item: $recipientSheet) { target in
             ClasseraRecipientSheet(api: api, target: target)
         }
@@ -504,12 +505,20 @@ private struct ClasseraRecipientSheet: View {
             .navigationTitle(target.forceOne ? "Force Send to Person" : "Edit Recipients")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(saving) } }
-            .task {
+            .task(id: api.accessAllowed) {
+                guard api.accessAllowed else {
+                    drafts = []; selected = ""; loaded = false; loading = false; confirmOne = false; error = nil
+                    return
+                }
+                loading = true
                 do {
                     let numbers = try await api.loadClasseraRecipients(id: target.service.id)
+                    guard api.accessAllowed && !Task.isCancelled else { return }
                     drafts = numbers.map { RecipientDraft(number: $0) }
                     loaded = true
-                } catch { self.error = api.friendly(error) }
+                } catch {
+                    if api.accessAllowed && !ServerAPI.isRefreshCancellation(error) { self.error = api.friendly(error) }
+                }
                 loading = false
             }
             .confirmationDialog("Send to ONE PERSON ONLY?", isPresented: $confirmOne, titleVisibility: .visible) {
@@ -542,5 +551,6 @@ private struct ClasseraRecipientSheet: View {
         } catch { self.error = api.friendly(error) }
     }
 }
+
 
 

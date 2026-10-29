@@ -57,11 +57,10 @@ final class ClasseraStudentsTests: XCTestCase {
             ClasseraWhatsAppWindow(className: "12F", windowOpen: nil, secondsLeft: nil, lastInboundAt: nil),
             ClasseraWhatsAppWindow(className: "12F", windowOpen: true, secondsLeft: 86401, lastInboundAt: 1793010000),
             ClasseraWhatsAppWindow(className: "12F", windowOpen: true, secondsLeft: -1, lastInboundAt: 1793010000),
-            ClasseraWhatsAppWindow(className: "12F", windowOpen: false, secondsLeft: 30, lastInboundAt: 1793010000),
-            ClasseraWhatsAppWindow(className: "12F", windowOpen: true, secondsLeft: 5400, lastInboundAt: nil)
+            ClasseraWhatsAppWindow(className: "12F", windowOpen: false, secondsLeft: 30, lastInboundAt: 1793010000)
         ] {
             XCTAssertNil(item.remainingSeconds(since: start, at: start))
-            XCTAssertEqual(item.label(since: start, at: start), "Unavailable")
+            XCTAssertEqual(item.label(since: start, at: start), "Unknown")
         }
     }
     func testWaitingSubscriptionNeverDisplaysEnabledAIPreference() {
@@ -260,7 +259,11 @@ final class ClasseraStudentsTests: XCTestCase {
             ["class_name": "12E", "window_open": false, "seconds_left": 0, "last_inbound_at": 1792900000]
         ]
         let data = try JSONSerialization.data(withJSONObject: json)
-        MockURLProtocol.handler = { _ in (200, data) }
+        let windows = try JSONSerialization.data(withJSONObject: ["version": 1, "phone": "201000000001",
+            "whatsapp_windows": json["whatsapp_windows"]!])
+        MockURLProtocol.handler = { request in
+            (200, request.url?.path.hasSuffix("/messaging") == true ? windows : data)
+        }
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
         for large in [false, true] {
             let window = UIWindow(windowScene: scene); window.frame = scene.coordinateSpace.bounds
@@ -294,6 +297,7 @@ final class ClasseraStudentsTests: XCTestCase {
     }
 
 }
+
 
 
 

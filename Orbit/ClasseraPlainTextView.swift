@@ -100,7 +100,7 @@ struct ClasseraPlainTextView: View {
         .navigationBarBackButtonHidden(busy)
         .task(id: phase == .active && api.accessAllowed) {
             guard phase == .active && api.accessAllowed else {
-                if phase == .background || !api.accessAllowed { generation += 1; busy = false; text = ""; response = nil; operation = nil }
+                if phase == .background || !api.accessAllowed { generation += 1; busy = false; text = ""; response = nil; operation = nil; confirm = false }
                 return
             }
             do { pending = try ClasseraTextVault.load(); vaultReady = true }
@@ -181,3 +181,4 @@ struct ClasseraPlainTextView: View {
         } catch { if epoch == generation { self.error = "Status could not be confirmed. No message was retried." } }
     }
 }
+

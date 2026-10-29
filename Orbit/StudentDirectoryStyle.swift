@@ -1,12 +1,12 @@
 import SwiftUI
 
 enum StudentPalette {
-    static let background = Color.black
-    static let surface = Color(white: 0.09)
-    static let alternate = Color(white: 0.055)
-    static let border = Color(white: 0.20)
-    static let secondary = Color(white: 0.68)
-    static let accent = Color(red: 0.14, green: 0.55, blue: 1)
+    static let background = Brand.background
+    static let surface = Brand.surface
+    static let alternate = Brand.background
+    static let border = Brand.border
+    static let secondary = Brand.muted
+    static let accent = Brand.accent
     static func initials(_ name: String) -> String {
         let parts = name.split(whereSeparator: { $0.isWhitespace })
         return String(parts.prefix(2).compactMap(\.first)).uppercased()
@@ -25,7 +25,7 @@ struct StudentAppearance: ViewModifier {
     func body(content: Content) -> some View {
         content.background(StudentPalette.background)
             .environment(\.colorScheme, .dark).tint(StudentPalette.accent)
-            .toolbarBackground(.black, for: .navigationBar)
+            .toolbarBackground(Brand.background, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
             .toolbarColorScheme(.dark, for: .navigationBar)
     }
@@ -82,7 +82,7 @@ struct StudentStatusPill: View {
             Circle().fill(StudentPalette.statusColor(status)).frame(width: 6, height: 6)
             Text(status.title).font(.caption.weight(.medium))
         }.foregroundStyle(.white).padding(.horizontal, 9).padding(.vertical, 6)
-            .background(Color(white: 0.16), in: Capsule())
+            .background(Brand.raised, in: RoundedRectangle(cornerRadius: 6))
             .accessibilityLabel("Reply access: \(status.title)")
     }
 }
@@ -98,9 +98,6 @@ struct StudentCompactRow: View {
     @Environment(\.dynamicTypeSize) private var typeSize
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            Text(StudentPalette.initials(name)).font(.system(size: 14, weight: .medium))
-                .foregroundStyle(.white).frame(width: 34, height: 34)
-                .background(Color(white: 0.24), in: Circle()).accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 5) {
                 Text(name).font(.subheadline.weight(.semibold)).foregroundStyle(.white)
                     .fixedSize(horizontal: false, vertical: true)
@@ -125,8 +122,9 @@ struct StudentCompactRow: View {
     private func chip(_ title: String) -> some View {
         Text(title).font(.caption2).foregroundStyle(.white)
             .padding(.horizontal, 7).padding(.vertical, 3)
-            .background(Color(white: 0.16), in: Capsule())
+            .background(Brand.raised, in: RoundedRectangle(cornerRadius: 5))
     }
 }
+
 
 

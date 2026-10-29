@@ -85,7 +85,7 @@ struct ClasseraMonitoringView: View {
         .onChange(of: ascending) { _, _ in offset = 0 }
         .onChange(of: classID) { _, _ in offset = 0 }
         .onChange(of: phase) { _, value in if value == .background { store.clear() } }
-        .onChange(of: api.accessAllowed) { _, value in if !value { store.clear() } }
+        .onChange(of: api.accessAllowed) { _, value in if !value { previewTarget = nil; store.clear() } }
         .onDisappear { store.clear() }
         .refreshable { await refresh() }
         .sheet(item: $previewTarget) { value in
@@ -526,3 +526,4 @@ struct ClasseraDeliveryDetail: View {
         }
     }
 }
+

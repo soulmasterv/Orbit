@@ -99,6 +99,9 @@ struct SubjectEditorView: View {
         .navigationBarBackButtonHidden(store.saving)
         .onAppear { visible = true }
         .onDisappear { visible = false; store.invalidate() }
+        .onChange(of: api.accessAllowed) { _, allowed in
+            if !allowed { confirmLegacyRemoval = false; confirmDiscard = false }
+        }
         .task(id: active) {
             if active { await store.load() }
             else if !store.saving { store.invalidate() }
@@ -117,3 +120,4 @@ struct SubjectEditorView: View {
         ids.isEmpty ? "None" : ids.map { catalog.label(for: $0) }.joined(separator: ", ")
     }
 }
+

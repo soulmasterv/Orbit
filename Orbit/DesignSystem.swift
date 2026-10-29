@@ -1,10 +1,20 @@
 import SwiftUI
 
 enum Brand {
-    static let accent = Color(red: 0.34, green: 0.35, blue: 0.92)
-    static let teal = Color(red: 0.04, green: 0.66, blue: 0.62)
-    static let background = Color(uiColor: .systemGroupedBackground)
-    static let surface = Color(uiColor: .secondarySystemGroupedBackground)
+    static let accent = Color(red: 0.33, green: 0.65, blue: 1)
+    static let teal = Color(red: 0.38, green: 0.82, blue: 0.63)
+    static let background = adaptive(light: 0xF3F5F8, dark: 0x080A0D)
+    static let surface = adaptive(light: 0xFFFFFF, dark: 0x15181E)
+    static let raised = adaptive(light: 0xE8EDF3, dark: 0x1C2128)
+    static let border = adaptive(light: 0xDCE1E8, dark: 0x292E38)
+    static let muted = adaptive(light: 0x536174, dark: 0xA4AEBB)
+    private static func adaptive(light: UInt32, dark: UInt32) -> Color {
+        Color(uiColor: UIColor { traits in
+            let value = traits.userInterfaceStyle == .dark ? dark : light
+            return UIColor(red: CGFloat((value >> 16) & 255) / 255,
+                green: CGFloat((value >> 8) & 255) / 255, blue: CGFloat(value & 255) / 255, alpha: 1)
+        })
+    }
 }
 
 struct BrandMark: View {
@@ -91,4 +101,5 @@ enum AppAppearance: String, CaseIterable, Identifiable {
         switch self { case .system: return nil; case .light: return .light; case .dark: return .dark }
     }
 }
+
 

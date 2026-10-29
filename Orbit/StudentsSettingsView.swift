@@ -32,6 +32,7 @@ struct StudentsSettingsView: View {
             }
         }
         .navigationTitle("Students Connection").navigationBarTitleDisplayMode(.inline)
+        .scrollContentBackground(.hidden).background(Brand.background)
         .onAppear {
             do {
                 let saved = try KeychainManager.loadStudentsConnection()
@@ -40,6 +41,7 @@ struct StudentsSettingsView: View {
             } catch { result = StudentsStore.message(for: error) }
         }
         .onDisappear { replacementKey = "" }
+        .onChange(of: api.accessAllowed) { _, allowed in if !allowed { replacementKey = "" } }
     }
 
     private func save() async {
@@ -65,6 +67,7 @@ struct StudentsSettingsView: View {
         } catch { result = StudentsStore.message(for: error) }
     }
 }
+
 
 
 

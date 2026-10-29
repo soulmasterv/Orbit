@@ -19,8 +19,8 @@ struct Student: Decodable, Identifiable {
     let name: String?
     let grade: String?
     let state: String
-    let windowOpen: Bool
-    let secondsLeft: Int
+    let windowOpen: Bool?
+    let secondsLeft: Int?
     // Older servers can omit these fields. Values are Unix epoch seconds UTC.
     let firstSeen: Int?
     let lastInboundAt: Int?
@@ -45,6 +45,18 @@ struct Student: Decodable, Identifiable {
         case firstSeen = "first_seen", lastInboundAt = "last_inbound_at"
         case activityStatusValue = "activity_status"
     }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        phone = try c.decode(String.self, forKey: .phone)
+        state = try c.decode(String.self, forKey: .state)
+        name = try c.decodeIfPresent(String.self, forKey: .name)
+        grade = try c.decodeIfPresent(String.self, forKey: .grade)
+        windowOpen = try? c.decodeIfPresent(Bool.self, forKey: .windowOpen)
+        secondsLeft = try? c.decodeIfPresent(Int.self, forKey: .secondsLeft)
+        firstSeen = try? c.decodeIfPresent(Int.self, forKey: .firstSeen)
+        lastInboundAt = try? c.decodeIfPresent(Int.self, forKey: .lastInboundAt)
+        activityStatusValue = try c.decodeIfPresent(String.self, forKey: .activityStatusValue)
+    }
     private func provided(_ value: String?) -> String {
         guard let value, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return "Not provided yet" }
         return value
@@ -65,19 +77,22 @@ struct StudentsSnapshot {
         StudentsSnapshot(students: students.filter { $0.phone != phone }, receivedAt: receivedAt, receivedInstant: receivedInstant)
     }
 
-    func remainingSeconds(for student: Student, at now: ContinuousClock.Instant = ContinuousClock.now) -> TimeInterval {
-        guard student.windowOpen else { return 0 }
+    func windowState(for student: Student, at now: ContinuousClock.Instant = .now) -> WhatsAppWindowState {
         // A monotonic clock prevents device wall-clock changes from extending a window.
         // Every server refresh creates a new snapshot and resets this baseline.
         let elapsed = receivedInstant.duration(to: now).components
         let seconds = Double(elapsed.seconds) + Double(elapsed.attoseconds) / 1e18
-        return max(0, Double(max(0, student.secondsLeft)) - max(0, seconds))
+        return .evidence(open: student.windowOpen, seconds: student.secondsLeft, elapsed: seconds)
+    }
+    func remainingSeconds(for student: Student, at now: ContinuousClock.Instant = .now) -> TimeInterval {
+        windowState(for: student, at: now).remaining ?? 0
     }
     func isWindowOpen(for student: Student, at now: ContinuousClock.Instant = ContinuousClock.now) -> Bool { remainingSeconds(for: student, at: now) > 0 }
     func windowLabel(for student: Student, at now: ContinuousClock.Instant = .now, timeZone: TimeZone = .current) -> String {
+        if windowState(for: student, at: now) == .unknown { return "Window unknown" }
         guard isWindowOpen(for: student, at: now) else { return "Window closed" }
         let deadline = student.lastInboundDate?.addingTimeInterval(86400)
-            ?? receivedAt.addingTimeInterval(Double(max(0, student.secondsLeft)))
+            ?? receivedAt.addingTimeInterval(Double(max(0, student.secondsLeft ?? 0)))
         guard let clock = WindowClock.time(deadline, timeZone: timeZone) else { return "Window open · closing time unavailable" }
         return "Open until " + clock
     }
@@ -89,7 +104,7 @@ struct StudentsSnapshot {
 }
 
 enum StudentsFilter: String, CaseIterable, Identifiable {
-    case all = "All", open = "Window open", closed = "Window closed", grade = "Grade"
+    case all = "All", open = "Window open", closed = "Window closed", unknown = "Window unknown", grade = "Grade"
     var id: String { rawValue }
 }
 
@@ -107,7 +122,8 @@ enum StudentsDirectory {
             switch filter {
             case .all: return true
             case .open: return snapshot.isWindowOpen(for: student, at: now)
-            case .closed: return !snapshot.isWindowOpen(for: student, at: now)
+            case .closed: return snapshot.windowState(for: student, at: now) == .closed
+            case .unknown: return snapshot.windowState(for: student, at: now) == .unknown
             case .grade: return student.state == "active" && (grade.isEmpty || student.grade == grade)
             }
         }
@@ -192,3 +208,4 @@ enum WindowClock {
         return formatter.string(from: date)
     }
 }
+

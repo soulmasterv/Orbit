@@ -135,9 +135,13 @@ struct StudentMessageComposer: View {
         }.navigationTitle("Compose Message")
         .onAppear { students.claimVisibility(refreshOwner); text = mobile.draft(phone: phone) }
         .onDisappear { students.suspend(owner: refreshOwner) }
+        .onChange(of: api.accessAllowed) { _, allowed in if !allowed { text = ""; confirming = false } }
         .onChange(of: text) { _, value in mobile.saveDraft(phone: phone, text: value) }
         .task(id: phase == .active && api.accessAllowed) {
-            if phase == .active && api.accessAllowed { await students.refresh(); await mobile.refresh() }
+            if phase == .active && api.accessAllowed {
+                await students.refresh(); await mobile.refresh()
+                if api.accessAllowed && phase == .active { text = mobile.draft(phone: phone) }
+            }
         }
         .task(id: "\(phase == .active)-\(mobile.state?.outbox?.requestID.uuidString ?? "none")") {
             if phase == .active && mobile.state?.outbox != nil { await mobile.boundedRecovery() }
@@ -153,6 +157,7 @@ struct MessageOutboxView: View {
     @EnvironmentObject private var mobile: MobileStore
     @Environment(\.scenePhase) private var phase
     @State private var review = false
+    @Environment(\.orbitAccessAllowed) private var accessAllowed
     var body: some View {
         Form {
             if let operation = mobile.state?.outbox {
@@ -168,6 +173,7 @@ struct MessageOutboxView: View {
             } else { Text("No saved message operation.") }
             MobileResultSection()
         }.navigationTitle("Message Status")
+        .onChange(of: accessAllowed) { _, allowed in if !allowed { review = false } }
         .task(id: "\(phase == .active)-\(mobile.state?.outbox?.requestID.uuidString ?? "none")") {
             guard phase == .active else { return }
             while !Task.isCancelled {
@@ -214,7 +220,13 @@ struct MobileFeedbackView: View {
             }
             Button("Refresh feedback") { Task { await refresh() } }.disabled(mutation)
         }.navigationTitle(selectedID == nil ? "Feedback" : "Feedback Details")
-        .task { await refresh() }.refreshable { if !mutation { await refresh() } }
+        .task(id: api.accessAllowed) {
+            guard api.accessAllowed else {
+                generation += 1; reports = []; confirming = nil; failure = nil; loading = false
+                return
+            }
+            await refresh()
+        }.refreshable { if !mutation { await refresh() } }
         .confirmationDialog(confirming?.isResolved == true ? "Reopen this report?" : "Mark report resolved?",
             isPresented: Binding(get: { confirming != nil }, set: { if !$0 { confirming = nil } }), presenting: confirming) { report in
             Button("Confirm and authorize") { Task { await resolve(report) } }
@@ -258,6 +270,7 @@ struct MobileFeedbackView: View {
         } catch { if api.accessAllowed { failure = MobileRules.error(error) + " Refresh before another action. No mutation was retried." } }
     }
 }
+
 
 
 

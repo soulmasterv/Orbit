@@ -9,6 +9,7 @@ struct StudentDatabasesView: View {
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 15) {
                 Text("Students").font(.largeTitle.bold()).foregroundStyle(.white)
+                OrbitVersionLink()
                 HStack(spacing: 0) {
                     databaseTab("School assistant", selected: !classeraSelected) { classeraSelected = false }
                     databaseTab("Classera", selected: classeraSelected) { classeraSelected = true }
@@ -56,6 +57,13 @@ struct ClasseraStudentsView: View {
     @State private var newName = ""
     @State private var creating = false
     @State private var newPhone: String?
+    @Environment(\.orbitNavigation) private var navigation
+    @State private var localAnchor: String?
+    private var scrollAnchor: Binding<String?> {
+        Binding(get: { navigation?.anchor(for: "classera-directory") ?? localAnchor }, set: { value in
+            if let value { localAnchor = value; navigation?.remember(value, for: "classera-directory") }
+        })
+    }
     private var filtered: [ClasseraStudent] {
         students.filter { student in
             student.activityStatus.matches(activity) &&
@@ -81,7 +89,7 @@ struct ClasseraStudentsView: View {
                     }
                 }.padding(.horizontal, 16).padding(.bottom, 14)
                 ForEach(Array(filtered.enumerated()), id: \.element.id) { index, student in
-                    NavigationLink { ClasseraStudentEditor(api: api, phone: student.phone) } label: {
+                    NavigationLink(value: ClasseraStudentRoute(phone: student.phone)) {
                         StudentCompactRow(name: student.displayName, phone: student.phone,
                             chips: student.subscriptions.map { row in
                                 let label = row.className == "12F" ? "1 (F)" : row.className == "12E" ? "2 (E)" : row.className
@@ -90,17 +98,24 @@ struct ClasseraStudentsView: View {
                             note: student.signupSession == nil ? nil : "Sign up in progress",
                             noteColor: .yellow,
                             alternate: !index.isMultiple(of: 2))
-                    }.buttonStyle(.plain)
+                    }.buttonStyle(.plain).id(student.phone)
                 }
                 if !loading && error == nil && filtered.isEmpty {
                     ContentUnavailableView(students.isEmpty ? "No Classera subscribers" : "No matching students",
                         systemImage: "person.2",
                         description: Text(students.isEmpty ? "New WhatsApp signups appear here." : "Try a different name, phone or activity filter."))
                 }
-            }.padding(.bottom, 12)
+            }.padding(.bottom, 12).scrollTargetLayout()
         }.modifier(StudentAppearance())
+        .scrollPosition(id: scrollAnchor, anchor: .top)
+        .navigationDestination(for: ClasseraStudentRoute.self) { route in
+            ClasseraStudentEditor(api: api, phone: route.phone)
+        }
         .navigationTitle(embedded ? "Orbit" : "Classera subscribers").navigationBarTitleDisplayMode(.inline)
         .scrollDismissesKeyboard(.interactively)
+        .onChange(of: api.accessAllowed) { _, allowed in
+            if !allowed { add = false; phone = ""; newName = "" }
+        }
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 NavigationLink { ClasseraMonitoringView(api: api) } label: { Label("Monitoring", systemImage: "chart.bar.xaxis") }
@@ -191,14 +206,21 @@ struct ClasseraStudentEditor: View {
     @State private var pendingAction: StudentManagementAction?
     @State private var reportClass: String?
     @State private var expandedClasses: Set<String> = []
-    @State private var windowInstant = ContinuousClock.now
-    @State private var messaging: ClasseraMessagingResponse?
+    @StateObject private var windowStore = ClasseraWindowStore()
+    @Environment(\.orbitNavigation) private var navigation
+    @State private var localAnchor: String?
+    private var scrollAnchor: Binding<String?> {
+        let key = "classera-detail-" + phone
+        return Binding(get: { navigation?.anchor(for: key) ?? localAnchor }, set: { value in
+            if let value { localAnchor = value; navigation?.remember(value, for: key) }
+        })
+    }
     @Environment(\.dismiss) private var dismiss
     private var canSave: Bool { loaded && !busy && api.accessAllowed && student?.signupSession == nil }
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                profileSection
+                profileSection.id("profile")
                 if busy { ProgressView("Please wait…").font(.caption) }
                 if let message {
                     Text(message).font(.subheadline).foregroundStyle(StudentPalette.secondary)
@@ -208,16 +230,17 @@ struct ClasseraStudentEditor: View {
                     Text("Sign up in progress. Finish on WhatsApp, then reload before editing.")
                         .font(.subheadline).foregroundStyle(.yellow)
                 }
-                subscriptionsSection
-                messagingSection
-                managementSection
+                subscriptionsSection.id("subscriptions")
+                messagingSection.id("messaging")
+                managementSection.id("management")
                 Button { Task { await reload() } } label: {
                     Label("Reload from server", systemImage: "arrow.clockwise")
                 }.disabled(busy || !api.accessAllowed)
                 Text("Classera subscriptions only. The school assistant database has separate data and controls.")
                     .font(.caption).foregroundStyle(StudentPalette.secondary)
-            }.padding(16)
+            }.padding(16).scrollTargetLayout()
         }.modifier(StudentAppearance())
+        .scrollPosition(id: scrollAnchor, anchor: .top)
         .scrollDismissesKeyboard(.interactively)
         .navigationTitle("Student details").navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(busy)
@@ -244,14 +267,18 @@ struct ClasseraStudentEditor: View {
         }
         .task(id: phase == .active && api.accessAllowed) {
             guard phase == .active && api.accessAllowed else {
-                if phase == .background || !api.accessAllowed { generation += 1; loaded = false; busy = false; student = nil; rows = []; messaging = nil; editName = false; nameDraft = "" }
+                if phase == .background || !api.accessAllowed {
+                    generation += 1; loaded = false; busy = false; student = nil; rows = []
+                    windowStore.clear(); editName = false; nameDraft = ""
+                    pendingAction = nil; reportClass = nil; removeClass = nil
+                }
                 return
             }
             // Face ID can briefly make the scene inactive. Keep drafts and the
             // pending operation; only backgrounding/locking invalidates them.
             if !loaded && !busy { await reload() }
         }
-        .onDisappear { generation += 1; loaded = false }
+        .onDisappear { generation += 1; loaded = false; windowStore.clear() }
         .confirmationDialog("Remove this subscription?", isPresented: Binding(get: { removeClass != nil }, set: { if !$0 { removeClass = nil } }), titleVisibility: .visible) {
             Button("Remove class", role: .destructive) {
                 rows.removeAll { $0.className == removeClass }; removeClass = nil
@@ -299,30 +326,9 @@ struct ClasseraStudentEditor: View {
         }
     }
     private var windowStatus: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("WhatsApp 24-hour window").font(.subheadline.weight(.medium))
-            TimelineView(.periodic(from: .now, by: 15)) { _ in
-                if let windows = messaging?.whatsappWindows ?? student?.whatsappWindows, !windows.isEmpty {
-                    ForEach(windows) { window in
-                        let remaining = window.remainingSeconds(since: windowInstant)
-                        HStack(alignment: .top) {
-                            Text(ClasseraClass.title(window.className)).foregroundStyle(StudentPalette.secondary)
-                            Spacer()
-                            HStack(spacing: 6) {
-                                Circle().fill(remaining == nil ? Color.gray : remaining! > 0 ? Color.green : Color.gray)
-                                    .frame(width: 6, height: 6)
-                                Text(window.displayLabel(since: windowInstant)).monospacedDigit()
-                            }
-                        }.font(.caption)
-                    }
-                } else {
-                    Label("Unavailable — not reported by Classera", systemImage: "clock")
-                        .font(.caption).foregroundStyle(StudentPalette.secondary)
-                }
-            }
-            Text("The window follows the student's last message to that WhatsApp number. It is separate from activity and subscription status.")
-                .font(.caption2).foregroundStyle(StudentPalette.secondary)
-        }.accessibilityIdentifier("classera.student.whatsappWindow")
+        ClasseraWindowPanel(store: windowStore, classes: rows.map(\.className)) {
+            Task { await windowStore.refresh(api: api, phone: phone) }
+        }.disabled(!api.accessAllowed)
     }
     private var subscriptionsSection: some View {
         detailGroup("Subscriptions") {
@@ -448,9 +454,9 @@ struct ClasseraStudentEditor: View {
         do {
             let result = try await api.loadClasseraStudent(phone: phone)
             guard epoch == generation && api.accessAllowed && !Task.isCancelled else { return }
-            student = result; rows = result.subscriptions; windowInstant = .now; loaded = true; message = nil
-            let windows = try? await api.loadClasseraMessaging(phone: phone)
-            if epoch == generation && api.accessAllowed { messaging = windows; windowInstant = .now }
+            student = result; rows = result.subscriptions; loaded = true; message = nil
+            busy = false
+            await windowStore.refresh(api: api, phone: phone)
         } catch { if epoch == generation && !ServerAPI.isRefreshCancellation(error) { message = error.localizedDescription } }
     }
     private func saveName() async {
@@ -491,7 +497,7 @@ struct ClasseraStudentEditor: View {
         do {
             let result = try await api.saveClasseraStudent(phone: phone, payload: payload)
             guard epoch == generation && api.accessAllowed else { return }
-            self.student = result; rows = result.subscriptions; windowInstant = .now; message = "Saved. No WhatsApp message was sent."
+            self.student = result; rows = result.subscriptions; message = "Saved. No WhatsApp message was sent."
         } catch {
             guard epoch == generation else { return }
             busy = false; loaded = false
@@ -553,6 +559,7 @@ enum ClasseraPhone {
         (8...15).contains(value.count) && value.first != "0" && value.utf8.allSatisfy { (48...57).contains($0) }
     }
 }
+
 
 
 

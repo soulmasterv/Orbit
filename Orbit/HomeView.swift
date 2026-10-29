@@ -64,63 +64,40 @@ struct HomeView: View {
     @Environment(\.scenePhase) private var phase
     @EnvironmentObject private var library: HomelabStore
     @Environment(\.dynamicTypeSize) private var dynamicType
+    @Environment(\.orbitNavigation) private var navigation
+    @State private var localAnchor: String?
+    private var scrollAnchor: Binding<String?> {
+        Binding(get: { navigation?.anchor(for: "home") ?? localAnchor }, set: { value in
+            if let value { localAnchor = value; navigation?.remember(value, for: "home") }
+        })
+    }
     private var columns: [GridItem] { Array(repeating: GridItem(.flexible(), spacing: 10), count: dynamicType.isAccessibilitySize ? 1 : 2) }
     private var favorites: [ServiceTileModel] { api.serviceTiles.filter { library.favorites.contains($0.target) } }
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 16) {
+                OrbitVersionLink().id("version")
                 if api.hasNotice { ConnectionNotice(api: api) }
-                if let d = api.dashboard { serverSummary(d.server); systemSummary(d) } else { DashboardPlaceholder(api: api) }
-                LatestClasseraReportsSection(api: api, store: latestReports)
-                NavigationLink {
-                    StudentDatabasesView(api: api)
-                } label: {
-                    Panel {
-                        HStack(spacing: 12) {
-                            Image(systemName: "person.3").foregroundStyle(Brand.accent)
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("Students").font(.headline).foregroundStyle(.primary)
-                                Text("Student directory and messaging windows")
-                                    .font(.caption).foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            Image(systemName: "chevron.right").foregroundStyle(.secondary)
-                        }
+                if let d = api.dashboard { serverSummary(d.server).id("server"); systemSummary(d).id("system") } else { DashboardPlaceholder(api: api) }
+                SectionHeading(title: "Workspace")
+                VStack(spacing: 0) {
+                    NavigationLink { StudentDatabasesView(api: api) } label: {
+                        CompactWorkspaceRow(title: "Students", subtitle: "Student directories and messaging windows")
                     }
-                }.buttonStyle(.plain)
-                NavigationLink {
-                    JarvisView(api: api)
-                } label: {
-                    Panel {
-                        HStack(spacing: 12) {
-                            Image(systemName: "waveform").foregroundStyle(Brand.accent)
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("JARVIS").font(.headline).foregroundStyle(.primary)
-                                Text("Private voice chat and reviewed memory").font(.caption).foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            Image(systemName: "chevron.right").foregroundStyle(.secondary)
-                        }
+                    NavigationLink { JarvisView(api: api) } label: {
+                        CompactWorkspaceRow(title: "JARVIS", subtitle: "Voice chat and reviewed memory")
                     }
-                }.buttonStyle(.plain)
-                NavigationLink {
-                    AIKeyUsageView(api: api)
-                } label: {
-                    Panel {
-                        HStack(spacing: 12) {
-                            Image(systemName: "chart.bar").foregroundStyle(Brand.accent)
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("AI Key Usage").font(.headline).foregroundStyle(.primary)
-                                Text("Classera Gemini requests and unused keys").font(.caption).foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            Image(systemName: "chevron.right").foregroundStyle(.secondary)
-                        }
+                    NavigationLink { CompactServicesOverview(api: api) } label: {
+                        CompactWorkspaceRow(title: "Services", subtitle: "Classera · Gemini · Padel")
                     }
-                }.buttonStyle(.plain)
+                    NavigationLink { AIKeyUsageView(api: api) } label: {
+                        CompactWorkspaceRow(title: "AI Key Usage", subtitle: "Recorded Classera requests", divider: false)
+                    }
+                }.buttonStyle(.plain).id("workspace")
+                LatestClasseraReportsSection(api: api, store: latestReports).id("reports")
                 if !favorites.isEmpty {
                     SectionHeading(title: "Favorites")
-                    LazyVGrid(columns: columns, spacing: 10) { ForEach(favorites) { tile($0) } }
+                    LazyVGrid(columns: columns, spacing: 10) { ForEach(favorites) { tile($0) } }.id("favorites")
                 }
                 HStack {
                     Text("Services").font(.headline); Spacer()
@@ -128,12 +105,13 @@ struct HomeView: View {
                 }
                 if let error = api.servicesError { Label(error, systemImage: "info.circle").font(.caption).foregroundStyle(.secondary) }
                 SnapshotStamp(date: api.servicesUpdatedAt, failed: api.servicesError != nil)
-                LazyVGrid(columns: columns, spacing: 10) { ForEach(api.serviceTiles) { tile($0) } }
+                LazyVGrid(columns: columns, spacing: 10) { ForEach(api.serviceTiles) { tile($0) } }.id("services")
                 HStack { Text("Recent activity").font(.headline); Spacer(); NavigationLink("View all") { ActivityView() }.font(.caption) }
                 if library.events.isEmpty { Text("Your confirmed app actions will appear here.").font(.caption).foregroundStyle(.secondary) }
                 else { Panel { VStack(alignment: .leading, spacing: 8) { ForEach(Array(library.events.prefix(3))) { ActivityRow(event: $0) } } } }
-            }.padding(16)
-        }.background(Brand.background).navigationTitle("Command Center").navigationBarTitleDisplayMode(.inline)
+            }.padding(16).scrollTargetLayout()
+        }.background(Brand.background).navigationTitle("Orbit").navigationBarTitleDisplayMode(.inline)
+        .scrollPosition(id: scrollAnchor, anchor: .top)
         .toolbar { ToolbarItem(placement: .topBarTrailing) { RefreshIndicator(loading: api.loading || api.servicesLoading || latestReports.loading) { Task { await refreshHome() } } } }
         .task { await api.ensureServicesFresh() }.refreshable { await refreshHome() }
     }
@@ -202,6 +180,7 @@ extension DockerContainer {
     var displayStatus: String { isUnhealthy ? "Unhealthy" : (isRunning ? "Running" : (state?.capitalized ?? "Unknown")) }
 }
 extension PadelComponent { var isWhatsApp: Bool { id.lowercased() == "whatsapp" || name.lowercased().contains("whatsapp") } }
+
 
 
 
