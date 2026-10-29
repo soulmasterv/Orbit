@@ -59,7 +59,9 @@ extension ServerAPI {
 }
 struct HomeView: View {
     @ObservedObject var api: ServerAPI
+    @StateObject private var latestReports = LatestClasseraReportsStore()
     let requestCommand: (PendingCommand) -> Void
+    @Environment(\.scenePhase) private var phase
     @EnvironmentObject private var library: HomelabStore
     @Environment(\.dynamicTypeSize) private var dynamicType
     private var columns: [GridItem] { Array(repeating: GridItem(.flexible(), spacing: 10), count: dynamicType.isAccessibilitySize ? 1 : 2) }
@@ -69,6 +71,7 @@ struct HomeView: View {
             LazyVStack(alignment: .leading, spacing: 16) {
                 if api.hasNotice { ConnectionNotice(api: api) }
                 if let d = api.dashboard { serverSummary(d.server); systemSummary(d) } else { DashboardPlaceholder(api: api) }
+                LatestClasseraReportsSection(api: api, store: latestReports)
                 NavigationLink {
                     StudentDatabasesView(api: api)
                 } label: {
@@ -131,8 +134,15 @@ struct HomeView: View {
                 else { Panel { VStack(alignment: .leading, spacing: 8) { ForEach(Array(library.events.prefix(3))) { ActivityRow(event: $0) } } } }
             }.padding(16)
         }.background(Brand.background).navigationTitle("Command Center").navigationBarTitleDisplayMode(.inline)
-        .toolbar { ToolbarItem(placement: .topBarTrailing) { RefreshIndicator(loading: api.loading || api.servicesLoading) { Task { await api.refreshAll() } } } }
-        .task { await api.ensureServicesFresh() }.refreshable { await api.refreshAll() }
+        .toolbar { ToolbarItem(placement: .topBarTrailing) { RefreshIndicator(loading: api.loading || api.servicesLoading || latestReports.loading) { Task { await refreshHome() } } } }
+        .task { await api.ensureServicesFresh() }.refreshable { await refreshHome() }
+    }
+    private func refreshHome() async {
+        async let dashboard: Void = api.refreshAll()
+        if phase == .active && api.accessAllowed {
+            await latestReports.load { try await api.latestClasseraReports() }
+        }
+        await dashboard
     }
     private func tile(_ model: ServiceTileModel) -> some View {
         Panel {

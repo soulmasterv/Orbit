@@ -59,6 +59,7 @@ final class ServerAPI: ObservableObject {
     @Published private(set) var servicesLoading = false
     @Published private(set) var servicesError: String?
     @Published private(set) var servicesUpdatedAt: Date?
+    @Published private(set) var latestReportsContext = UUID()
 
     private let session: URLSession
     private let tokenProvider: () -> String
@@ -123,6 +124,7 @@ final class ServerAPI: ObservableObject {
         guard accessAllowed != allowed else { return }
         accessAllowed = allowed
         if !allowed {
+            latestReportsContext = UUID()
             studentsAccessGeneration += 1
             needsVerification = true
             classeraRecipients.removeAll()
@@ -346,6 +348,7 @@ final class ServerAPI: ObservableObject {
 
     func cachedLogs(_ target: LogTarget) -> LogSnapshot? { logSnapshots[target] }
     private func resetSecondaryRequests() {
+        latestReportsContext = UUID()
         classeraRecipients.removeAll()
         servicesGeneration += 1
         logGeneration += 1
@@ -936,6 +939,31 @@ final class ServerAPI: ObservableObject {
             return "Cannot reach the server. Check your internet connection and try again."
         }
         return error.localizedDescription
+    }
+}
+
+extension ServerAPI {
+    func latestClasseraReports() async throws -> LatestClasseraReportsResponse {
+        guard accessAllowed && !previewMode && !Task.isCancelled else { throw CancellationError() }
+        guard !tokenProvider().isEmpty else { throw LatestClasseraReportsFailure.authenticationRequired }
+        let context = latestReportsContext
+        // Reuse Orbit's Keychain-backed request builder and no-redirect session.
+        let command = try request(path: "/api/classera/latest-reports", endpoint: baseURL)
+        let (data, response) = try await session.data(for: command)
+        guard accessAllowed && context == latestReportsContext && !Task.isCancelled else { throw CancellationError() }
+        guard let http = response as? HTTPURLResponse else { throw LatestClasseraReportsFailure.invalidResponse }
+        if [401, 403].contains(http.statusCode) { throw LatestClasseraReportsFailure.authenticationRequired }
+        guard [200, 503].contains(http.statusCode) else {
+            if [404, 501].contains(http.statusCode) { throw LatestClasseraReportsFailure.endpointUnavailable }
+            throw HTTPFailure(status: http.statusCode)
+        }
+        guard data.count <= 65_536,
+              let result = try? JSONDecoder().decode(LatestClasseraReportsResponse.self, from: data),
+              result.isValid else { throw LatestClasseraReportsFailure.invalidResponse }
+        if http.statusCode == 503 && (result.status != "unavailable" || result.observedCount != 0) {
+            throw LatestClasseraReportsFailure.invalidResponse
+        }
+        return result
     }
 }
 
