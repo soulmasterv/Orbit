@@ -59,6 +59,7 @@ final class ServerAPI: ObservableObject {
     @Published private(set) var servicesLoading = false
     @Published private(set) var servicesError: String?
     @Published private(set) var servicesUpdatedAt: Date?
+    @Published private(set) var latestReportsContext = UUID()
 
     private let session: URLSession
     private let tokenProvider: () -> String
@@ -123,6 +124,7 @@ final class ServerAPI: ObservableObject {
         guard accessAllowed != allowed else { return }
         accessAllowed = allowed
         if !allowed {
+            latestReportsContext = UUID()
             studentsAccessGeneration += 1
             needsVerification = true
             classeraRecipients.removeAll()
@@ -346,6 +348,7 @@ final class ServerAPI: ObservableObject {
 
     func cachedLogs(_ target: LogTarget) -> LogSnapshot? { logSnapshots[target] }
     private func resetSecondaryRequests() {
+        latestReportsContext = UUID()
         classeraRecipients.removeAll()
         servicesGeneration += 1
         logGeneration += 1
@@ -431,151 +434,7 @@ final class ServerAPI: ObservableObject {
         } catch {
             actionError = friendly(error)
             return
-        }
-
-        let path: String
-        let authorizationReason: String
-        let activityTitle: String
-
-        switch action.kind {
-        case .testGeminiKey:
-            path = "/api/services/gemini/\(id)/test"
-            authorizationReason = "Test \(action.name) through your server."
-            activityTitle = "Key test for \(action.name)"
-
-        case .fireClasseraReport:
-            path = "/api/services/classera/\(id)/fire"
-            authorizationReason = "Send the current Classera WhatsApp report for \(action.name)."
-            activityTitle = "Report request for \(action.name)"
-
-        case .forceFireClasseraReport:
-            path = "/api/services/classera/\(id)/force-fire"
-            authorizationReason = "Force-send the Classera WhatsApp report for \(action.name), bypassing the delivery guard for this run."
-            activityTitle = "Forced report request for \(action.name)"
-        case .forceOneClasseraReport:
-            path = "/api/services/classera/\(id)/force-one"
-            authorizationReason = "Force-send the \(action.name) report to ONE PERSON ONLY: \(action.recipient ?? "")."
-            activityTitle = "One-person report request for \(action.name)"
-        }
-
-        await performAction(
-            path: path,
-            name: action.name,
-            action: .start,
-            authorizationReason: authorizationReason,
-            refreshServices: true,
-            activityTitle: activityTitle,
-            body: body
-        )
-    }
-
-    private func classeraPath(_ id: String) throws -> String {
-        guard (1...3).map({ "classera-\($0)" }).contains(id),
-              serviceSnapshot?.classera?.contains(where: { $0.id == id }) == true else {
-            throw APIError.message("This Classera instance is not in the verified service snapshot.")
-        }
-        return "/api/services/classera/\(id)"
-    }
-
-    func loadClasseraRecipients(id: String) async throws -> [String] {
-        let path = try classeraPath(id)
-        let generation = refreshGeneration
-        classeraRecipients[id] = nil
-        let (data, response) = try await get(path: path + "/recipients")
-        guard accessAllowed && generation == refreshGeneration && !Task.isCancelled else { throw CancellationError() }
-        try validate(response)
-        let result = try JSONDecoder().decode(ClasseraRecipientsResponse.self, from: data)
-        guard result.ok && result.classera == id else { throw APIError.message("The recipient response did not match this Classera instance.") }
-        let numbers = result.recipients.isEmpty ? [] : try ClasseraRecipientValidation.list(result.recipients)
-        classeraRecipients[id] = numbers
-        return numbers
-    }
-
-    func saveClasseraRecipients(id: String, recipients: [String]) async throws {
-        let path = try classeraPath(id)
-        let numbers = try ClasseraRecipientValidation.list(recipients)
-        guard !previewMode && canControl && servicesError == nil && !servicesLoading else {
-            throw APIError.message("Refresh and reconnect before saving recipients.")
-        }
-        actionBusy = true
-        actionProgress = "Saving recipients…"
-        defer { actionBusy = false; actionProgress = "" }
-        let generation = refreshGeneration
-        try await authorize("Change the WhatsApp recipients for \(id).")
-        guard accessAllowed && generation == refreshGeneration && !Task.isCancelled else { throw CancellationError() }
-        var command = try request(path: path + "/recipients", method: "PUT")
-        command.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        command.httpBody = try JSONEncoder().encode(ClasseraRecipientsPayload(recipients: numbers))
-        // Mutations go directly to URLSession once, without GET failover or retries.
-        let (data, response) = try await session.data(for: command)
-        guard accessAllowed && generation == refreshGeneration else { throw CancellationError() }
-        try validate(response)
-        if let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any], object["ok"] as? Bool == false {
-            throw APIError.message("The server declined the recipient changes.")
-        }
-        classeraRecipients[id] = numbers
-        await loadServices()
-    }
-
-    // Classera is the owner-only Orbit database, never the separate Students X-API-Key origin.
-    private func classeraDirectoryData(path: String, method: String = "GET", body: Data? = nil) async throws -> Data {
-        guard accessAllowed && !previewMode && !Task.isCancelled else { throw CancellationError() }
-        let epoch = studentsAccessGeneration
-        var command = try request(path: path, method: method, endpoint: baseURL)
-        if let body { command.httpBody = body; command.setValue("application/json", forHTTPHeaderField: "Content-Type") }
-        let (data, response): (Data, URLResponse)
-        do { (data, response) = try await session.data(for: command) }
-        catch {
-            if method != "GET" { throw ClasseraDirectoryFailure.uncertain }
-            throw APIError.message("Classera could not be reached. Check the connection and retry.")
-        }
-        guard accessAllowed && epoch == studentsAccessGeneration && !Task.isCancelled else { throw CancellationError() }
-        guard let http = response as? HTTPURLResponse else { throw APIError.message("Classera returned an invalid response.") }
-        if method == "POST" && path.hasSuffix("/messaging"), (400..<500).contains(http.statusCode),
-           let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-           let code = body["error"] as? String,
-           ["window_closed","student_not_eligible","unauthorized","owner_not_permitted","invalid_request","issuance_throttled","window_unavailable","provider_unavailable"].contains(code) {
-            throw ClasseraTextRejection(code: code)
-        }
-        switch http.statusCode {
-        case 200: return data
-        case 401, 403: throw APIError.message("Owner authentication failed. Check the Orbit connection in Settings.")
-        case 409: throw ClasseraDirectoryFailure.conflict
-        case 404, 501: throw APIError.message("The Classera directory API is not available on this server.")
-        case 422: throw APIError.message("Check the student name, international phone number, class and AI preference.")
-        default:
-            if method != "GET" { throw ClasseraDirectoryFailure.uncertain }
-            throw APIError.message("The Classera database is temporarily unavailable.")
-        }
-    }
-    func loadClasseraDirectory() async throws -> [ClasseraStudent] {
-        let data = try await classeraDirectoryData(path: "/api/classera-students")
-        guard let result = try? JSONDecoder().decode(ClasseraDirectoryResponse.self, from: data), result.version == 1 else {
-            throw APIError.message("The Classera directory response is incompatible.")
-        }
-        return result.students
-    }
-    func loadClasseraStudent(phone: String) async throws -> ClasseraStudent {
-        guard ClasseraPhone.valid(phone) else { throw APIError.message("Use 8–15 international digits, without + or spaces.") }
-        let data = try await classeraDirectoryData(path: "/api/classera-students/\(phone)")
-        guard let result = try? JSONDecoder().decode(ClasseraStudent.self, from: data), result.phone == phone, result.revision.count == 64 else {
-            throw APIError.message("The Classera student response is incompatible.")
-        }
-        return result
-    }
-    func manageClasseraStudent(student: ClasseraStudent, action: StudentManagementAction) async throws -> ClasseraStudent? {
-        guard ClasseraPhone.valid(student.phone), action.isValid(for: student.activityStatus), accessAllowed, !actionBusy, !Task.isCancelled else { throw CancellationError() }
-        actionBusy = true; actionProgress = "Updating Classera student…"
-        defer { actionBusy = false; actionProgress = "" }
-        let epoch = studentsAccessGeneration
-        try await authorizeConfirmed("\(action.title) for this Classera student. This affects replies and daily reports.")
-        guard accessAllowed && epoch == studentsAccessGeneration && !Task.isCancelled else { throw CancellationError() }
-        let payload = ClasseraManagementPayload(expectedRevision: student.revision, activityStatus: action.activityStatus?.rawValue)
-        let path = "/api/classera-students/\(student.phone)" + (action == .remove ? "" : "/activity")
-        let data = try await classeraDirectoryData(path: path, method: action == .remove ? "DELETE" : "PUT", body: JSONEncoder().encode(payload))
-        let result: ClasseraStudent?
-        if action == .remove {
-            guard (try? JSONDecoder().decode(StudentMutationAcknowledgement.self, from: data))?.ok == true else { throw ClasseraDirectoryFailure.uncertain }
+…2263 tokens truncated…d (try? JSONDecoder().decode(StudentMutationAcknowledgement.self, from: data))?.ok == true else { throw ClasseraDirectoryFailure.uncertain }
             result = nil
         } else {
             guard let record = try? JSONDecoder().decode(ClasseraStudent.self, from: data), record.phone == student.phone, record.activityStatus == action.activityStatus else { throw ClasseraDirectoryFailure.uncertain }
@@ -936,6 +795,31 @@ final class ServerAPI: ObservableObject {
             return "Cannot reach the server. Check your internet connection and try again."
         }
         return error.localizedDescription
+    }
+}
+
+extension ServerAPI {
+    func latestClasseraReports() async throws -> LatestClasseraReportsResponse {
+        guard accessAllowed && !previewMode && !Task.isCancelled else { throw CancellationError() }
+        guard !tokenProvider().isEmpty else { throw LatestClasseraReportsFailure.authenticationRequired }
+        let context = latestReportsContext
+        // Reuse Orbit's Keychain-backed request builder and no-redirect session.
+        let command = try request(path: "/api/classera/latest-reports", endpoint: baseURL)
+        let (data, response) = try await session.data(for: command)
+        guard accessAllowed && context == latestReportsContext && !Task.isCancelled else { throw CancellationError() }
+        guard let http = response as? HTTPURLResponse else { throw LatestClasseraReportsFailure.invalidResponse }
+        if [401, 403].contains(http.statusCode) { throw LatestClasseraReportsFailure.authenticationRequired }
+        guard [200, 503].contains(http.statusCode) else {
+            if [404, 501].contains(http.statusCode) { throw LatestClasseraReportsFailure.endpointUnavailable }
+            throw HTTPFailure(status: http.statusCode)
+        }
+        guard data.count <= 65_536,
+              let result = try? JSONDecoder().decode(LatestClasseraReportsResponse.self, from: data),
+              result.isValid else { throw LatestClasseraReportsFailure.invalidResponse }
+        if http.statusCode == 503 && (result.status != "unavailable" || result.observedCount != 0) {
+            throw LatestClasseraReportsFailure.invalidResponse
+        }
+        return result
     }
 }
 
