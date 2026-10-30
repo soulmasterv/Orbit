@@ -27,7 +27,8 @@ print credentials, file contents or reports in diagnostics. Do not send messages
 
 ## Contract
 
-GET /api/downloads optionally takes `?folder=<id from a folder entry>`.
+GET /api/downloads optionally takes `?folder=<id from a folder entry>` and
+`cursor=<next_cursor from the previous response>` to load additional files.
 Owner Authorization bearer authentication, same native Orbit settings/Keychain.
 
 ```json
@@ -38,8 +39,10 @@ GET /api/downloads/files/{id} returns file bytes. No externally supplied URL or
 filesystem path is accepted. IDs encode relative paths; they are not credentials.
 Every component is validated and opened relative to the root with NOFOLLOW.
 Symlinks, hidden entries, traversal and special files are excluded. Only regular
-files can be read. Listing is limited to 1,000 entries per folder (truncated=true
-is explicit), folders first and newest entries first within each kind.
+files can be read. Listing is paged at 1,000 entries with next_cursor for Load more,
+folders first and newest entries first within each kind. A safety limit of 50,000
+entries per folder produces an explicit unavailable response, never a silently
+incomplete listing. Refresh restarts paging; files changed while paging can move.
 
 Responses are no-store; 401 authentication, 403 browser Origin/cross-site request,
 404 missing file/folder, 413 over 25 MB, 422 invalid identifier/query, 503 unavailable

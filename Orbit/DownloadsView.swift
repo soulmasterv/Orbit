@@ -20,8 +20,12 @@ struct OrbitDownloadsResponse: Decodable {
     let version: Int
     let items: [OrbitDownloadItem]
     let truncated: Bool
+    let nextCursor: String?
+    enum CodingKeys: String, CodingKey { case version, items, truncated; case nextCursor = "next_cursor" }
     var valid: Bool {
-        version == 1 && items.count <= 1000 && Set(items.map(\.id)).count == items.count && items.allSatisfy {
+        version == 1 && items.count <= 1000 &&
+        (nextCursor == nil || (nextCursor!.count <= 6 && !nextCursor!.isEmpty && nextCursor!.allSatisfy(\.isNumber))) &&
+        Set(items.map(\.id)).count == items.count && items.allSatisfy {
             OrbitDownloadItem.validID($0.id) && !$0.name.isEmpty && $0.name.utf8.count <= 1024 &&
             ["folder", "file"].contains($0.kind) && $0.size >= 0
         }
@@ -80,7 +84,11 @@ struct DownloadsView: View {
                     }.padding(.vertical, 5)
                 }.listRowBackground(Brand.surface)
             }
-            if snapshot?.truncated == true { Text("Showing up to 1,000 entries. Open a subfolder to narrow the list.").font(.caption) }
+            if snapshot?.nextCursor != nil {
+                Button("Load more files") { Task { await refresh(more: true) } }.disabled(loading)
+            } else if snapshot?.truncated == true {
+                Text("More files are available. Update the Downloads backend to enable paging.").font(.caption)
+            }
         }.scrollContentBackground(.hidden).background(Brand.background)
             .navigationTitle(folder?.name ?? "Downloads").navigationBarTitleDisplayMode(.inline)
             .searchable(text: $search, prompt: "Search files")
@@ -90,14 +98,17 @@ struct DownloadsView: View {
             .onDisappear { clear() }
     }
     private func clear() { generation += 1; snapshot = nil; failure = nil; loading = false; search = "" }
-    @MainActor private func refresh() async {
+    @MainActor private func refresh(more: Bool = false) async {
         guard api.accessAllowed && !loading else { return }
         generation += 1; let epoch = generation; loading = true; failure = nil
         defer { if generation == epoch { loading = false } }
         do {
-            let result = try await api.downloads(folder: folder?.id)
+            let result = try await api.downloads(folder: folder?.id, cursor: more ? snapshot?.nextCursor : nil)
             guard epoch == generation && api.accessAllowed && !Task.isCancelled else { return }
-            snapshot = result
+            if more, let previous = snapshot {
+                let existing = Set(previous.items.map(\.id))
+                snapshot = OrbitDownloadsResponse(version: result.version, items: previous.items + result.items.filter { !existing.contains($0.id) }, truncated: result.truncated, nextCursor: result.nextCursor)
+            } else { snapshot = result }
         } catch {
             guard epoch == generation && api.accessAllowed && !ServerAPI.isRefreshCancellation(error) else { return }
             snapshot = nil; failure = OrbitDownloadsError.message(error)

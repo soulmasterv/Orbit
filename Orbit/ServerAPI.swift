@@ -1102,9 +1102,13 @@ extension ServerAPI {
 
 @MainActor
 extension ServerAPI {
-    func downloads(folder: String? = nil) async throws -> OrbitDownloadsResponse {
+    func downloads(folder: String? = nil, cursor: String? = nil) async throws -> OrbitDownloadsResponse {
         if let folder, !OrbitDownloadItem.validID(folder) { throw OrbitDownloadsError.invalid }
-        let path = "/api/downloads" + (folder.map { "?folder=" + $0 } ?? "")
+        if let cursor, cursor.isEmpty || cursor.count > 6 || !cursor.utf8.allSatisfy({ $0 >= 48 && $0 <= 57 }) { throw OrbitDownloadsError.invalid }
+        var query: [String] = []
+        if let folder { query.append("folder=" + folder) }
+        if let cursor { query.append("cursor=" + cursor) }
+        let path = "/api/downloads" + (query.isEmpty ? "" : "?" + query.joined(separator: "&"))
         let data = try await downloadsData(path: path, limit: 2_097_152, file: false)
         guard let result = try? JSONDecoder().decode(OrbitDownloadsResponse.self, from: data), result.valid else {
             throw OrbitDownloadsError.invalid
@@ -1148,3 +1152,4 @@ extension ServerAPI {
         return data
     }
 }
+

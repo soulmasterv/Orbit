@@ -49,11 +49,13 @@ class Downloads:
             os.close(fd)
             raise
 
-    def listing(self, folder=None):
+    def listing(self, folder=None, cursor=None):
         parts = parts_for(folder) if folder else []
+        if cursor is not None and not re.fullmatch(r'[0-9]{1,6}', cursor):
+            raise ValueError()
+        offset = int(cursor or 0)
         fd = self.open(parts, folder=True)
         rows = []
-        truncated = False
         try:
             with os.scandir(fd) as entries:
                 for entry in entries:
@@ -62,16 +64,18 @@ class Downloads:
                     info = entry.stat(follow_symlinks=False)
                     if not (stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode)):
                         continue
-                    if len(rows) == 1000:
-                        truncated = True
-                        break
+                    if len(rows) == 50000:
+                        raise OSError('Folder listing limit exceeded')
                     rows.append(dict(id=identifier(parts + [entry.name]), name=entry.name,
                                      kind='folder' if stat.S_ISDIR(info.st_mode) else 'file',
                                      size=info.st_size, modified_at=int(info.st_mtime)))
         finally:
             os.close(fd)
         rows.sort(key=lambda r: (r['kind'] != 'folder', -r['modified_at'], r['name']))
-        return dict(version=1, items=rows, truncated=truncated)
+        page = rows[offset:offset + 1000]
+        more = offset + len(page) < len(rows)
+        return dict(version=1, items=page, truncated=more,
+                    next_cursor=str(offset + len(page)) if more else None)
 
     def read(self, value):
         parts = parts_for(value)
@@ -99,9 +103,9 @@ def register(app, owner_token, downloads=None):
             return jsonify(error='owner_not_permitted'), 403
         try:
             if file_id is None:
-                if set(request.args) - {'folder'}:
+                if set(request.args) - {'folder', 'cursor'}:
                     raise ValueError()
-                return jsonify(downloads.listing(request.args.get('folder')))
+                return jsonify(downloads.listing(request.args.get('folder'), request.args.get('cursor')))
             data, name = downloads.read(file_id)
             response = send_file(io.BytesIO(data), mimetype=mimetypes.guess_type(name)[0] or 'application/octet-stream',
                                  as_attachment=True, download_name=name, max_age=0)

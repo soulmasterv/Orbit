@@ -72,6 +72,17 @@ class DownloadsTests(unittest.TestCase):
             self.assertEqual(getattr(self.client, method)('/api/downloads', headers=self.headers).status_code, 405)
         self.assertEqual((self.root / '12F' / 'daily.pdf').read_bytes(), before)
 
+    def test_paging_exposes_every_file_and_rejects_invalid_cursor(self):
+        for index in range(1005):
+            (self.root / ('report-%04d.pdf' % index)).write_bytes(b'fixture')
+        first = self.reader.listing()
+        self.assertEqual(len(first['items']), 1000)
+        self.assertTrue(first['truncated'])
+        second = self.reader.listing(cursor=first['next_cursor'])
+        self.assertFalse(second['truncated'])
+        self.assertEqual(len({row['id'] for row in first['items'] + second['items']}), 1006)
+        self.assertEqual(self.client.get('/api/downloads?cursor=-1', headers=self.headers).status_code, 422)
+
 
 if __name__ == '__main__':
     unittest.main()

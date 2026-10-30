@@ -19,8 +19,8 @@ final class DownloadsTests: XCTestCase {
         return ServerAPI(session: URLSession(configuration: config), defaults: defaults,
                          tokenProvider: { token }, authorize: { _ in XCTFail("Read-only files cannot authorize a mutation") })
     }
-    private func response(_ request: URLRequest, status: Int = 200, data: Data) -> (HTTPURLResponse, Data) {
-        (HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!, data)
+    private func response(_ request: URLRequest, status: Int = 200, data: Data) -> (Int, Data) {
+        (status, data)
     }
     func testListingUsesOwnerGetAndDecodesFoldersAndFiles() async throws {
         MockURLProtocol.handler = { request in
@@ -44,6 +44,16 @@ final class DownloadsTests: XCTestCase {
         }
         let data = try await api().downloadFile(id: "ZmlsZQ")
         XCTAssertEqual(data, Data("%PDF-fixture".utf8)); XCTAssertEqual(MockURLProtocol.requests.count, 1)
+    }
+    func testPagingUsesReturnedCursorAndRejectsMalformedCursorLocally() async throws {
+        MockURLProtocol.handler = { request in
+            XCTAssertEqual(request.url?.query, "folder=MTJG&cursor=1000")
+            return self.response(request, data: Data(#"{"version":1,"truncated":false,"next_cursor":null,"items":[]}"#.utf8))
+        }
+        _ = try await api().downloads(folder: "MTJG", cursor: "1000")
+        XCTAssertEqual(MockURLProtocol.requests.count, 1)
+        do { _ = try await api().downloads(cursor: "-1"); XCTFail("Expected invalid cursor") } catch {}
+        XCTAssertEqual(MockURLProtocol.requests.count, 1)
     }
     func testAuthenticationMissingEndpointAndRemovedFileAreDistinct() async {
         for (status, expected) in [(401, OrbitDownloadsError.authentication), (503, .unavailable), (404, .notFound)] {
