@@ -1099,3 +1099,52 @@ extension ServerAPI {
         return result
     }
 }
+
+@MainActor
+extension ServerAPI {
+    func downloads(folder: String? = nil) async throws -> OrbitDownloadsResponse {
+        if let folder, !OrbitDownloadItem.validID(folder) { throw OrbitDownloadsError.invalid }
+        let path = "/api/downloads" + (folder.map { "?folder=" + $0 } ?? "")
+        let data = try await downloadsData(path: path, limit: 2_097_152, file: false)
+        guard let result = try? JSONDecoder().decode(OrbitDownloadsResponse.self, from: data), result.valid else {
+            throw OrbitDownloadsError.invalid
+        }
+        return result
+    }
+    func downloadFile(id: String) async throws -> Data {
+        guard OrbitDownloadItem.validID(id) else { throw OrbitDownloadsError.invalid }
+        return try await downloadsData(path: "/api/downloads/files/" + id, limit: 25 * 1024 * 1024, file: true)
+    }
+    private func downloadsData(path: String, limit: Int, file: Bool) async throws -> Data {
+        guard accessAllowed && !previewMode && !Task.isCancelled else { throw CancellationError() }
+        guard !tokenProvider().isEmpty else { throw OrbitDownloadsError.authentication }
+        let context = latestReportsContext
+        var command = try request(path: path, endpoint: baseURL)
+        command.timeoutInterval = file ? 30 : 10
+        command.setValue(file ? "application/octet-stream" : "application/json", forHTTPHeaderField: "Accept")
+        // The existing native session rejects redirects. Never give a preview URL
+        // or permanent authorization header to a web view.
+        let (bytes, response) = try await session.bytes(for: command)
+        guard accessAllowed && context == latestReportsContext && !Task.isCancelled else { throw CancellationError() }
+        guard let http = response as? HTTPURLResponse, response.url == command.url else { throw OrbitDownloadsError.invalid }
+        switch http.statusCode {
+        case 200: break
+        case 401, 403: throw OrbitDownloadsError.authentication
+        case 404: throw file ? OrbitDownloadsError.notFound : OrbitDownloadsError.unavailable
+        case 501, 503: throw OrbitDownloadsError.unavailable
+        case 413: throw OrbitDownloadsError.tooLarge
+        default: throw OrbitDownloadsError.invalid
+        }
+        guard response.expectedContentLength <= Int64(limit) else { throw OrbitDownloadsError.tooLarge }
+        var data = Data()
+        for try await byte in bytes {
+            if data.count % 4096 == 0 {
+                guard accessAllowed && context == latestReportsContext && !Task.isCancelled else { throw CancellationError() }
+            }
+            guard data.count < limit else { throw OrbitDownloadsError.tooLarge }
+            data.append(byte)
+        }
+        guard accessAllowed && context == latestReportsContext && !Task.isCancelled else { throw CancellationError() }
+        return data
+    }
+}

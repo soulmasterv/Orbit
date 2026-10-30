@@ -85,6 +85,9 @@ struct HomeView: View {
                     NavigationLink { JarvisView(api: api) } label: {
                         CompactWorkspaceRow(title: "JARVIS", subtitle: "Voice chat and reviewed memory")
                     }
+                    NavigationLink { DownloadsView(api: api) } label: {
+                        CompactWorkspaceRow(title: "Downloads", subtitle: "Browse files & daily reports")
+                    }
                     NavigationLink { CompactServicesOverview(api: api) } label: {
                         CompactWorkspaceRow(title: "Services", subtitle: "Classera · Gemini · Padel")
                     }
