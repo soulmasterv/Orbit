@@ -19,19 +19,7 @@ struct StudentDatabasesView: View {
             else { StudentsView(api: api, embedded: true) }
         }
         .modifier(StudentAppearance())
-        .toolbar(.hidden, for: .tabBar)
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            HStack {
-                Label("Students", systemImage: "person.2.fill")
-                    .foregroundStyle(StudentPalette.accent).frame(maxWidth: .infinity)
-                Button {
-                    if let onWorkspace { onWorkspace() } else { dismiss() }
-                } label: {
-                    Label("Workspace", systemImage: "square.grid.2x2").frame(maxWidth: .infinity)
-                }.foregroundStyle(StudentPalette.secondary)
-            }.font(.caption.weight(.medium)).padding(.vertical, 14)
-                .background(.black).overlay(alignment: .top) { Divider().overlay(StudentPalette.border) }
-        }
+        .toolbar(.visible, for: .tabBar)
     }
     private func databaseTab(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {

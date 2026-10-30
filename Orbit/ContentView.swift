@@ -76,7 +76,7 @@ struct ContentView: View {
                 .tag(2)
             NavigationStack(path: $navigation.studentsPath) {
                 StudentDatabasesView(api: api, onWorkspace: { navigation.selectedTab = 0 })
-                    .toolbar(.hidden, for: .tabBar)
+                    .toolbar(.visible, for: .tabBar)
             }
                 .tabItem { Label("Students", systemImage: "person.3") }
                 .tag(3)
