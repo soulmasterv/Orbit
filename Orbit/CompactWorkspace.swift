@@ -15,8 +15,10 @@ struct CompactWorkspaceRow: View {
                 Spacer(minLength: 8)
                 Image(systemName: "chevron.right").font(.caption).foregroundStyle(Brand.muted)
             }.padding(.vertical, 14).frame(maxWidth: .infinity, minHeight: 58, alignment: .leading)
-            if divider { Divider().overlay(Brand.border) }
-        }.contentShape(Rectangle())
+        }.padding(.horizontal, 12)
+            .background(Brand.surface, in: RoundedRectangle(cornerRadius: 12))
+            .overlay { RoundedRectangle(cornerRadius: 12).stroke(Brand.border, lineWidth: 1) }
+            .contentShape(Rectangle())
     }
 }
 

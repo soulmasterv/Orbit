@@ -63,7 +63,6 @@ struct HomeView: View {
     let requestCommand: (PendingCommand) -> Void
     @Environment(\.scenePhase) private var phase
     @EnvironmentObject private var library: HomelabStore
-    @Environment(\.dynamicTypeSize) private var dynamicType
     @Environment(\.orbitNavigation) private var navigation
     @State private var localAnchor: String?
     private var scrollAnchor: Binding<String?> {
@@ -71,7 +70,6 @@ struct HomeView: View {
             if let value { localAnchor = value; navigation?.remember(value, for: "home") }
         })
     }
-    private var columns: [GridItem] { Array(repeating: GridItem(.flexible(), spacing: 10), count: dynamicType.isAccessibilitySize ? 1 : 2) }
     private var favorites: [ServiceTileModel] { api.serviceTiles.filter { library.favorites.contains($0.target) } }
     var body: some View {
         ScrollView {
@@ -80,7 +78,7 @@ struct HomeView: View {
                 if api.hasNotice { ConnectionNotice(api: api) }
                 if let d = api.dashboard { serverSummary(d.server).id("server"); systemSummary(d).id("system") } else { DashboardPlaceholder(api: api) }
                 SectionHeading(title: "Workspace")
-                VStack(spacing: 0) {
+                VStack(spacing: 10) {
                     NavigationLink { StudentDatabasesView(api: api) } label: {
                         CompactWorkspaceRow(title: "Students", subtitle: "Student directories and messaging windows")
                     }
@@ -97,7 +95,7 @@ struct HomeView: View {
                 LatestClasseraReportsSection(api: api, store: latestReports).id("reports")
                 if !favorites.isEmpty {
                     SectionHeading(title: "Favorites")
-                    LazyVGrid(columns: columns, spacing: 10) { ForEach(favorites) { tile($0) } }.id("favorites")
+                    LazyVStack(spacing: 10) { ForEach(favorites) { tile($0) } }.id("favorites")
                 }
                 HStack {
                     Text("Services").font(.headline); Spacer()
@@ -105,7 +103,7 @@ struct HomeView: View {
                 }
                 if let error = api.servicesError { Label(error, systemImage: "info.circle").font(.caption).foregroundStyle(.secondary) }
                 SnapshotStamp(date: api.servicesUpdatedAt, failed: api.servicesError != nil)
-                LazyVGrid(columns: columns, spacing: 10) { ForEach(api.serviceTiles) { tile($0) } }.id("services")
+                LazyVStack(spacing: 10) { ForEach(api.serviceTiles) { tile($0) } }.id("services")
                 HStack { Text("Recent activity").font(.headline); Spacer(); NavigationLink("View all") { ActivityView() }.font(.caption) }
                 if library.events.isEmpty { Text("Your confirmed app actions will appear here.").font(.caption).foregroundStyle(.secondary) }
                 else { Panel { VStack(alignment: .leading, spacing: 8) { ForEach(Array(library.events.prefix(3))) { ActivityRow(event: $0) } } } }
@@ -123,24 +121,31 @@ struct HomeView: View {
         await dashboard
     }
     private func tile(_ model: ServiceTileModel) -> some View {
-        Panel {
-            VStack(alignment: .leading, spacing: 7) {
-                HStack { Image(systemName: model.symbol).font(.title3).foregroundStyle(Brand.accent); Spacer(); FavoriteButton(target: model.target) }
-                NavigationLink {
-                    switch model.target {
-                    case .service(let page): ServiceDetailView(api: api, page: page)
-                    case .process(let id): ProcessDetailView(api: api, processID: id, requestCommand: requestCommand)
-                    case .docker(let name): ContainerDetailView(api: api, containerName: name, requestCommand: requestCommand)
-                    }
-                } label: {
+        HStack(alignment: .top, spacing: 12) {
+            NavigationLink {
+                switch model.target {
+                case .service(let page): ServiceDetailView(api: api, page: page)
+                case .process(let id): ProcessDetailView(api: api, processID: id, requestCommand: requestCommand)
+                case .docker(let name): ContainerDetailView(api: api, containerName: name, requestCommand: requestCommand)
+                }
+            } label: {
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: model.symbol).font(.title3).foregroundStyle(Brand.accent)
+                        .frame(width: 24).padding(.top, 2)
                     VStack(alignment: .leading, spacing: 7) {
-                        Text(model.name).font(.subheadline.weight(.semibold)).foregroundStyle(.primary).lineLimit(2)
+                        Text(model.name).font(.subheadline.weight(.semibold)).foregroundStyle(.primary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text(model.detail).font(.caption).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                         StatusBadge(status: model.status)
-                        Text(model.detail).font(.caption).foregroundStyle(.secondary).lineLimit(2)
-                    }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
-                }.buttonStyle(.plain)
-            }.frame(maxWidth: .infinity, alignment: .topLeading)
-        }
+                    }.frame(maxWidth: .infinity, alignment: .leading)
+                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(Brand.accent)
+                }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+            }.buttonStyle(.plain)
+            FavoriteButton(target: model.target)
+        }.padding(12)
+            .background(Brand.surface, in: RoundedRectangle(cornerRadius: 12))
+            .overlay { RoundedRectangle(cornerRadius: 12).stroke(Brand.border, lineWidth: 1) }
     }
     private func serverSummary(_ server: ServerStats) -> some View {
         Panel {

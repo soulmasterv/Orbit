@@ -10,7 +10,7 @@ final class OrbitNavigationState: ObservableObject {
     @Published var studentsPath = NavigationPath()
     @Published var settingsPath = NavigationPath()
     private var anchors: [String: String] = [:]
-    init(selectedTab: Int = 3, home: [DetailRoute] = []) {
+    init(selectedTab: Int = 0, home: [DetailRoute] = []) {
         self.selectedTab = selectedTab; homePath = NavigationPath(home)
     }
     func anchor(for screen: String) -> String? { anchors[screen] }

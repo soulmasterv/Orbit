@@ -42,7 +42,7 @@ struct ContentView: View {
         if arguments.contains("--preview-docker") { return 2 }
         if arguments.contains("--preview-settings") { return 4 }
         #endif
-        return 3
+        return 0
     }
 
     private var colorScheme: ColorScheme? {
