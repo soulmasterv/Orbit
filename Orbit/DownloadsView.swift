@@ -68,10 +68,7 @@ struct DownloadsView: View {
                 ContentUnavailableView(search.isEmpty ? "No downloads yet" : "No matching files", systemImage: "folder")
             }
             ForEach(items) { item in
-                NavigationLink {
-                    if item.isFolder { DownloadsView(api: api, folder: item) }
-                    else { DownloadPreviewView(api: api, item: item) }
-                } label: {
+                NavigationLink(value: item) {
                     HStack(spacing: 12) {
                         Image(systemName: item.isFolder ? "folder" : "doc.text").foregroundStyle(Brand.accent)
                         VStack(alignment: .leading, spacing: 4) {
@@ -90,6 +87,7 @@ struct DownloadsView: View {
                 Text("More files are available. Update the Downloads backend to enable paging.").font(.caption)
             }
         }.scrollContentBackground(.hidden).background(Brand.background)
+            .modifier(DownloadsDestinations(api: api, root: folder == nil))
             .navigationTitle(folder?.name ?? "Downloads").navigationBarTitleDisplayMode(.inline)
             .searchable(text: $search, prompt: "Search files")
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button { Task { await refresh() } } label: { Image(systemName: "arrow.clockwise") }.disabled(loading) } }
@@ -113,6 +111,19 @@ struct DownloadsView: View {
             guard epoch == generation && api.accessAllowed && !ServerAPI.isRefreshCancellation(error) else { return }
             snapshot = nil; failure = OrbitDownloadsError.message(error)
         }
+    }
+}
+
+private struct DownloadsDestinations: ViewModifier {
+    let api: ServerAPI
+    let root: Bool
+    @ViewBuilder func body(content: Content) -> some View {
+        if root {
+            content.navigationDestination(for: OrbitDownloadItem.self) { item in
+                if item.isFolder { DownloadsView(api: api, folder: item) }
+                else { DownloadPreviewView(api: api, item: item) }
+            }
+        } else { content }
     }
 }
 
