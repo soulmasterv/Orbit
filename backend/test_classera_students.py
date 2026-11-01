@@ -46,6 +46,36 @@ class DirectoryTests(unittest.TestCase):
             response=self.client.put(self.url,headers=self.headers,json={'expected_revision':current['revision'],'subscriptions':rows})
             self.assertEqual(response.status_code,422)
             self.assertEqual(self.directory.get(self.phone),current)
+    def test_paused_and_opted_out_round_trip_every_ai_preference_without_reactivation(self):
+        for status in ['paused','opted_out']:
+            for preference in [None,0,1]:
+                with self.directory.connect() as c:
+                    c.execute('DELETE FROM subscribers WHERE phone=?',(self.phone,))
+                    c.executemany('INSERT INTO subscribers VALUES(?,?,?,?,?,?,?)',[
+                        (self.phone,'Student','12F',preference,status,'joined-original','before'),
+                        (self.phone,'Student','12E',0,'active','joined-other','before')])
+                current=self.directory.get(self.phone)
+                rows=[{key:r[key] for key in ['class_name','name','ai_enabled','status']} for r in current['subscriptions']]
+                for row in rows:
+                    row['name']='Renamed'
+                    if row['class_name']=='12E':row['ai_enabled']=1
+                response=self.client.put(self.url,headers=self.headers,json={'expected_revision':current['revision'],'subscriptions':rows})
+                self.assertEqual(response.status_code,200)
+                saved={r['class_name']:r for r in response.get_json()['subscriptions']}
+                self.assertEqual(saved['12F']['status'],status)
+                self.assertEqual(saved['12F']['ai_enabled'],preference)
+                self.assertEqual(saved['12F']['joined_at'],'joined-original')
+                self.assertEqual(saved['12E']['ai_enabled'],1)
+    def test_cannot_invent_paused_or_switch_between_preserved_states(self):
+        with self.directory.connect() as c:
+            c.execute('INSERT INTO subscribers VALUES(?,?,?,?,?,?,?)',(self.phone,'Student','12F',1,'paused','old','before'))
+        current=self.directory.get(self.phone)
+        for rows in [[self.row('12F',ai=0,status='paused')],
+                     [self.row('12F',ai=1,status='opted_out')],
+                     [self.row('12F',ai=1,status='paused'),self.row('12E',ai=1,status='paused')]]:
+            response=self.client.put(self.url,headers=self.headers,json={'expected_revision':current['revision'],'subscriptions':rows})
+            self.assertEqual(response.status_code,422)
+            self.assertEqual(self.directory.get(self.phone),current)
     def row(self, klass="12F", ai=1, status="active"):
         return dict(class_name=klass, name="Test Student", ai_enabled=ai, status=status)
     def put(self, rows, revision=None):

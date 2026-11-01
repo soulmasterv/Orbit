@@ -43,14 +43,35 @@ final class ClasseraStudentHistoryLayoutTests: XCTestCase {
              "activity_status": activity, "signup_session": NSNull(),
              "subscriptions": [["class_name": "12F", "name": name, "status": status, "ai_enabled": 0]]]
         }
+        var mixed = student("201000000001", "Student A", "active", "allowed")
+        mixed["subscriptions"] = [
+            ["class_name": "12F", "name": "Student A", "status": "active", "ai_enabled": 0],
+            ["class_name": "12E", "name": "Student A", "status": "opted_out", "ai_enabled": 1]]
         let data = try JSONSerialization.data(withJSONObject: ["version": 1, "students": [
             student("201000000004", "Student D", "active", "suspended"),
-            student("201000000001", "Student A", "active", "allowed"),
+            mixed,
+            student("201000000002", "Student B", "paused", "allowed"),
             student("201000000003", "Student C", "opted_out", "allowed")]])
         MockURLProtocol.handler = { _ in (200, data) }
         let api = api()
         try await capture("classera-directory-optout-filter-dark", content: ClasseraStudentsView(api: api))
         XCTAssertTrue(MockURLProtocol.requests.contains { $0.url?.path == "/api/classera-students" })
+    }
+    func testPausedAndOptedOutDetailLabelsLayout() async throws {
+        let data = Data("""
+        {"phone":"201000000001","profile_name":"Student A","activity_status":"allowed","signup_session":null,
+        "revision":"\(String(repeating: "a", count: 64))","subscriptions":[
+        {"class_name":"12F","name":"Student A","status":"paused","ai_enabled":1},
+        {"class_name":"12E","name":"Student A","status":"opted_out","ai_enabled":0}]}
+        """.utf8)
+        MockURLProtocol.handler = { request in
+            if request.url?.path.hasSuffix("/messaging") == true {
+                return (200, Data(#"{"version":1,"phone":"201000000001","whatsapp_windows":[],"updated_at":1793536980}"#.utf8))
+            }
+            return (200, data)
+        }
+        let api = api()
+        try await capture("classera-subscriptions-paused-optedout-dark", content: ClasseraStudentEditor(api: api, phone: "201000000001"))
     }
     func testHistoryDetailDateTimeAndActualAIRequestLayout() async throws {
         let data = Data(#"{"id":"fixture","report":"12F 1/11/26","class_id":"12F","phone":"201000000001","student":"Student A","template":"classera_v9","message_id":"fixture-outbound","status":"read","created_at":1793536500,"updated_at":1793536860,"historical":false,"ai_analysis":{"status":"requested","requested_at":1793536980}}"#.utf8)

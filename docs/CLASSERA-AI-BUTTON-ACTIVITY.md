@@ -38,6 +38,8 @@ another agent's changes. Automated tests use isolated fixtures and do not send m
 An existing opted-out subscription remains opted_out during another class edit.
 The directory API accepts that status only when the current row already has it and
 its AI value is unchanged. This is distinct from Disabled and unknown preferences.
+The same preservation applies to paused; it displays Paused and retains its original
+AI value, including null. Neither status is silently normalized to active or disabled.
 The native list and details show an explicit Opted out label. Fully opted-out
 students are hidden in All and shown by the Opted out filter; mixed active-class
 subscriptions and unfinished onboarding remain visible. Suspended rows are stably

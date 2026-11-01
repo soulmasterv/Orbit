@@ -115,7 +115,7 @@ class Directory:
             if klass not in CLASSES.values() or klass in seen: raise Invalid()
             if not isinstance(name, str) or not name.strip() or len(name) > 120 or any(ord(c) < 32 for c in name): raise Invalid()
             if ai is not None and (type(ai) is not int or ai not in (0,1)): raise Invalid()
-            if status not in ("active", "waiting_for_class", "disabled", "opted_out"): raise Invalid()
+            if status not in ("active", "waiting_for_class", "disabled", "opted_out", "paused"): raise Invalid()
             if status in ("waiting_for_class","disabled") and ai is not None: raise Invalid()
             seen.add(klass)
         with self.connect() as conn:
@@ -126,11 +126,11 @@ class Directory:
             if current["signup_session"] is not None: raise Conflict()
             existing={row['class_name']:row for row in current['subscriptions']}
             for row in rows:
-                if row['status']=='opted_out':
+                if row['status'] in ('opted_out','paused'):
                     original=existing.get(row['class_name'])
-                    # Preserve an existing opt-out when another class changes;
-                    # this route cannot invent opt-outs or alter their AI state.
-                    if not original or original['status']!='opted_out' or row['ai_enabled']!=original['ai_enabled']:
+                    # Preserve existing self-service states during other edits;
+                    # this route cannot invent them or alter their AI state.
+                    if not original or original['status']!=row['status'] or row['ai_enabled']!=original['ai_enabled']:
                         raise Invalid()
             ts = datetime.now(ZoneInfo("Africa/Cairo")).isoformat()
             for klass in CLASSES.values():

@@ -96,7 +96,7 @@ struct ClasseraStudentEdit: Encodable {
               Set(known.map(\.className)).count == known.count,
               known.allSatisfy({ !$0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && $0.name.count <= 120 &&
                   !$0.name.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) &&
-                  ["active", "waiting_for_class", "disabled", "opted_out"].contains($0.status) &&
+                  ["active", "waiting_for_class", "disabled", "opted_out", "paused"].contains($0.status) &&
                   ($0.aiEnabled == nil || $0.aiEnabled == 0 || $0.aiEnabled == 1) &&
                   (!["waiting_for_class", "disabled"].contains($0.status) || $0.aiEnabled == nil) }) else {
             throw APIError.message("Enter a name for each class. Finish any WhatsApp signup before editing here.")
@@ -125,11 +125,13 @@ enum ClasseraClass {
 enum ClasseraSubscriptionSummary {
     static func modeLabel(_ row: ClasseraSubscription) -> String {
         if row.status == "opted_out" { return "Opted out" }
+        if row.status == "paused" { return "Paused" }
         if row.status == "waiting_for_class" { return "Waiting" }
         return ClasseraSubscriptionMode.current(row)?.rawValue ?? "Not set"
     }
     static func aiLabel(_ row: ClasseraSubscription) -> String {
         if row.status == "opted_out" { return "Opted out" }
+        if row.status == "paused" { return "Paused" }
         guard row.status != "waiting_for_class" else { return "Not set" }
         switch row.aiEnabled { case 1: return "On"; case 0: return "Off"; default: return "Not set" }
     }

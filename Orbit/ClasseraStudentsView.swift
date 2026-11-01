@@ -339,6 +339,7 @@ struct ClasseraStudentEditor: View {
                         Text(ClasseraClass.title(row.className)).font(.subheadline.weight(.semibold))
                         if row.status == "waiting_for_class" { Text("Waiting for class").font(.caption).foregroundStyle(.yellow) }
                         if row.status == "opted_out" { Text("Opted out").font(.caption).foregroundStyle(StudentPalette.secondary) }
+                        if row.status == "paused" { Text("Paused").font(.caption).foregroundStyle(StudentPalette.secondary) }
                         if !row.editable { Text("Legacy subscription preserved").font(.caption).foregroundStyle(.secondary) }
                     }
                     Spacer(minLength: 8)

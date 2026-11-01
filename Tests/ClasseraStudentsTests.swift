@@ -62,6 +62,37 @@ final class ClasseraStudentsTests: XCTestCase {
         XCTAssertEqual(saved[0]["ai_enabled"] as? Int, 0)
         XCTAssertEqual(saved[1]["ai_enabled"] as? Int, 1)
     }
+    func testPausedAndOptOutPreserveEveryAIPreferenceWhenRenaming() throws {
+        for status in ["paused", "opted_out"] {
+            let preferences: [Int?] = [nil, 0, 1]
+            for preference in preferences {
+                let original = try directoryStudent("201000000001", statuses: [status, "active"])
+                var object = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(original)) as? [String: Any])
+                var rows = try XCTUnwrap(object["subscriptions"] as? [[String: Any]])
+                rows[0]["ai_enabled"] = preference.map { $0 as Any } ?? NSNull()
+                object["subscriptions"] = rows
+                let student = try JSONDecoder().decode(ClasseraStudent.self, from: JSONSerialization.data(withJSONObject: object))
+                let renamed = try ClasseraNameEdit.applying("Updated name", to: student.subscriptions)
+                let encoded = try JSONEncoder().encode(ClasseraStudentEdit(student: student, rows: renamed))
+                let payload = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+                let saved = try XCTUnwrap(payload["subscriptions"] as? [[String: Any]])
+                XCTAssertEqual(saved[0]["status"] as? String, status)
+                if let preference { XCTAssertEqual(saved[0]["ai_enabled"] as? Int, preference) }
+                else { XCTAssertTrue(saved[0]["ai_enabled"] is NSNull) }
+                XCTAssertEqual(saved[0]["name"] as? String, "Updated name")
+                XCTAssertEqual(ClasseraSubscriptionSummary.modeLabel(student.subscriptions[0]), status == "paused" ? "Paused" : "Opted out")
+                XCTAssertEqual(ClasseraSubscriptionSummary.aiLabel(student.subscriptions[0]), status == "paused" ? "Paused" : "Opted out")
+                XCTAssertNil(ClasseraSubscriptionMode.current(student.subscriptions[0]))
+            }
+        }
+    }
+    func testPausedClassDoesNotOptOutOrGloballySuspendStudent() throws {
+        let student = try directoryStudent("201000000001", statuses: ["paused", "opted_out"])
+        XCTAssertFalse(student.isOptedOut)
+        XCTAssertEqual(student.activityStatus, .allowed)
+        XCTAssertEqual(ClasseraDirectoryFilter.current.apply(to: [student], search: "").count, 1)
+        XCTAssertEqual(ClasseraDirectoryFilter.suspended.apply(to: [student], search: "").count, 0)
+    }
     func testDefaultListHidesOptOutAndStablePartitionsSuspendedWithoutSections() throws {
         let suspended = try directoryStudent("201000000001", statuses: ["active"], activity: "suspended")
         let opted = try directoryStudent("201000000002", statuses: ["opted_out"])
