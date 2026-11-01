@@ -2,7 +2,7 @@ import json
 import sys
 import types
 import unittest
-from classera_report_notices import NoticeTransport, NoticeDispatch, notice_template_valid
+from classera_report_notices import NoticeTransport, NoticeDispatch, notice_template_valid, report_date_label
 from install_report_notices import patch_sender
 import test_report_settings as fixturelib
 
@@ -23,7 +23,7 @@ class FakeProvider:
     def get(self, url, **kwargs):
         self.calls.append(('GET', url, kwargs))
         if '/phone_numbers' in url: return Response({'data': [{'phone_number_id': '123456789', 'business_account_id': '987654321'}]})
-        return Response({'data': [{'name': 'classera_wa_notice', 'language': 'en_US', 'status': 'APPROVED' if self.approved else 'PENDING', 'components': [{'type': 'BODY', 'text': 'Classera notice: {{1}}'}]}]})
+        return Response({'data': [{'name': 'classera_wa_notice', 'language': 'en_US', 'status': 'APPROVED' if self.approved else 'PENDING', 'components': [{'type': 'HEADER', 'format': 'TEXT', 'text': 'Notice'}, {'type': 'BODY', 'text': '*Notice for {{1}} - {{2}}:*\n\n- {{3}}'}]}]})
     def post(self, url, **kwargs): self.calls.append(('POST', url, kwargs)); return Response({'messages': [{'id': 'fixture'}]})
 
 
@@ -31,16 +31,16 @@ class NoticeTransportTests(unittest.TestCase):
     def test_open_window_uses_one_freeform_without_template_calls(self):
         provider = FakeProvider({'window_open': True, 'seconds_left': 300})
         self.assertEqual(NoticeTransport(provider).send('201000000001', '12F', 'Fixture'), 'accepted')
-        self.assertEqual(provider.calls, ['window', ('plaintext', 'Fixture')])
+        self.assertEqual(provider.calls, ['window', ('plaintext', '*Notice for 12F:*\n\n- Fixture')])
 
     def test_closed_window_uses_verified_template_exactly_once(self):
         provider = FakeProvider()
-        self.assertEqual(NoticeTransport(provider).send('201000000001', '12F', 'Fixture'), 'accepted')
+        self.assertEqual(NoticeTransport(provider).send('201000000001', '12F', 'Fixture', report_date='1/11/2026'), 'accepted')
         posts = [c for c in provider.calls if isinstance(c, tuple) and c[0] == 'POST']
         self.assertEqual(len(posts), 1)
         request = posts[0][2]
         self.assertFalse(request['allow_redirects'])
-        self.assertEqual(request['json']['template'], {'name': 'classera_wa_notice', 'language': {'code': 'en_US'}, 'components': [{'type': 'body', 'parameters': [{'type': 'text', 'text': 'Fixture'}]}]})
+        self.assertEqual(request['json']['template'], {'name': 'classera_wa_notice', 'language': {'code': 'en_US'}, 'components': [{'type': 'body', 'parameters': [{'type': 'text', 'text': '12F'}, {'type': 'text', 'text': '1/11/2026'}, {'type': 'text', 'text': 'Fixture'}]}]})
         self.assertNotIn('fixture-key', json.dumps(request['json']))
 
     def test_unknown_near_expiry_or_unapproved_never_sends_freeform(self):
@@ -61,13 +61,27 @@ class NoticeTransportTests(unittest.TestCase):
         self.assertEqual(NoticeTransport(provider).send('201000000001', '12F', 'Fixture'), 'unknown')
         self.assertEqual(provider.calls, ['window', 'one-send'])
 
-    def test_notice_template_requires_one_text_parameter_and_exact_language(self):
-        value = {'name': 'classera_wa_notice', 'language': 'en_US', 'status': 'APPROVED', 'components': [{'type': 'BODY', 'text': 'Notice: {{1}}'}]}
+    def test_notice_template_requires_three_text_parameters_and_exact_language(self):
+        value = {'name': 'classera_wa_notice', 'language': 'en_US', 'status': 'APPROVED', 'components': [{'type': 'BODY', 'text': 'Notice for {{1}} - {{2}}: {{3}}'}]}
         self.assertTrue(notice_template_valid(value))
         value['components'][0]['text'] = 'Class {{1}} notice {{2}}'
         self.assertFalse(notice_template_valid(value))
-        value['components'][0]['text'] = 'Notice: {{1}}'; value['language'] = 'en_us'
+        value['components'][0]['text'] = 'Notice for {{1}} - {{2}}: {{3}}'; value['language'] = 'en_us'
         self.assertFalse(notice_template_valid(value))
+
+    def test_unknown_report_date_never_uses_today_for_a_template(self):
+        provider = FakeProvider()
+        self.assertEqual(NoticeTransport(provider).send('201000000001', '12F', 'Fixture'), 'skipped_report_date_unknown')
+        self.assertFalse(any(isinstance(c, tuple) and c[0] == 'POST' for c in provider.calls))
+        self.assertEqual(report_date_label('12F 1/11/26'), '1/11/2026')
+        self.assertEqual(report_date_label('12E 29_02_2024'), '29/2/2024')
+        self.assertIsNone(report_date_label('12F 29/2/26'))
+        self.assertIsNone(report_date_label('12F 1/11'))
+
+    def test_plaintext_keeps_selected_class_and_actual_report_date(self):
+        provider = FakeProvider({'window_open': True, 'seconds_left': 300})
+        self.assertEqual(NoticeTransport(provider).send('201000000001', '12E', 'Fixture', report_date='2/11/2026'), 'accepted')
+        self.assertEqual(provider.calls[-1], ('plaintext', '*Notice for 12E - 2/11/2026:*\n\n- Fixture'))
 
 
 class NoticeBatchTests(unittest.TestCase):
@@ -77,7 +91,7 @@ class NoticeBatchTests(unittest.TestCase):
         self.sent = []
         sent = self.sent
         class Transport:
-            def send(self, phone, klass, text, allowed):
+            def send(self, phone, klass, text, allowed, report_date=None):
                 if not allowed(): return 'skipped_ineligible'
                 sent.append((phone, klass, text)); return 'accepted'
         self.dispatch = NoticeDispatch(self.settings, Transport(), ready=lambda: True)

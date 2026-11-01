@@ -8,11 +8,22 @@ import json
 from pathlib import Path
 import re
 import time
+from datetime import date
 from classera_kapso import Kapso
 from classera_report_settings import ReportSettings
 
 ROOT = Path('/home/local/classera')
 CLASSES = {'12F': 'classera-1', '12E': 'classera-2'}
+
+
+def report_date_label(title):
+    match = re.search(r'(?:^|\D)(\d{1,2})[_/-](\d{1,2})[_/-](\d{4}|\d{2})(?:\D|$)', title)
+    if not match: return None
+    day, month, year = match.groups()
+    try:
+        value = date(2000 + int(year) if len(year) == 2 else int(year), int(month), int(day))
+        return f'{value.day}/{value.month}/{value.year:04d}'
+    except ValueError: return None
 
 
 def producer_ready(root=ROOT):
@@ -39,7 +50,7 @@ def notice_template_valid(value):
     if not isinstance(components, list) or any(not isinstance(c, dict) or c.get('type') not in ['BODY', 'HEADER', 'FOOTER'] for c in components):
         return False
     bodies = [c for c in components if c.get('type') == 'BODY']
-    if len(bodies) != 1 or not isinstance(bodies[0].get('text'), str) or set(re.findall(r'\{\{([^}]+)\}\}', bodies[0]['text'])) != {'1'}:
+    if len(bodies) != 1 or not isinstance(bodies[0].get('text'), str) or set(re.findall(r'\{\{([^}]+)\}\}', bodies[0]['text'])) != {'1', '2', '3'}:
         return False
     for component in components:
         if component['type'] == 'HEADER' and component.get('format') != 'TEXT': return False
@@ -75,7 +86,7 @@ class NoticeTransport:
             self.cache[class_name] = (self.now() + 60, verified)
         return verified
 
-    def send(self, phone, class_name, text, allowed=lambda: True):
+    def send(self, phone, class_name, text, allowed=lambda: True, report_date=None):
         try:
             window = self.provider.window(phone, class_name)
         except Exception:
@@ -85,11 +96,14 @@ class NoticeTransport:
             # One mutation only. A failed/uncertain plaintext is never retried as a template.
             try:
                 if not allowed(): return 'skipped_ineligible'
-                status, message = self.provider.send(phone, class_name, text)
+                heading = f'*Notice for {class_name}' + (f' - {report_date}' if report_date else '') + ':*'
+                status, message = self.provider.send(phone, class_name, heading + '\n\n- ' + text)
                 return status if status in ['accepted', 'failed', 'unknown'] else 'unknown'
             except Exception: return 'unknown'
         if not self.template_ready(class_name):
             return 'skipped_window_closed' if window.get('window_open') is False else 'skipped_window_unknown'
+        if not report_date:
+            return 'skipped_report_date_unknown'
         try:
             key, phone_id = self.provider.settings(class_name)
             if not allowed(): return 'skipped_ineligible'
@@ -97,7 +111,8 @@ class NoticeTransport:
                 headers={'X-API-Key': key, 'Content-Type': 'application/json'},
                 json={'messaging_product': 'whatsapp', 'to': phone, 'type': 'template', 'template': {
                     'name': 'classera_wa_notice', 'language': {'code': 'en_US'}, 'components': [
-                        {'type': 'body', 'parameters': [{'type': 'text', 'text': text}]}]}},
+                        {'type': 'body', 'parameters': [{'type': 'text', 'text': class_name},
+                            {'type': 'text', 'text': report_date}, {'type': 'text', 'text': text}]}]}},
                 timeout=12, allow_redirects=False)
             if response.status_code == 408: return 'unknown'
             if 400 <= response.status_code < 500: return 'failed'
@@ -117,7 +132,7 @@ class NoticeDispatch:
         if class_name not in CLASSES or single or forced or not self.ready(): return None
         batch = hashlib.sha256(json.dumps([class_name, report_title], ensure_ascii=False).encode()).hexdigest()
         claimed = self.settings.claim_notice(CLASSES[class_name], batch, list(recipients), already_started=already_started)
-        return {'notice_id': claimed['id'], 'class_name': class_name} if claimed else None
+        return {'notice_id': claimed['id'], 'class_name': class_name, 'report_date': report_date_label(report_title)} if claimed else None
 
     def after_report(self, batch, phone, report_accepted):
         if not batch: return
@@ -132,7 +147,7 @@ class NoticeDispatch:
                       AND NOT EXISTS(SELECT 1 FROM signup_sessions p WHERE p.phone=s.phone)
                       AND NOT EXISTS(SELECT 1 FROM orbit_student_controls a WHERE a.phone=s.phone
                         AND (a.activity_status IS NULL OR a.activity_status<>'allowed'))''', (phone, batch['class_name'])).fetchone())
-            outcome = self.transport.send(phone, batch['class_name'], text, allowed=eligible) if eligible() else 'skipped_ineligible'
+            outcome = self.transport.send(phone, batch['class_name'], text, allowed=eligible, report_date=batch.get('report_date')) if eligible() else 'skipped_ineligible'
         self.settings.record_notice_result(batch['notice_id'], phone, outcome)
 
 

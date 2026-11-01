@@ -335,6 +335,7 @@ struct ClasseraReportSettingsView: View {
          "skipped_window_closed": "Skipped: closed window / template unavailable",
          "skipped_window_unknown": "Skipped: unknown window / template unavailable",
          "skipped_report_failed": "Skipped: report not accepted",
+         "skipped_report_date_unknown": "Skipped: report date unavailable for template",
          "skipped_ineligible": "Skipped: student no longer eligible"][key] ?? "Unrecognized outcome"
     }
 }

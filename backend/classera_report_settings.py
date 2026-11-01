@@ -243,7 +243,7 @@ class ReportSettings:
             return dict(c.execute('SELECT * FROM orbit_report_notices WHERE id=?', (queued['id'],)).fetchone())
 
     def record_notice_result(self, notice_id, phone, outcome):
-        if outcome not in ['accepted', 'failed', 'unknown', 'skipped_window_closed', 'skipped_window_unknown', 'skipped_report_failed', 'skipped_ineligible']:
+        if outcome not in ['accepted', 'failed', 'unknown', 'skipped_window_closed', 'skipped_window_unknown', 'skipped_report_failed', 'skipped_ineligible', 'skipped_report_date_unknown']:
             raise Problem('invalid_outcome')
         with self.connect() as c:
             c.execute('BEGIN IMMEDIATE')

@@ -55,8 +55,13 @@ memory and is cleared on lock/background/navigation away.
 
 User selected a separate WhatsApp notice: plaintext in a verified open24-hour
 window, otherwise approved template `classera_wa_notice`, language `en_US`, with
-one body parameter `{{1}}` containing the notice text. Example template body:
-`Classera notice: {{1}}`. No dynamic media/header/buttons are assumed. The server
+three body parameters: `{{1}}` selected class, `{{2}}` actual report date and
+`{{3}}` notice text. Example template body: `*Notice for {{1}} - {{2}}:*` followed
+by a blank line and `- {{3}}`. A static text header such as `Notice` is supported.
+No dynamic media/header/buttons are assumed. Missing or invalid report dates are
+not replaced with today's date: the template route is skipped with a clear reason.
+Plaintext includes the same class/date heading when a reliable report date exists.
+The server
 checks actual provider approval and parameter shape before the template route.
 Until approved, closed/unknown-window notices are skipped and recorded. Plaintext
 is never inferred from subscription/report/delivery status and requires at least
