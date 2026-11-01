@@ -65,6 +65,14 @@ struct ContentView: View {
                         case .logs(let target, let name): LogViewer(api: api, target: target, name: name)
                         }
                     }
+                    .navigationDestination(for: WorkspaceRoute.self) { route in
+                        switch route {
+                        case .jarvis: JarvisView(api: api)
+                        case .downloads: DownloadsView(api: api)
+                        case .services: CompactServicesOverview(api: api)
+                        case .aiKeyUsage: AIKeyUsageView(api: api)
+                        }
+                    }
             }
                 .tabItem { Label("Home", systemImage: "square.grid.2x2") }
                 .tag(0)

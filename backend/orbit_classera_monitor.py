@@ -26,7 +26,7 @@ def timestamp(value):
     except (ValueError, TypeError, OverflowError): return None
 
 def report_date(report, historical=False):
-    match = re.search(r"(?:^|\D)(\d{1,2})[_-](\d{1,2})[_-](\d{4}|\d{2})(?:\D|$)", report)
+    match = re.search(r"(?:^|\D)(\d{1,2})[_/-](\d{1,2})[_/-](\d{4}|\d{2})(?:\D|$)", report)
     if match:
         d, m, y = map(int, match.groups())
         try: return date(2000 + y if y < 100 else y, m, d).isoformat()
@@ -52,6 +52,7 @@ class Store:
     def connect(self, readonly=False):
         conn = sqlite3.connect(self.path.resolve().as_uri() + ("?mode=ro" if readonly else "?mode=rw"), uri=True, timeout=5)
         conn.row_factory = sqlite3.Row
+        conn.create_function("orbit_full_report_date", 1, lambda title: report_date(title, True), deterministic=True)
         conn.execute("PRAGMA busy_timeout=5000")
         try:
             yield conn
@@ -165,9 +166,9 @@ class Store:
                 if key=="status" and query[key] not in STATES:raise ValueError("invalid_status")
                 clauses.append("a."+column+"=?");args.append(query[key])
         for key,operator in [("from",">="),("to","<=")]:
-            if query.get(key):date.fromisoformat(query[key]);clauses.append("a.report_date"+operator+"?");args.append(query[key])
+            if query.get(key):date.fromisoformat(query[key]);clauses.append("COALESCE(NULLIF(a.report_date,''),orbit_full_report_date(a.report))"+operator+"?");args.append(query[key])
         limit=min(max(int(query.get("limit",30)),1),100);offset=max(int(query.get("offset",0)),0)
-        sort={"date":"COALESCE(a.report_date,'')","updated":"a.updated_at","class":"a.class_id"}.get(query.get("sort","updated"))
+        sort={"date":"COALESCE(NULLIF(a.report_date,''),orbit_full_report_date(a.report),'')","updated":"a.updated_at","class":"a.class_id"}.get(query.get("sort","updated"))
         if sort is None:raise ValueError("invalid_sort")
         direction={"asc":"ASC","desc":"DESC"}.get(query.get("direction","desc"))
         if not direction:raise ValueError("invalid_direction")
@@ -184,7 +185,11 @@ class Store:
             conn.execute("BEGIN")
             total=conn.execute("SELECT COUNT(*)"+source+where,args).fetchone()[0]
             rows=[dict(r) for r in conn.execute("SELECT a.*,s.name AS student"+source+where+" ORDER BY "+sort+" "+direction+",a.id LIMIT ? OFFSET ?",args+[limit,offset])]
-        for r in rows:r["historical"]=bool(r["historical"])
+        for r in rows:
+            r["historical"]=bool(r["historical"])
+            stored = r["report_date"]
+            r["report_date"] = stored or report_date(r["report"], True)
+            r["report_date_source"] = "stored" if stored else "title" if r["report_date"] else None
         return {"version":1,"records":rows,"total":total,"offset":offset,
                 "next_offset":offset+limit if offset+limit<total else None,"updated_at":int(time.time()),
                 "limitations":["Imported legacy rows lack template names, original attempt times and expected-recipient snapshots. Subscriber names reflect current profiles."]}
@@ -198,6 +203,10 @@ class Store:
             targets=[dict(r) for r in c.execute("SELECT * FROM orbit_report_targets")]
             runs=[dict(r) for r in c.execute("SELECT * FROM orbit_report_runs")]
             skips=[dict(r) for r in c.execute("SELECT s.phone,r.report,r.class_id,r.report_date FROM orbit_report_skips s JOIN orbit_report_runs r ON s.run_id=r.id")]
+        # Resolve explicit full title dates in memory only; preserve stored history.
+        for row in attempts + targets + runs + skips:
+            if not row["report_date"]:
+                row["report_date"] = report_date(row["report"], True)
         selected=query.get("class_id")
         valid=lambda r:r["report_date"] and start.isoformat()<=r["report_date"]<=end.isoformat() and (not selected or r["class_id"]==selected)
         a=[r for r in attempts if valid(r)];t=[r for r in targets if valid(r)];r=[v for v in runs if valid(v)]

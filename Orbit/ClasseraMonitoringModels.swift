@@ -71,6 +71,9 @@ struct ClasseraDeliveryRecord: Decodable, Identifiable {
     let id: String
     let report: String
     let report_date: String?
+    let report_date_source: String?
+    var displayReportDate: String? { report_date ?? ClasseraReportTitleDate.parse(report) }
+    var dateFromTitle: Bool { report_date_source == "title" || (report_date == nil && ClasseraReportTitleDate.parse(report) != nil) }
     let class_id: String
     let phone: String
     let student: String?
@@ -135,7 +138,7 @@ enum ClasseraMonitoringFailure: Error, LocalizedError {
         case .notSent: return "No notification request was submitted."
         case .uncertain: return "The outcome is uncertain. Check the saved operation status; do not submit another notification."
         case .http(let status, let code):
-            if code == "sending_disabled" { return "Sending is disabled until the approved template contract is verified." }
+            if code == "sending_disabled" { return "Class-ready invitations are not enabled on this server." }
             switch status {
             case 401, 403: return "Owner authentication failed. Check Orbit connection settings."
             case 404: return "This feature or operation was not found. A missing operation after a connection error is not permission to resend."
@@ -146,5 +149,25 @@ enum ClasseraMonitoringFailure: Error, LocalizedError {
             default: return "Classera monitoring is unavailable. No notification was retried."
             }
         }
+    }
+}
+
+enum ClasseraReportTitleDate {
+    static func parse(_ title: String) -> String? {
+        let pattern = #"(?:^|\D)(\d{1,2})[_/-](\d{1,2})[_/-](\d{4}|\d{2})(?:\D|$)"#
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let match = regex.firstMatch(in: title, range: NSRange(title.startIndex..., in: title)) else { return nil }
+        let pieces = (1...3).compactMap { index -> Int? in
+            guard let range = Range(match.range(at: index), in: title) else { return nil }
+            return Int(title[range])
+        }
+        guard pieces.count == 3 else { return nil }
+        let year = pieces[2] < 100 ? 2000 + pieces[2] : pieces[2]
+        var calendar = Calendar(identifier: .gregorian); calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let wanted = DateComponents(year: year, month: pieces[1], day: pieces[0])
+        guard let date = calendar.date(from: wanted) else { return nil }
+        let actual = calendar.dateComponents([.year, .month, .day], from: date)
+        guard actual.year == year && actual.month == pieces[1] && actual.day == pieces[0] else { return nil }
+        return String(format: "%04d-%02d-%02d", year, pieces[1], pieces[0])
     }
 }

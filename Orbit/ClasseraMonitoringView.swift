@@ -102,11 +102,11 @@ struct ClasseraMonitoringView: View {
                 stamp(response.updated_at)
                 Text(response.notice).font(.caption).foregroundStyle(.secondary)
                 if !response.sending_enabled {
-                    Label("Class-ready invitations disabled — template contract unverified", systemImage: "lock.fill")
+                    Label("Class-ready invitations need server setup", systemImage: "lock.fill")
                         .font(.subheadline).foregroundStyle(.yellow)
                 }
-                if response.classes.isEmpty { empty("No waiting classes", "Waiting registrations will appear here.") }
-                ForEach(response.classes) { item in
+                if response.classes.allSatisfy({ $0.waiting_count == 0 }) { empty("No waiting students", "Waiting registrations will appear here.") }
+                ForEach(response.classes.filter { $0.waiting_count > 0 }) { item in
                     VStack(alignment: .leading, spacing: 9) {
                         HStack {
                             Text(item.class_name).font(.headline)
@@ -183,8 +183,9 @@ struct ClasseraMonitoringView: View {
                                 Text(ClasseraDeliveryState.title(row.status)).font(.caption).foregroundStyle(color(row.status))
                             }
                             Text(row.phone).font(.subheadline).monospacedDigit()
-                            Text("\(row.class_id) · \(row.report_date ?? "Report date unavailable")").font(.caption).foregroundStyle(.secondary)
+                            Text("\(row.class_id) · \(row.displayReportDate ?? "Report date not recorded")").font(.caption).foregroundStyle(.secondary)
                             Text(row.report).font(.caption).foregroundStyle(.secondary)
+                            if row.dateFromTitle { Text("Date from report title").font(.caption2).foregroundStyle(.secondary) }
                             Text(row.template ?? "Template not recorded").font(.caption).foregroundStyle(.secondary)
                         }.foregroundStyle(.white).padding(13)
                             .background(StudentPalette.surface, in: RoundedRectangle(cornerRadius: 11))
@@ -335,17 +336,25 @@ struct ClasseraMonitoringView: View {
         }
     }
     private func metrics(_ data: ClasseraStatisticsResponse) -> some View {
-        VStack(spacing: 9) {
-            LabeledContent("Expected recipient/report targets", value: number(data.expected))
+        VStack(alignment: .leading, spacing: 9) {
             LabeledContent("Recorded attempts", value: String(data.attempts))
             ForEach(ClasseraDeliveryState.all, id: \.self) { state in
                 LabeledContent(ClasseraDeliveryState.title(state), value: number(data.counts[state]))
             }
-            LabeledContent("Not attempted", value: number(data.not_attempted))
-            LabeledContent("Skipped", value: number(data.skipped))
-            LabeledContent("Delivered/read targets", value: number(data.delivered_targets))
-            LabeledContent("Delivery rate", value: rate(data.delivery_rate))
-            Text("Rate denominator: \(number(data.expected)) expected targets. A message appears in one latest-status category. Acceptance and HTTP 200 do not prove delivery.")
+            if let expected = data.expected {
+                Divider()
+                LabeledContent("Expected recipient/report targets", value: String(expected))
+                if let value = data.not_attempted { LabeledContent("Not attempted", value: String(value)) }
+                if let value = data.skipped { LabeledContent("Skipped", value: String(value)) }
+                if let value = data.delivered_targets { LabeledContent("Delivered/read targets", value: String(value)) }
+                LabeledContent("Delivery rate", value: rate(data.delivery_rate))
+            } else {
+                Divider()
+                Label("Recipient totals were not recorded", systemImage: "info.circle")
+                Text("Delivery percentage, skipped and not-attempted counts cannot be calculated for these reports. Current subscriber counts are not used to reconstruct past targets.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Text("Each attempt appears once at its latest status. Read attempts are separate from delivered-but-not-read attempts.")
                 .font(.caption).foregroundStyle(.secondary)
         }.font(.subheadline).padding(14).background(StudentPalette.surface, in: RoundedRectangle(cornerRadius: 12))
     }
@@ -427,7 +436,7 @@ private struct ClasseraNotificationPreview: View {
                         Button("Notify \(value.eligible_count) students") { confirmation = value }
                             .disabled(!value.can_execute || !store.vaultReady || store.pending != nil || store.mutationBusy || !api.accessAllowed)
                         if let reason = value.disabled_reason {
-                            Text(reason == "template_contract_unverified" ? "Sending disabled until the approved template contract is verified." :
+                            Text(reason == "template_contract_unverified" ? "Invitation sending has not been configured and verified on the server." :
                                  reason == "class_not_supported" ? "This class is not supported yet." : "There are no eligible, unnotified students.")
                                 .font(.caption).foregroundStyle(.yellow)
                         }
@@ -490,7 +499,8 @@ struct ClasseraDeliveryDetail: View {
                 LabeledContent("Phone", value: record.phone).textSelection(.enabled)
                 LabeledContent("Class", value: record.class_id)
                 LabeledContent("Report", value: record.report)
-                LabeledContent("Report date", value: record.report_date ?? "Unavailable")
+                LabeledContent("Report date", value: record.displayReportDate ?? "Not recorded")
+                if record.dateFromTitle { Text("Date from report title; the original record is unchanged.").font(.caption).foregroundStyle(.secondary) }
                 LabeledContent("Template", value: record.template ?? "Not recorded")
                 LabeledContent("Message ID", value: record.message_id ?? "Not recorded").textSelection(.enabled)
                 LabeledContent("Status", value: ClasseraDeliveryState.title(record.status))
@@ -526,4 +536,3 @@ struct ClasseraDeliveryDetail: View {
         }
     }
 }
-

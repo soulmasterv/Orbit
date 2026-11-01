@@ -19,6 +19,13 @@ struct OrbitChangelogEntry: Identifiable {
     let title: String
     let changes: [String]
     static let entries: [Self] = [
+        .init(id: "2026-11-navigation-monitoring", title: "Workspace navigation and delivery history", changes: [
+            "Home’s Students shortcut selects the existing Students tab instead of opening a second directory.",
+            "Workspace destinations use stable navigation routes; refreshing cancellation no longer leaves the Classera directory loading.",
+            "Report history can show an explicit full date from the report title, with its source labelled.",
+            "Daily report statistics explain missing historical recipient totals without inventing delivery rates.",
+            "Waiting lists show classes with waiting students. Invitation sending still requires verified server setup."
+        ]),
         .init(id: "4.1.0", title: "Navigation and student status", changes: [
             "Compact blue/graphite styling, flatter workspace links and dense student rows.",
             "Visible version/build information and an offline in-app changelog.",
@@ -70,3 +77,4 @@ struct OrbitChangelogView: View {
             .accessibilityIdentifier("orbit.changelog")
     }
 }
+

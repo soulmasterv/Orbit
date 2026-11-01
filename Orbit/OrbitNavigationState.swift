@@ -13,6 +13,7 @@ final class OrbitNavigationState: ObservableObject {
     init(selectedTab: Int = 0, home: [DetailRoute] = []) {
         self.selectedTab = selectedTab; homePath = NavigationPath(home)
     }
+    func openStudents() { selectedTab = 3 }
     func anchor(for screen: String) -> String? { anchors[screen] }
     func remember(_ anchor: String?, for screen: String) {
         // Privacy cleanup can temporarily remove scroll targets. Do not replace a
@@ -57,4 +58,9 @@ struct RetainedProtectedContent<Content: View, Cover: View>: View {
             if !visible { cover.frame(maxWidth: .infinity, maxHeight: .infinity).zIndex(1) }
         }
     }
+}
+
+/// Stable routes for Workspace destinations; Students selects its existing tab.
+enum WorkspaceRoute: String, Hashable, CaseIterable {
+    case jarvis, downloads, services, aiKeyUsage
 }

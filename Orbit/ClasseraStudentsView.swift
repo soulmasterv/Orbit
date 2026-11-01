@@ -168,12 +168,12 @@ struct ClasseraStudentsView: View {
     private func refresh() async {
         guard api.accessAllowed && phase == .active && !loading else { return }
         generation += 1; let epoch = generation; loading = true
+        defer { if epoch == generation { loading = false } }
         do {
             let result = try await api.loadClasseraDirectory()
             guard epoch == generation && api.accessAllowed && !Task.isCancelled else { return }
             students = result; error = nil
         } catch { if epoch == generation && !ServerAPI.isRefreshCancellation(error) { self.error = error.localizedDescription } }
-        if epoch == generation { loading = false }
     }
 }
 

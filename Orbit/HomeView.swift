@@ -79,19 +79,19 @@ struct HomeView: View {
                 if let d = api.dashboard { serverSummary(d.server).id("server"); systemSummary(d).id("system") } else { DashboardPlaceholder(api: api) }
                 SectionHeading(title: "Workspace")
                 VStack(spacing: 10) {
-                    NavigationLink { StudentDatabasesView(api: api) } label: {
+                    Button { navigation?.openStudents() } label: {
                         CompactWorkspaceRow(title: "Students", subtitle: "Student directories and messaging windows")
-                    }
-                    NavigationLink { JarvisView(api: api) } label: {
+                    }.disabled(navigation == nil || !api.accessAllowed).accessibilityIdentifier("workspace.students")
+                    NavigationLink(value: WorkspaceRoute.jarvis) {
                         CompactWorkspaceRow(title: "JARVIS", subtitle: "Voice chat and reviewed memory")
                     }
-                    NavigationLink { DownloadsView(api: api) } label: {
+                    NavigationLink(value: WorkspaceRoute.downloads) {
                         CompactWorkspaceRow(title: "Downloads", subtitle: "Browse files & daily reports")
                     }
-                    NavigationLink { CompactServicesOverview(api: api) } label: {
+                    NavigationLink(value: WorkspaceRoute.services) {
                         CompactWorkspaceRow(title: "Services", subtitle: "Classera · Gemini · Padel")
                     }
-                    NavigationLink { AIKeyUsageView(api: api) } label: {
+                    NavigationLink(value: WorkspaceRoute.aiKeyUsage) {
                         CompactWorkspaceRow(title: "AI Key Usage", subtitle: "Recorded Classera requests", divider: false)
                     }
                 }.buttonStyle(.plain).id("workspace")
