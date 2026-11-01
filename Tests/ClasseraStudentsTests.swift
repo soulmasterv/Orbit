@@ -32,6 +32,49 @@ final class ClasseraStudentsTests: XCTestCase {
         XCTAssertEqual(ClasseraClass.title("classera-1"),"Classera 1 (F)")
         XCTAssertEqual(ClasseraClass.title("12E"),"Classera 2 (E)")
     }
+    private func directoryStudent(_ phone: String, statuses: [String], activity: String = "allowed", signup: Bool = false) throws -> ClasseraStudent {
+        let subscriptions: [[String: Any]] = statuses.enumerated().map { index, status in
+            ["class_name": index == 0 ? "12F" : "12E", "name": "Student \(phone)", "status": status, "ai_enabled": 0]
+        }
+        let object: [String: Any] = ["phone": phone, "revision": String(repeating: "a", count: 64),
+            "activity_status": activity, "subscriptions": subscriptions,
+            "signup_session": signup ? ["step": "name"] as Any : NSNull()]
+        return try JSONDecoder().decode(ClasseraStudent.self, from: JSONSerialization.data(withJSONObject: object))
+    }
+    func testOptOutNeedsExplicitEvidenceAndPreservesOtherClassesAndOnboarding() throws {
+        XCTAssertTrue(try directoryStudent("201000000001", statuses: ["opted_out"]).isOptedOut)
+        for statuses in [[], ["disabled"], ["active"], ["waiting_for_class"], ["opted_out", "active"], ["opted_out", "legacy_unknown"]] {
+            XCTAssertFalse(try directoryStudent("201000000001", statuses: statuses).isOptedOut)
+        }
+        XCTAssertFalse(try directoryStudent("201000000001", statuses: ["opted_out"], signup: true).isOptedOut)
+    }
+    func testOptedOutClassHasExplicitLabelAndSurvivesAnotherClassEdit() throws {
+        let student = try directoryStudent("201000000001", statuses: ["opted_out", "active"])
+        XCTAssertEqual(ClasseraSubscriptionSummary.modeLabel(student.subscriptions[0]), "Opted out")
+        XCTAssertEqual(ClasseraSubscriptionSummary.aiLabel(student.subscriptions[0]), "Opted out")
+        XCTAssertNil(ClasseraSubscriptionMode.current(student.subscriptions[0]))
+        var rows = student.subscriptions
+        rows[1] = ClasseraSubscriptionMode.ai.applying(to: rows[1])
+        let encoded = try JSONEncoder().encode(ClasseraStudentEdit(student: student, rows: rows))
+        let payload = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        let saved = try XCTUnwrap(payload["subscriptions"] as? [[String: Any]])
+        XCTAssertEqual(saved[0]["status"] as? String, "opted_out")
+        XCTAssertEqual(saved[0]["ai_enabled"] as? Int, 0)
+        XCTAssertEqual(saved[1]["ai_enabled"] as? Int, 1)
+    }
+    func testDefaultListHidesOptOutAndStablePartitionsSuspendedWithoutSections() throws {
+        let suspended = try directoryStudent("201000000001", statuses: ["active"], activity: "suspended")
+        let opted = try directoryStudent("201000000002", statuses: ["opted_out"])
+        let first = try directoryStudent("201000000003", statuses: ["active"])
+        let second = try directoryStudent("201000000004", statuses: ["active"])
+        let anotherSuspended = try directoryStudent("201000000005", statuses: ["active"], activity: "suspended")
+        let input = [suspended, opted, first, anotherSuspended, second]
+        XCTAssertEqual(ClasseraDirectoryFilter.current.apply(to: input, search: "").map(\.phone), [first.phone, second.phone, suspended.phone, anotherSuspended.phone])
+        XCTAssertEqual(ClasseraDirectoryFilter.optedOut.apply(to: input, search: "").map(\.phone), [opted.phone])
+        XCTAssertEqual(ClasseraDirectoryFilter.suspended.apply(to: input, search: "").map(\.phone), [suspended.phone, anotherSuspended.phone])
+        XCTAssertEqual(ClasseraDirectoryFilter.allowed.apply(to: input, search: "00003").map(\.phone), [first.phone])
+        XCTAssertEqual(input.count, 5)
+    }
     func testClasseraWindowIsOptionalAndNeverInferredFromSubscriptionDates() throws {
         let legacy = try JSONDecoder().decode(ClasseraStudent.self, from: record)
         XCTAssertNil(legacy.whatsappWindows)

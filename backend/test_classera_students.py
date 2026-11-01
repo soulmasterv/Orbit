@@ -22,6 +22,30 @@ class DirectoryTests(unittest.TestCase):
         self.phone = "201000000001"
         self.url = "/api/classera-students/" + self.phone
     def tearDown(self): self.tmp.cleanup()
+    def test_other_class_edit_preserves_existing_opt_out_and_preferences(self):
+        with self.directory.connect() as c:
+            c.executemany("INSERT INTO subscribers VALUES(?,?,?,?,?,?,?)",[
+                (self.phone,'Student','12F',0,'opted_out','old','before'),
+                (self.phone,'Student','12E',0,'active','old','before')])
+        current=self.directory.get(self.phone)
+        rows=[{key:r[key] for key in ['class_name','name','ai_enabled','status']} for r in current['subscriptions']]
+        next(r for r in rows if r['class_name']=='12E')['ai_enabled']=1
+        updated=self.directory.save(self.phone,{'expected_revision':current['revision'],'subscriptions':rows})
+        by_class={r['class_name']:r for r in updated['subscriptions']}
+        self.assertEqual(by_class['12F']['status'],'opted_out')
+        self.assertEqual(by_class['12F']['ai_enabled'],0)
+        self.assertEqual(by_class['12F']['joined_at'],'old')
+        self.assertEqual(by_class['12E']['ai_enabled'],1)
+
+    def test_cannot_invent_opt_out_or_change_preserved_opt_out_ai(self):
+        with self.directory.connect() as c:
+            c.execute("INSERT INTO subscribers VALUES(?,?,?,?,?,?,?)",(self.phone,'Student','12F',0,'opted_out','old','before'))
+        current=self.directory.get(self.phone)
+        for rows in [[self.row('12F',ai=1,status='opted_out')],
+                     [self.row('12F',ai=0,status='opted_out'),self.row('12E',ai=None,status='opted_out')]]:
+            response=self.client.put(self.url,headers=self.headers,json={'expected_revision':current['revision'],'subscriptions':rows})
+            self.assertEqual(response.status_code,422)
+            self.assertEqual(self.directory.get(self.phone),current)
     def row(self, klass="12F", ai=1, status="active"):
         return dict(class_name=klass, name="Test Student", ai_enabled=ai, status=status)
     def put(self, rows, revision=None):
@@ -92,3 +116,4 @@ class DirectoryTests(unittest.TestCase):
         self.assertFalse(can_reply('not-a-number',self.path))
 
 if __name__ == "__main__": unittest.main()
+

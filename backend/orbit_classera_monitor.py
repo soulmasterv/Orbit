@@ -10,6 +10,7 @@ import uuid
 from datetime import date, datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
+from classera_ai_activity import evidence as ai_button_evidence
 
 DB = Path("/home/local/classera/shared/delivery_state.db")
 SUBSCRIBERS = Path("/home/local/classera/shared/subscribers.sqlite3")
@@ -185,6 +186,7 @@ class Store:
             conn.execute("BEGIN")
             total=conn.execute("SELECT COUNT(*)"+source+where,args).fetchone()[0]
             rows=[dict(r) for r in conn.execute("SELECT a.*,s.name AS student"+source+where+" ORDER BY "+sort+" "+direction+",a.id LIMIT ? OFFSET ?",args+[limit,offset])]
+            for row in rows: row['ai_analysis'] = ai_button_evidence(conn, row)
         for r in rows:
             r["historical"]=bool(r["historical"])
             stored = r["report_date"]

@@ -192,6 +192,9 @@ struct ClasseraMonitoringView: View {
                             Text(row.report).font(.caption).foregroundStyle(.secondary)
                             if row.dateFromTitle { Text("Date from report title").font(.caption2).foregroundStyle(.secondary) }
                             Text(row.template ?? "Template not recorded").font(.caption).foregroundStyle(.secondary)
+                            Text("Attempt recorded: \(ClasseraDeliveryClock.label(row.created_at))").font(.caption).foregroundStyle(.secondary)
+                            Text("Status updated: \(ClasseraDeliveryClock.label(row.updated_at))").font(.caption).foregroundStyle(.secondary)
+                            Text("AI analysis: \(row.ai_analysis?.label ?? "Unknown")").font(.caption)
                         }.foregroundStyle(.white).padding(13)
                             .background(StudentPalette.surface, in: RoundedRectangle(cornerRadius: 11))
                     }.buttonStyle(.plain)
@@ -509,7 +512,16 @@ struct ClasseraDeliveryDetail: View {
                 LabeledContent("Template", value: record.template ?? "Not recorded")
                 LabeledContent("Message ID", value: record.message_id ?? "Not recorded").textSelection(.enabled)
                 LabeledContent("Status", value: ClasseraDeliveryState.title(record.status))
-                LabeledContent("Updated", value: Date(timeIntervalSince1970: Double(record.updated_at)).formatted(date: .abbreviated, time: .shortened))
+                LabeledContent("Attempt recorded", value: ClasseraDeliveryClock.label(record.created_at))
+                LabeledContent("Last status update", value: ClasseraDeliveryClock.label(record.updated_at))
+            }
+            Section("AI analysis request") {
+                LabeledContent("Get AI analysis", value: record.ai_analysis?.label ?? "Unknown")
+                if record.ai_analysis?.label == "Requested" {
+                    LabeledContent("Button pressed", value: ClasseraDeliveryClock.label(record.ai_analysis?.requested_at))
+                }
+                Text("This records the button press, separately from AI subscription settings and whether an analysis reply was delivered. Unknown means no reliable tracking is available.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             Text(record.historical ? "Imported last-known snapshot. Earlier events, template and original attempt time may not have been recorded." :
                     "This is the latest confirmed state for this message attempt. API acceptance does not prove delivery.")

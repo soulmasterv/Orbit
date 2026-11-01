@@ -36,7 +36,7 @@ struct ClasseraStudentsView: View {
     @Environment(\.scenePhase) private var phase
     @State private var students: [ClasseraStudent] = []
     @State private var search = ""
-    @State private var activity: StudentActivityStatus?
+    @State private var directoryFilter: ClasseraDirectoryFilter = .current
     @State private var error: String?
     @State private var loading = false
     @State private var generation = 0
@@ -53,10 +53,7 @@ struct ClasseraStudentsView: View {
         })
     }
     private var filtered: [ClasseraStudent] {
-        students.filter { student in
-            student.activityStatus.matches(activity) &&
-            (search.isEmpty || student.displayName.localizedCaseInsensitiveContains(search) || student.phone.contains(search))
-        }
+        directoryFilter.apply(to: students, search: search)
     }
     private var classCount: Int { Set(students.flatMap(\.subscriptions).filter(\.editable).map(\.className)).count }
     var body: some View {
@@ -65,11 +62,22 @@ struct ClasseraStudentsView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     StudentSearchField(text: $search)
                     HStack {
-                        Text("\(students.count) subscribers")
+                        Text("\(filtered.count) \(directoryFilter == .optedOut ? "opted out" : "subscribers")")
                         Spacer()
                         Text("\(classCount) classes")
                     }.font(.caption).foregroundStyle(StudentPalette.secondary)
-                    StudentAccessFilters(selection: $activity)
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(ClasseraDirectoryFilter.allCases) { filter in
+                                Button { directoryFilter = filter } label: {
+                                    Text(filter.rawValue).font(.subheadline).foregroundStyle(.white)
+                                        .padding(.horizontal, 13).padding(.vertical, 10)
+                                        .background(directoryFilter == filter ? StudentPalette.accent : StudentPalette.surface,
+                                                    in: RoundedRectangle(cornerRadius: 9))
+                                }.buttonStyle(.plain).accessibilityAddTraits(directoryFilter == filter ? .isSelected : [])
+                            }
+                        }
+                    }
                     if loading { ProgressView("Refreshing…").font(.caption) }
                     if let error {
                         Text(error).font(.caption).foregroundStyle(.orange)
@@ -81,7 +89,7 @@ struct ClasseraStudentsView: View {
                         StudentCompactRow(name: student.displayName, phone: student.phone,
                             chips: student.subscriptions.map { row in
                                 let label = row.className == "12F" ? "1 (F)" : row.className == "12E" ? "2 (E)" : row.className
-                                return row.status == "waiting_for_class" ? "\(label) · Waiting" : "\(label) · \(ClasseraSubscriptionMode.current(row)?.rawValue ?? "Not set")"
+                                return "\(label) · \(ClasseraSubscriptionSummary.modeLabel(row))"
                             }, status: student.activityStatus,
                             note: student.signupSession == nil ? nil : "Sign up in progress",
                             noteColor: .yellow,
@@ -330,6 +338,7 @@ struct ClasseraStudentEditor: View {
                     VStack(alignment: .leading, spacing: 5) {
                         Text(ClasseraClass.title(row.className)).font(.subheadline.weight(.semibold))
                         if row.status == "waiting_for_class" { Text("Waiting for class").font(.caption).foregroundStyle(.yellow) }
+                        if row.status == "opted_out" { Text("Opted out").font(.caption).foregroundStyle(StudentPalette.secondary) }
                         if !row.editable { Text("Legacy subscription preserved").font(.caption).foregroundStyle(.secondary) }
                     }
                     Spacer(minLength: 8)
@@ -344,7 +353,7 @@ struct ClasseraStudentEditor: View {
                             }
                         } label: {
                             HStack(spacing: 5) {
-                                Text(ClasseraSubscriptionMode.current(row)?.rawValue ?? "Choose mode")
+                                Text(ClasseraSubscriptionSummary.modeLabel(row))
                                 Image(systemName: "chevron.up.chevron.down").font(.caption2)
                             }
                         }.disabled(!canSave)

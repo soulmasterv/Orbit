@@ -33,7 +33,28 @@ struct ClasseraStudent: Codable, Identifiable {
     var displayName: String { profileName ?? subscriptions.first?.name ?? signupSession?.name ?? "Onboarding student" }
     var maskedPhone: String { "•••• " + phone.suffix(4) }
     var hasPendingClass: Bool { subscriptions.contains { $0.status == "waiting_for_class" } }
+    // Empty admin-created profiles and mixed/legacy subscriptions are not proof of opt-out.
+    var isOptedOut: Bool {
+        signupSession == nil && !subscriptions.isEmpty && subscriptions.allSatisfy { $0.status == "opted_out" }
+    }
     enum CodingKeys: String, CodingKey { case phone, subscriptions, revision; case signupSession = "signup_session", activityStatusValue = "activity_status", whatsappWindows = "whatsapp_windows", profileName = "profile_name" }
+}
+
+enum ClasseraDirectoryFilter: String, CaseIterable, Identifiable {
+    case current = "All", allowed = "Allowed", suspended = "Suspended", optedOut = "Opted out"
+    var id: String { rawValue }
+    func apply(to students: [ClasseraStudent], search: String) -> [ClasseraStudent] {
+        let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
+        let matching = students.filter { student in
+            let consentMatches = self == .optedOut ? student.isOptedOut : !student.isOptedOut
+            let activityMatches = self == .allowed ? student.activityStatus == .allowed :
+                self == .suspended ? student.activityStatus == .suspended : true
+            return consentMatches && activityMatches && (query.isEmpty ||
+                student.displayName.localizedCaseInsensitiveContains(query) || student.phone.contains(query))
+        }
+        // Stable partition retains the API activity order within both groups.
+        return matching.filter { $0.activityStatus != .suspended } + matching.filter { $0.activityStatus == .suspended }
+    }
 }
 
 enum ClasseraNameEdit {
@@ -75,7 +96,7 @@ struct ClasseraStudentEdit: Encodable {
               Set(known.map(\.className)).count == known.count,
               known.allSatisfy({ !$0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && $0.name.count <= 120 &&
                   !$0.name.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) &&
-                  ["active", "waiting_for_class", "disabled"].contains($0.status) &&
+                  ["active", "waiting_for_class", "disabled", "opted_out"].contains($0.status) &&
                   ($0.aiEnabled == nil || $0.aiEnabled == 0 || $0.aiEnabled == 1) &&
                   (!["waiting_for_class", "disabled"].contains($0.status) || $0.aiEnabled == nil) }) else {
             throw APIError.message("Enter a name for each class. Finish any WhatsApp signup before editing here.")
@@ -102,7 +123,13 @@ enum ClasseraClass {
 
 
 enum ClasseraSubscriptionSummary {
+    static func modeLabel(_ row: ClasseraSubscription) -> String {
+        if row.status == "opted_out" { return "Opted out" }
+        if row.status == "waiting_for_class" { return "Waiting" }
+        return ClasseraSubscriptionMode.current(row)?.rawValue ?? "Not set"
+    }
     static func aiLabel(_ row: ClasseraSubscription) -> String {
+        if row.status == "opted_out" { return "Opted out" }
         guard row.status != "waiting_for_class" else { return "Not set" }
         switch row.aiEnabled { case 1: return "On"; case 0: return "Off"; default: return "Not set" }
     }
@@ -212,4 +239,5 @@ struct ClasseraTextRejection: Error, LocalizedError {
         }
     }
 }
+
 

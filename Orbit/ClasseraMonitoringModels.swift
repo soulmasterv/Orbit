@@ -83,6 +83,31 @@ struct ClasseraDeliveryRecord: Decodable, Identifiable {
     let created_at: Int?
     let updated_at: Int
     let historical: Bool
+    let ai_analysis: ClasseraAIAnalysisEvidence?
+}
+
+struct ClasseraAIAnalysisEvidence: Decodable {
+    let status: String?
+    let requested_at: Int?
+    var label: String {
+        switch status {
+        case "requested" where (requested_at ?? 0) > 0: return "Requested"
+        case "not_recorded": return "No click recorded"
+        case "not_applicable": return "No AI button"
+        default: return "Unknown"
+        }
+    }
+}
+
+enum ClasseraDeliveryClock {
+    static func label(_ seconds: Int?, timeZone: TimeZone = .current) -> String {
+        guard let seconds, seconds > 0, seconds <= 253402300799 else { return "Not recorded" }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = timeZone
+        formatter.dateFormat = "d MMM yyyy · h:mm a"
+        return formatter.string(from: Date(timeIntervalSince1970: Double(seconds)))
+    }
 }
 struct ClasseraHistoryResponse: ClasseraVersioned {
     let version: Int

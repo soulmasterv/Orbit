@@ -10,6 +10,7 @@ from pathlib import Path
 from flask import Flask
 from orbit_classera_monitor import Store, report_date
 from classera_monitoring_api import register, ClassReady, Problem
+from classera_ai_activity import migrate as migrate_ai_tracking, observe_button
 
 class ClasseraMonitoringTests(unittest.TestCase):
     def setUp(self):
@@ -37,6 +38,31 @@ class ClasseraMonitoringTests(unittest.TestCase):
     def tearDown(self):
         for pool in self.pools:pool.shutdown(wait=True)
         self.temp.cleanup()
+
+    def test_history_ai_tracking_is_unknown_on_older_backend_and_does_not_migrate_on_get(self):
+        run=self.store.begin('12F 1/11/26','12F',['201000000001'])
+        self.store.attempt(run,'201000000001','classera_v9')
+        response=self.client.get('/api/classera/delivery-history',headers=self.auth)
+        self.assertEqual(response.status_code,200)
+        self.assertEqual(response.get_json()['records'][0]['ai_analysis'],{'status':'unknown','requested_at':None})
+        with self.store.connect(True) as c:
+            self.assertIsNone(c.execute("SELECT 1 FROM sqlite_master WHERE name='orbit_ai_button_events'").fetchone())
+
+    def test_exact_ai_context_links_after_delivery_bind_and_not_other_class_report(self):
+        with self.store.connect() as c:migrate_ai_tracking(c,now=int(time.time())-10)
+        run=self.store.begin('12F 1/11/26','12F',['201000000001'])
+        attempt=self.store.attempt(run,'201000000001','classera_v9')
+        other_run=self.store.begin('12E 1/11/26','12E',['201000000001'])
+        other=self.store.attempt(other_run,'201000000001','classera_v9')
+        moment=int(time.time())
+        self.assertTrue(observe_button({'type':'button','from':'201000000001','id':'inbound-click',
+            'timestamp':str(moment),'context':{'id':'report-message-F'},'button':{'payload':'Get AI Analysis'}},path=self.db,now=moment))
+        self.store.result(attempt,'delivered','report-message-F')
+        self.store.result(other,'read','report-message-E')
+        records={r['id']:r for r in self.client.get('/api/classera/delivery-history',headers=self.auth).get_json()['records']}
+        self.assertEqual(records[attempt]['ai_analysis'],{'status':'requested','requested_at':moment})
+        self.assertEqual(records[other]['ai_analysis']['status'],'not_recorded')
+        self.assertEqual(records[other]['status'],'read')
 
     def post_body(self,preview):
         return {"request_id":str(uuid.uuid4()),"class_id":preview["class_id"],

@@ -2,6 +2,26 @@ import XCTest
 @testable import Orbit
 
 final class MonitoringEvidenceTests: XCTestCase {
+    func testDeliveryTimesUseTwelveHourClockAndDeviceZoneWithoutInventingDates() throws {
+        let utc = try XCTUnwrap(TimeZone(secondsFromGMT: 0))
+        let plus3 = try XCTUnwrap(TimeZone(secondsFromGMT: 10800))
+        XCTAssertEqual(ClasseraDeliveryClock.label(43200, timeZone: utc), "1 Jan 1970 · 12:00 PM")
+        XCTAssertEqual(ClasseraDeliveryClock.label(43200, timeZone: plus3), "1 Jan 1970 · 3:00 PM")
+        XCTAssertEqual(ClasseraDeliveryClock.label(86400, timeZone: utc), "2 Jan 1970 · 12:00 AM")
+        XCTAssertEqual(ClasseraDeliveryClock.label(nil), "Not recorded")
+        XCTAssertEqual(ClasseraDeliveryClock.label(-1), "Not recorded")
+        XCTAssertEqual(ClasseraDeliveryClock.label(Int.max), "Not recorded")
+    }
+    func testAIPressRequiresExplicitEvidenceAndIsSeparateFromDelivery() throws {
+        func decode(_ value: String) throws -> ClasseraAIAnalysisEvidence {
+            try JSONDecoder().decode(ClasseraAIAnalysisEvidence.self, from: Data(value.utf8))
+        }
+        XCTAssertEqual(try decode(#"{"status":"requested","requested_at":1200}"#).label, "Requested")
+        XCTAssertEqual(try decode(#"{"status":"requested","requested_at":null}"#).label, "Unknown")
+        XCTAssertEqual(try decode(#"{"status":"new_server_state"}"#).label, "Unknown")
+        XCTAssertEqual(try decode(#"{"status":"not_recorded"}"#).label, "No click recorded")
+        XCTAssertEqual(try decode(#"{}"#).label, "Unknown")
+    }
     func testExplicitFullReportTitleDatesAndInvalidDates() {
         XCTAssertEqual(ClasseraReportTitleDate.parse("12F 1/11/26"), "2026-11-01")
         XCTAssertEqual(ClasseraReportTitleDate.parse("12E 01_11_2026"), "2026-11-01")
@@ -13,6 +33,7 @@ final class MonitoringEvidenceTests: XCTestCase {
     func testHistoryLabelsTitleDateWithoutChangingStoredEvidence() throws {
         let value = try JSONDecoder().decode(ClasseraDeliveryRecord.self, from: Data(#"{"id":"fixture","report":"12F 1/11/26","report_date":null,"class_id":"12F","phone":"201000000001","student":null,"template":"classera_v9","message_id":null,"status":"delivered","created_at":null,"updated_at":1,"historical":true}"#.utf8))
         XCTAssertNil(value.report_date)
+        XCTAssertNil(value.ai_analysis)
         XCTAssertEqual(value.displayReportDate, "2026-11-01")
         XCTAssertTrue(value.dateFromTitle)
         XCTAssertEqual(value.template, "classera_v9")
