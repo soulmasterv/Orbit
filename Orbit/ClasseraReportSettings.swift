@@ -123,7 +123,7 @@ final class ClasseraReportSettingsStore: ObservableObject {
             settings = value; draft = drafts[classID] ?? value.queued_notice?.text ?? ""; error = nil
         } catch {
             guard generation == epoch && api.accessAllowed else { return }
-            error = Self.safe(error)
+            self.error = Self.safe(error)
         }
     }
     func prepareAI(api: ServerAPI, value: Int) async {
@@ -134,7 +134,7 @@ final class ClasseraReportSettingsStore: ObservableObject {
             let result = try await api.classeraBulkAIPreview(classID, value: value)
             guard generation == epoch && api.accessAllowed && !Task.isCancelled else { return }
             preview = result; error = nil
-        } catch { if generation == epoch && api.accessAllowed { error = Self.safe(error) } }
+        } catch { if generation == epoch && api.accessAllowed { self.error = Self.safe(error) } }
     }
     func applyAI(api: ServerAPI, confirmed: ClasseraAIPreview) async {
         guard canMutate, settings?.capabilities.bulk_ai == true, let preview,
