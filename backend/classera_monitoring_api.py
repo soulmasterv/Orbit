@@ -120,16 +120,13 @@ class ClassReady:
         return self.operation(identifier),200 if replay else 202
 
     def dispatch(self, identifier):
-        # Never run on GET. Never retry. Pending reservations require manual review after a crash.
+        # Commit at-most-once reservation before HTTP. Never hold signup DB locks over network.
         with self.store.connect(True) as c:
             op=dict(c.execute("SELECT * FROM orbit_class_ready_operations WHERE id=?",(identifier,)).fetchone())
             rows=[dict(r) for r in c.execute("SELECT * FROM orbit_class_ready_recipients WHERE operation_id=?",(identifier,))]
         for row in rows:
             if row["status"]!="reserved":continue
-            with self.connect() as c:
-                c.execute("BEGIN IMMEDIATE")
-                current=c.execute("SELECT status FROM orbit_class_ready_recipients WHERE operation_id=? AND phone=?",(identifier,row["phone"])).fetchone()
-                if not current or current["status"]!="reserved":continue
+            def eligible(c):
                 student=c.execute("""SELECT s.joined_at FROM people.subscribers s
                   LEFT JOIN people.orbit_student_controls r ON r.phone=s.phone
                   WHERE s.phone=? AND s.class_name=? AND s.status='waiting_for_class'
@@ -138,15 +135,29 @@ class ClassReady:
                   (row["phone"],op["class_id"])).fetchone()
                 key=hashlib.sha256(json.dumps([row["phone"],op["class_id"],student["joined_at"] if student else None]).encode()).hexdigest()
                 info=next((v for v in self.catalog() if v["id"]==op["class_id"]),{})
-                state,message,code="failed",None,"eligibility_changed"
-                if student and re.fullmatch(r"[1-9][0-9]{7,14}",row["phone"]) and key==row["enrollment_key"] and info.get("supported") and info.get("template_verified") and self.sender:
-                    state,code="unknown",None
-                    try:
-                        result=self.sender(op["class_id"],row["phone"])
-                        if result.get("status")=="accepted" and isinstance(result.get("message_id"),str) and result["message_id"]:
-                            state,message="accepted",result["message_id"]
-                        elif result.get("status")=="failed":state,code="failed","provider_rejected"
-                    except Exception:code="outcome_unknown"
+                return bool(student and re.fullmatch(r"[1-9][0-9]{7,14}",row["phone"]) and key==row["enrollment_key"] and info.get("supported") and info.get("template_verified") and self.sender)
+            with self.connect() as c:
+                c.execute("BEGIN IMMEDIATE")
+                current=c.execute("SELECT status FROM orbit_class_ready_recipients WHERE operation_id=? AND phone=?",(identifier,row["phone"])).fetchone()
+                if not current or current["status"]!="reserved":continue
+                allowed=eligible(c)
+                c.execute("UPDATE orbit_class_ready_recipients SET status=?,error_code=? WHERE operation_id=? AND phone=?",
+                    ("unknown" if allowed else "failed","dispatch_started" if allowed else "eligibility_changed",identifier,row["phone"]))
+            if not allowed:continue
+            state,message,code="failed",None,"eligibility_changed"
+            # Recheck a pause or signup that committed after reservation.
+            with self.connect(True) as c:
+                allowed=eligible(c)
+            if allowed:
+                state,code="unknown",None
+                try:
+                    result=self.sender(op["class_id"],row["phone"])
+                    if result.get("status")=="accepted" and isinstance(result.get("message_id"),str) and result["message_id"]:
+                        state,message="accepted",result["message_id"]
+                    elif result.get("status")=="failed":state,code="failed","provider_rejected"
+                except Exception:code="outcome_unknown"
+            with self.store.connect() as c:
+                c.execute("BEGIN IMMEDIATE")
                 c.execute("UPDATE orbit_class_ready_recipients SET status=?,message_id=?,error_code=? WHERE operation_id=? AND phone=?",
                           (state,message,code,identifier,row["phone"]))
                 if message:

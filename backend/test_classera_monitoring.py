@@ -117,6 +117,25 @@ class ClasseraMonitoringTests(unittest.TestCase):
         self.assertEqual(len(self.calls),2)
         self.assertEqual(again.operation(body["request_id"])["counts"]["unknown"],2)
 
+    def test_invitation_http_does_not_lock_signup_db_and_early_receipt_is_replayed(self):
+        def sender(klass, phone):
+            self.calls.append((klass,phone))
+            # A separate signup writer must commit while the provider call is active.
+            with sqlite3.connect(self.people,timeout=0.2) as c:
+                c.execute("UPDATE subscribers SET name='Fixture updated' WHERE phone=?",(phone,))
+            message='early-'+phone
+            self.store.event(message,'read',int(time.time()))
+            return {'status':'accepted','message_id':message}
+        service=self.verified_service(sender)
+        body=self.post_body(service.preview('12F'));service.submit(body)
+        service.pool.shutdown(wait=True)
+        self.assertEqual(len(self.calls),2)
+        result=service.operation(body['request_id'])
+        self.assertEqual(result['counts']['read'],2)
+        self.assertEqual(result['counts']['accepted'],0)
+        service.dispatch(body['request_id'])
+        self.assertEqual(len(self.calls),2)
+
     def test_pending_dispatch_rechecks_pause_and_enrollment(self):
         class Deferred:
             def submit(self,*args):pass
@@ -251,3 +270,4 @@ class ClasseraMonitoringTests(unittest.TestCase):
         self.store.event("failed-message","failed",1793010002)
         self.store.event("failed-message","sent",1793010003)
         self.assertEqual(self.store.history({"record_id":identifier})["records"][0]["status"],"failed")
+
