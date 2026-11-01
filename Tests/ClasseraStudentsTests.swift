@@ -68,12 +68,13 @@ final class ClasseraStudentsTests: XCTestCase {
         let first = try directoryStudent("201000000003", statuses: ["active"])
         let second = try directoryStudent("201000000004", statuses: ["active"])
         let anotherSuspended = try directoryStudent("201000000005", statuses: ["active"], activity: "suspended")
-        let input = [suspended, opted, first, anotherSuspended, second]
-        XCTAssertEqual(ClasseraDirectoryFilter.current.apply(to: input, search: "").map(\.phone), [first.phone, second.phone, suspended.phone, anotherSuspended.phone])
+        let legacyPaused = try directoryStudent("201000000006", statuses: ["active"], activity: "blocked")
+        let input = [suspended, opted, first, anotherSuspended, second, legacyPaused]
+        XCTAssertEqual(ClasseraDirectoryFilter.current.apply(to: input, search: "").map(\.phone), [first.phone, second.phone, suspended.phone, anotherSuspended.phone, legacyPaused.phone])
         XCTAssertEqual(ClasseraDirectoryFilter.optedOut.apply(to: input, search: "").map(\.phone), [opted.phone])
-        XCTAssertEqual(ClasseraDirectoryFilter.suspended.apply(to: input, search: "").map(\.phone), [suspended.phone, anotherSuspended.phone])
+        XCTAssertEqual(ClasseraDirectoryFilter.suspended.apply(to: input, search: "").map(\.phone), [suspended.phone, anotherSuspended.phone, legacyPaused.phone])
         XCTAssertEqual(ClasseraDirectoryFilter.allowed.apply(to: input, search: "00003").map(\.phone), [first.phone])
-        XCTAssertEqual(input.count, 5)
+        XCTAssertEqual(input.count, 6)
     }
     func testClasseraWindowIsOptionalAndNeverInferredFromSubscriptionDates() throws {
         let legacy = try JSONDecoder().decode(ClasseraStudent.self, from: record)

@@ -48,12 +48,12 @@ enum ClasseraDirectoryFilter: String, CaseIterable, Identifiable {
         let matching = students.filter { student in
             let consentMatches = self == .optedOut ? student.isOptedOut : !student.isOptedOut
             let activityMatches = self == .allowed ? student.activityStatus == .allowed :
-                self == .suspended ? student.activityStatus == .suspended : true
+                self == .suspended ? student.activityStatus.matches(.suspended) : true
             return consentMatches && activityMatches && (query.isEmpty ||
                 student.displayName.localizedCaseInsensitiveContains(query) || student.phone.contains(query))
         }
         // Stable partition retains the API activity order within both groups.
-        return matching.filter { $0.activityStatus != .suspended } + matching.filter { $0.activityStatus == .suspended }
+        return matching.filter { !$0.activityStatus.matches(.suspended) } + matching.filter { $0.activityStatus.matches(.suspended) }
     }
 }
 
