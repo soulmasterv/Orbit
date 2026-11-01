@@ -65,6 +65,11 @@ struct ClasseraMonitoringView: View {
         .navigationBarBackButtonHidden(store.mutationBusy)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
+                NavigationLink { ClasseraReportSettingsView(api: api) } label: {
+                    Label("Report settings", systemImage: "slider.horizontal.3")
+                }.accessibilityLabel("Classera report settings")
+            }
+            ToolbarItem(placement: .topBarTrailing) {
                 Button { Task { await refresh() } } label: { Image(systemName: "arrow.clockwise") }
                     .disabled(store.loading || store.mutationBusy || !api.accessAllowed)
                     .accessibilityLabel("Refresh Classera monitoring")

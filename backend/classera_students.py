@@ -202,8 +202,14 @@ def register(app, owner_token, directory=None):
     from classera_monitoring_api import register as register_monitoring
     register_monitoring(app, owner_token)
 
+    from classera_report_settings import ReportSettings, register as register_report_settings
+    from classera_report_notices import producer_ready
+    register_report_settings(app, owner_token, ReportSettings(directory.path,
+        notice_ready=lambda: directory.path.resolve() == Path(DB).resolve() and producer_ready()))
+
     @app.after_request
     def private_directory(response):
         if request.path.startswith("/api/classera-students"):
             response.headers["Cache-Control"] = "no-store"
         return response
+

@@ -19,6 +19,12 @@ struct OrbitChangelogEntry: Identifiable {
     let title: String
     let changes: [String]
     static let entries: [Self] = [
+        .init(id: "2026-11-report-administration", title: "Classera report administration", changes: [
+            "Report settings with selected-class AI/No-AI previews and atomic updates, preserving paused subscriptions and unfinished signups.",
+            "Queue one notice for the next new class-wide report. Open windows use plaintext; closed or unknown windows require an approved classera_wa_notice template.",
+            "Saved request identities, read-only recovery and explicit cancellation prevent silent duplicate actions after a timeout.",
+            "Verified class-ready template support reuses the existing Opt-in signup flow. Server installation and explicit class enablement are required."
+        ]),
         .init(id: "2026-11-navigation-monitoring", title: "Workspace navigation and delivery history", changes: [
             "Home’s Students shortcut selects the existing Students tab instead of opening a second directory.",
             "Workspace destinations use stable navigation routes; refreshing cancellation no longer leaves the Classera directory loading.",

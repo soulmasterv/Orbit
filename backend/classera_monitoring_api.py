@@ -34,7 +34,7 @@ class ClassReady:
         catalog=self.catalog();info=next((c for c in catalog if c["id"]==class_id),None)
         if info is None: raise Problem("class_not_found",404)
         rows=[dict(r) for r in conn.execute("""SELECT s.phone,s.name,s.class_name,s.joined_at,s.updated_at,
-          COALESCE(c.activity_status,'allowed') AS activity_status,
+          CASE WHEN c.phone IS NULL THEN 'allowed' ELSE c.activity_status END AS activity_status,
           EXISTS(SELECT 1 FROM people.signup_sessions p WHERE p.phone=s.phone) AS signup
           FROM people.subscribers s LEFT JOIN people.orbit_student_controls c ON c.phone=s.phone
           WHERE s.class_name=? AND s.status='waiting_for_class' ORDER BY s.phone""",(class_id,))]
@@ -44,7 +44,7 @@ class ClassReady:
             r["enrollment_key"]=key
             r["notification_status"]=previous["status"] if previous else "not_notified"
             r["eligible"]=bool(info["supported"] and re.fullmatch(r"[1-9][0-9]{7,14}",r["phone"]) and r["activity_status"]=="allowed" and not r["signup"] and previous is None)
-        safe_info={"id":info["id"],"name":info["name"],"supported":bool(info["supported"])}
+        safe_info={"id":info["id"],"name":info["name"],"supported":bool(info["supported"]),"template_revision":info.get("template_revision")}
         revision=hashlib.sha256(json.dumps([safe_info,rows],sort_keys=True,ensure_ascii=False).encode()).hexdigest()
         count=sum(r["eligible"] for r in rows)
         can_execute=bool(self.sender and info.get("template_verified") and info["supported"] and count)
@@ -71,7 +71,7 @@ class ClassReady:
             c.execute("BEGIN")
             classes=[self._preview(c,item["id"]) for item in catalog]
         return {"version":1,"classes":classes,"updated_at":int(time.time()),
-          "sending_enabled":bool(self.sender),
+          "sending_enabled":bool(self.sender and any(item.get("template_verified") for item in catalog)),
           "notice":"Notifications are invitations to opt in. Sending never subscribes a student or enables a scheduler."}
 
     def operation(self, identifier):
@@ -133,7 +133,7 @@ class ClassReady:
                 student=c.execute("""SELECT s.joined_at FROM people.subscribers s
                   LEFT JOIN people.orbit_student_controls r ON r.phone=s.phone
                   WHERE s.phone=? AND s.class_name=? AND s.status='waiting_for_class'
-                  AND (r.activity_status IS NULL OR r.activity_status='allowed')
+                  AND (r.phone IS NULL OR r.activity_status='allowed')
                   AND NOT EXISTS(SELECT 1 FROM people.signup_sessions p WHERE p.phone=s.phone)""",
                   (row["phone"],op["class_id"])).fetchone()
                 key=hashlib.sha256(json.dumps([row["phone"],op["class_id"],student["joined_at"] if student else None]).encode()).hexdigest()
@@ -149,6 +149,9 @@ class ClassReady:
                     except Exception:code="outcome_unknown"
                 c.execute("UPDATE orbit_class_ready_recipients SET status=?,message_id=?,error_code=? WHERE operation_id=? AND phone=?",
                           (state,message,code,identifier,row["phone"]))
+                if message:
+                    events=c.execute("SELECT status,event_at FROM orbit_delivery_events WHERE message_id=? ORDER BY event_at,received_at",(message,)).fetchall()
+                    for event in events:self.store._apply(c,message,event["status"],event["event_at"])
         with self.store.connect() as c:
             c.execute("UPDATE orbit_class_ready_operations SET status='complete',updated_at=? WHERE id=?",(int(time.time()),identifier))
             c.execute("INSERT INTO orbit_class_ready_audit(request_id,class_id,action,created_at) VALUES(?,?,?,?)",(identifier,op["class_id"],"complete",int(time.time())))
@@ -177,9 +180,16 @@ def catalog_factory(subscribers, root):
 
 def register(app,owner_token,store=None,catalog=None,sender=None):
     store=store or Store()
-    catalog=catalog or catalog_factory(store.subscribers,"/home/local/classera")
+    if catalog is None:
+        catalog=catalog_factory(store.subscribers,"/home/local/classera")
+        if sender is None:
+            from classera_ready_sender import ReadySender
+            adapter=ReadySender()
+            if adapter.proof():
+                catalog=adapter.catalog(catalog)
+                sender=adapter.send
     service=ClassReady(store,catalog,sender)
-    # In production sender=None: no guessed template payload or provider call can occur.
+    # Without a valid private verification receipt, sender remains None.
     def authorized():
         supplied=request.headers.get("Authorization","")
         if not owner_token or not hmac.compare_digest(supplied.encode(),("Bearer "+owner_token).encode()):raise Problem("unauthorized",401)
@@ -208,3 +218,4 @@ def register(app,owner_token,store=None,catalog=None,sender=None):
       ("/api/classera/daily-statistics","orbit_classera_statistics",["GET"],lambda:store.statistics(request.args))]
     for path,name,methods,handler in routes:app.add_url_rule(path,name,endpoint(handler),methods=methods)
     return service
+

@@ -1035,6 +1035,64 @@ extension ServerAPI {
         }
         return result
     }
+    private func reportSettingsPath(_ classID: String) throws -> String {
+        guard ["classera-1", "classera-2"].contains(classID) else { throw ClasseraMonitoringFailure.invalidResponse }
+        return "/api/classera/report-settings/" + classID
+    }
+    func classeraReportSettings(_ classID: String) async throws -> ClasseraReportSettings {
+        let value: ClasseraReportSettings = try await classeraMonitoringRequest(reportSettingsPath(classID))
+        guard value.isValid && value.class_id == classID else { throw ClasseraMonitoringFailure.invalidResponse }
+        return value
+    }
+    func classeraBulkAIPreview(_ classID: String, value: Int) async throws -> ClasseraAIPreview {
+        guard [0, 1].contains(value) else { throw ClasseraMonitoringFailure.invalidResponse }
+        let result: ClasseraAIPreview = try await classeraMonitoringRequest(reportSettingsPath(classID) + "/bulk-ai/preview",
+            method: "POST", body: JSONEncoder().encode(["ai_enabled": value]))
+        guard result.isValid && result.class_id == classID && result.ai_enabled == value else { throw ClasseraMonitoringFailure.invalidResponse }
+        return result
+    }
+    func classeraReportOperation(_ classID: String, requestID: String) async throws -> ClasseraReportOperation {
+        guard UUID(uuidString: requestID)?.uuidString.lowercased() == requestID else { throw ClasseraMonitoringFailure.invalidResponse }
+        let value: ClasseraReportOperation = try await classeraMonitoringRequest(reportSettingsPath(classID) + "/operations/" + requestID)
+        guard value.isValid && value.class_id == classID && value.request_id == requestID else { throw ClasseraMonitoringFailure.invalidResponse }
+        return value
+    }
+    private func reportMutation(_ classID: String, suffix: String, method: String, body: Data,
+        requestID: String, reason: String, beforeSubmit: () throws -> Void) async throws -> ClasseraReportOperation {
+        let path = try reportSettingsPath(classID) + suffix
+        guard accessAllowed && !previewMode && !actionBusy && !Task.isCancelled,
+              UUID(uuidString: requestID)?.uuidString.lowercased() == requestID else { throw ClasseraMonitoringFailure.notSent }
+        let epoch = studentsAccessGeneration
+        actionBusy = true; actionProgress = "Authorize report settings…"
+        defer { actionBusy = false; actionProgress = "" }
+        do { try await authorizeConfirmed(reason) } catch { throw ClasseraMonitoringFailure.notSent }
+        guard accessAllowed && epoch == studentsAccessGeneration && !Task.isCancelled else { throw ClasseraMonitoringFailure.notSent }
+        try beforeSubmit()
+        let result: ClasseraReportOperation = try await classeraMonitoringRequest(path, method: method, body: body)
+        guard result.isValid && result.class_id == classID && result.request_id == requestID else { throw ClasseraMonitoringFailure.uncertain }
+        classeraRecipients.removeAll()
+        return result
+    }
+    func applyClasseraBulkAI(_ classID: String, payload: ClasseraBulkAIPayload,
+        beforeSubmit: () throws -> Void) async throws -> ClasseraReportOperation {
+        guard [0, 1].contains(payload.ai_enabled), payload.expected_affected_count >= 0 else { throw ClasseraMonitoringFailure.notSent }
+        let result = try await reportMutation(classID, suffix: "/bulk-ai/operations", method: "POST", body: JSONEncoder().encode(payload),
+            requestID: payload.request_id, reason: "Change \(payload.expected_affected_count) eligible subscriptions in the selected class to \(payload.ai_enabled == 1 ? "AI" : "No AI"). No message is sent now.", beforeSubmit: beforeSubmit)
+        guard result.kind == "bulk-ai" && result.status == "completed" && result.affected_count == payload.expected_affected_count else { throw ClasseraMonitoringFailure.uncertain }
+        return result
+    }
+    func saveClasseraReportNotice(_ classID: String, payload: ClasseraNoticePayload,
+        beforeSubmit: () throws -> Void) async throws -> ClasseraReportOperation {
+        guard payload.text.count <= 1000 else { throw ClasseraMonitoringFailure.notSent }
+        let result = try await reportMutation(classID, suffix: "/next-notice", method: "PUT", body: JSONEncoder().encode(payload),
+            requestID: payload.request_id, reason: "Save the notice for only the next class-wide report. This does not send a message now.", beforeSubmit: beforeSubmit)
+        guard result.kind == "next-notice" && result.status == "completed" && result.affected_count == 0 else { throw ClasseraMonitoringFailure.uncertain }
+        return result
+    }
+    func cancelClasseraReportOperation(_ classID: String, requestID: String) async throws -> ClasseraReportOperation {
+        try await reportMutation(classID, suffix: "/operations/" + requestID + "/cancel", method: "POST", body: Data("{}".utf8),
+            requestID: requestID, reason: "Cancel an unresolved report request if it has not applied. Completed changes are not undone.", beforeSubmit: {})
+    }
     func classeraWaitingList() async throws -> ClasseraWaitingResponse {
         try await classeraMonitoringRequest("/api/classera/waiting-list")
     }
@@ -1152,4 +1210,5 @@ extension ServerAPI {
         return data
     }
 }
+
 
