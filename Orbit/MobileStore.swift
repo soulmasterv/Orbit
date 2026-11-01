@@ -17,6 +17,8 @@ final class MobileStore: ObservableObject {
     private var generation = 0
     private var foregroundBusy = false
     private var capabilityConnection: StudentsConnection?
+    private var freshness = ReadSnapshotFreshness()
+    private var capabilityContext: UUID?
 
     init(api: ServerAPI, load: @escaping () throws -> MobileSecureState = KeychainManager.loadMobileState,
          save: @escaping (MobileSecureState) throws -> Void = KeychainManager.saveMobileState,
@@ -40,9 +42,11 @@ final class MobileStore: ObservableObject {
         try save(next) // Publish only after secure persistence succeeds.
         state = next
     }
-    func suspend() {
-        generation += 1; capabilities = nil; events = []
-        capabilityConnection = nil
+    func suspend(preserveReadSnapshot: Bool = false) {
+        generation += 1; foregroundBusy = false
+        if !preserveReadSnapshot {
+            capabilities = nil; events = []; capabilityConnection = nil; freshness.clear(); capabilityContext = nil
+        }
         // In-flight sends retain their durable operation; never replay on unlock.
         state = nil
     }
@@ -50,11 +54,25 @@ final class MobileStore: ObservableObject {
         guard let value = try connection() else { throw APIError.message("Configure the Students HTTPS connection first.") }
         return try value.validated()
     }
+    func refreshIfNeeded() async {
+        guard api.accessAllowed else { return }
+        if let capabilityContext, capabilityContext != api.latestReportsContext {
+            generation += 1; foregroundBusy = false; capabilities = nil; events = []
+            capabilityConnection = nil; self.capabilityContext = nil; freshness.clear()
+        }
+        do {
+            try ensureLoaded()
+            if capabilities != nil, error == nil, try configured() == capabilityConnection,
+               freshness.isFresh(context: api.latestReportsContext) { return }
+        } catch { }
+        await refresh()
+    }
     func refresh() async {
         guard api.accessAllowed && !foregroundBusy else { return }
         foregroundBusy = true
-        defer { foregroundBusy = false }
         let epoch = generation
+        capabilityContext = api.latestReportsContext
+        defer { if epoch == generation { foregroundBusy = false } }
         do {
             try ensureLoaded()
             let configured = try configured()
@@ -70,6 +88,7 @@ final class MobileStore: ObservableObject {
                 var seen = Set<UUID>()
                 events = decoded.filter { seen.insert($0.id).inserted }
             }
+            freshness.record(context: api.latestReportsContext)
         } catch {
             guard api.accessAllowed && epoch == generation else { return }
             capabilities = nil; capabilityConnection = nil; self.error = MobileRules.error(error)
@@ -190,5 +209,6 @@ final class MobileStore: ObservableObject {
         api.invalidateStudentsConnection()
     }
 }
+
 
 

@@ -104,9 +104,9 @@ struct AppRootView: View {
             do { try await Task.sleep(for: .seconds(remaining)) } catch { return }
             session.expireIfNeeded()
         }
-        .task(id: phase == .active && api.accessAllowed) {
+        .task(id: "\(phase == .active)|\(api.accessAllowed)|\(api.latestReportsContext)") {
             guard phase == .active && api.accessAllowed else { return }
-            await mobile.refresh()
+            await mobile.refreshIfNeeded()
             await mobile.retireNotifications()
             await mobile.boundedRecovery()
         }
@@ -115,18 +115,18 @@ struct AppRootView: View {
             privacyCover = phase != .active && !session.isUnlocked
             if phase == .background {
                 DeviceAuthorization.cancelCurrentAuthentication()
-                api.setAccessAllowed(false)
-                mobile.suspend()
+                api.setAccessAllowed(false, preservingSession: session.isUnlocked)
+                mobile.suspend(preserveReadSnapshot: session.isUnlocked)
             } else if phase == .active {
                 Task { await activateIfNeeded() }
             }
         }
         .onChange(of: session.isUnlocked) { _, unlocked in
-            if !unlocked { DeviceAuthorization.cancelCurrentAuthentication() }
+            if !unlocked { DeviceAuthorization.cancelCurrentAuthentication(); mobile.suspend() }
             let wasAllowed = api.accessAllowed
             api.setAccessAllowed(unlocked && phase == .active)
             if unlocked && phase == .active && !wasAllowed {
-                Task { await api.refreshAll() }
+                Task { await api.refreshIfNeeded() }
             }
         }
     }
@@ -139,7 +139,7 @@ struct AppRootView: View {
         await session.activate()
         guard phase == .active && session.isUnlocked && !api.accessAllowed else { return }
         api.setAccessAllowed(true)
-        await api.refreshAll()
+        await api.refreshIfNeeded()
     }
 }
 

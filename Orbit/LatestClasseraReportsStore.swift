@@ -6,15 +6,20 @@ final class LatestClasseraReportsStore: ObservableObject {
     @Published private(set) var snapshot: LatestClasseraReportsResponse?
     @Published private(set) var state: LatestClasseraReportsState = .idle
     private var generation = 0
+    private var freshness = ReadSnapshotFreshness()
     var loading: Bool { state == .loading }
 
-    func clear() {
+    func clear(preserveSnapshot: Bool = false) {
         generation += 1
-        snapshot = nil
-        state = .idle
+        if !preserveSnapshot { snapshot = nil; freshness.clear() }
+        if snapshot == nil || state == .loading { state = .idle }
     }
 
-    func load(fetch: () async throws -> LatestClasseraReportsResponse) async {
+    func loadIfNeeded(context: UUID, fetch: () async throws -> LatestClasseraReportsResponse) async {
+        if snapshot != nil, freshness.isFresh(context: context) { return }
+        await load(context: context, fetch: fetch)
+    }
+    func load(context: UUID? = nil, fetch: () async throws -> LatestClasseraReportsResponse) async {
         guard !loading && !Task.isCancelled else { return }
         generation += 1
         let epoch = generation
@@ -28,6 +33,7 @@ final class LatestClasseraReportsStore: ObservableObject {
             }
             guard value.isValid else { throw LatestClasseraReportsFailure.invalidResponse }
             snapshot = value
+            if let context { freshness.record(context: context) }
             switch value.observedCount {
             case 2: state = .ready
             case 1: state = .partial
@@ -50,3 +56,4 @@ final class LatestClasseraReportsStore: ObservableObject {
         }
     }
 }
+

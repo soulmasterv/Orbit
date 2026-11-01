@@ -47,6 +47,8 @@ final class ClasseraMonitoringStore: ObservableObject {
     @Published var mutationBusy = false
     @Published private(set) var vaultReady = false
     private var generation = 0
+    private var freshness = ReadSnapshotFreshness()
+    private var lastReadKey: String?
     private let loadPending: () throws -> ClasseraPendingOperation?
     private let savePending: (ClasseraPendingOperation?) throws -> Void
     init(loadPending: @escaping () throws -> ClasseraPendingOperation? = ClasseraOperationVault.load,
@@ -58,11 +60,17 @@ final class ClasseraMonitoringStore: ObservableObject {
         do { pending = try loadPending(); vaultReady = true }
         catch { self.error = "Unlock iPhone to read the saved operation. Sending remains unavailable." }
     }
-    func clear() {
+    func clear(preserveReadSnapshots: Bool = false) {
         generation += 1; loading = false; preview = nil; vaultReady = false
-        waiting = nil; history = nil; statistics = nil; operation = nil
+        operation = nil
+        if !preserveReadSnapshots {
+            waiting = nil; history = nil; statistics = nil; freshness.clear(); lastReadKey = nil
+        }
     }
-    func load(api: ServerAPI, tab: Int, query: [String: String] = [:]) async {
+    func load(api: ServerAPI, tab: Int, query: [String: String] = [:], automatic: Bool = false) async {
+        if !freshness.belongs(to: api.latestReportsContext) { waiting = nil; history = nil; statistics = nil }
+        let key = "\(tab)|\(query.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: "&"))"
+        if automatic, error == nil, lastReadKey == key, freshness.isFresh(context: api.latestReportsContext) { return }
         generation += 1; let epoch = generation; loading = true
         defer { if epoch == generation { loading = false } }
         do {
@@ -81,6 +89,7 @@ final class ClasseraMonitoringStore: ObservableObject {
                 statistics = value
             }
             error = nil
+            lastReadKey = key; freshness.record(context: api.latestReportsContext)
         } catch {
             if epoch == generation && !ServerAPI.isRefreshCancellation(error) { self.error = safe(error) }
         }
@@ -103,6 +112,7 @@ final class ClasseraMonitoringStore: ObservableObject {
         let payload: ClasseraReadyPayload
         do { payload = try ClasseraReadyPayload(preview: preview) }
         catch { self.error = safe(error); return }
+        freshness.expire()
         generation += 1; let epoch = generation; mutationBusy = true
         defer { mutationBusy = false }
         do {
@@ -149,3 +159,4 @@ final class ClasseraMonitoringStore: ObservableObject {
         return "Classera could not be reached. Refresh read-only data; submitted notifications must be checked using their saved operation."
     }
 }
+

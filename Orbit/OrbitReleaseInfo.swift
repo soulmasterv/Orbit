@@ -19,6 +19,12 @@ struct OrbitChangelogEntry: Identifiable {
     let title: String
     let changes: [String]
     static let entries: [Self] = [
+        .init(id: "2026-11-refresh-and-pause", title: "Quieter refresh and clearer subscription controls", changes: [
+            "Brief app switches reuse recent read-only data during the same unlocked session. Manual refresh still fetches new data.",
+            "Classera pull-to-refresh owns its request, avoiding false connection errors when the pull gesture is cancelled.",
+            "Subscription choices are AI and No AI. Paused means the student paused reports; Suspended is an administrator restriction.",
+            "Existing restrictions and AI preferences are preserved. App lock, connection changes and pending-action verification still invalidate or recheck data."
+        ]),
         .init(id: "2026-11-student-delivery-status", title: "Student filters and AI requests", changes: [
             "Opted-out students have their own filter and explicit class labels. Suspended students appear last in the same list.",
             "Delivery history separates recorded attempt times from status updates using local twelve-hour dates and times.",

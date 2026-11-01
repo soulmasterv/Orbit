@@ -72,18 +72,22 @@ final class ClasseraUXTests: XCTestCase {
             XCTAssertNil(ClasseraPhone.normalized(value))
         }
     }
-    func testSubscriptionThreeModesAndLegacyPendingPreservation() throws {
+    func testSubscriptionOnlyAIModesAndLegacyRestrictionPreservation() throws {
         let original = ClasseraSubscription(className: "12F", name: "Name", aiEnabled: nil, status: "waiting_for_class", joinedAt: "old")
         XCTAssertNil(ClasseraSubscriptionMode.current(original))
+        XCTAssertEqual(ClasseraSubscriptionMode.allCases, [.ai, .noAI])
         for mode in ClasseraSubscriptionMode.allCases {
             let result = mode.applying(to: original)
             XCTAssertEqual(ClasseraSubscriptionMode.current(result), mode)
             XCTAssertEqual(result.name, original.name); XCTAssertEqual(result.joinedAt, original.joinedAt)
-            if mode == .disabled { XCTAssertEqual(result.status, "disabled"); XCTAssertNil(result.aiEnabled) }
-            else { XCTAssertEqual(result.status, "active") }
+            XCTAssertEqual(result.status, "active")
         }
         let record = try JSONDecoder().decode(ClasseraStudent.self, from: student)
-        _ = try ClasseraStudentEdit(student: record, rows: [ClasseraSubscriptionMode.disabled.applying(to: original)])
+        let legacy = ClasseraSubscription(className: "12F", name: "Name", aiEnabled: nil, status: "disabled", joinedAt: "old")
+        _ = try ClasseraStudentEdit(student: record, rows: [legacy])
+        XCTAssertNil(ClasseraSubscriptionMode.current(legacy))
+        XCTAssertEqual(ClasseraSubscriptionSummary.modeLabel(legacy), "Suspended")
+        XCTAssertEqual(legacy.status, "disabled")
     }
     func testFaceIDSessionLastsFiveMinutesWithoutRenewingOnAppSwitch() async {
         var clock: TimeInterval = 0; var prompts = 0
@@ -152,3 +156,4 @@ final class ClasseraUXTests: XCTestCase {
         XCTAssertEqual(MockURLProtocol.requests.count, 1); XCTAssertEqual(MockURLProtocol.requests.first?.httpMethod, "GET")
     }
 }
+

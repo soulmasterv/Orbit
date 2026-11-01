@@ -53,6 +53,7 @@ final class ServerAPI: ObservableObject {
     @Published var actionNotice: String?
     @Published private(set) var hasSavedToken = false
     @Published private(set) var accessAllowed: Bool
+    @Published private(set) var retainsReadSnapshots = false
     @Published private(set) var lastNetworkSeconds: Double?
     @Published private(set) var lastDecodeSeconds: Double?
     @Published private(set) var serviceSnapshot: ServiceSnapshot?
@@ -80,6 +81,8 @@ final class ServerAPI: ObservableObject {
     private var logGeneration = 0
     private var classeraRecipients: [String: [String]] = [:]
     private var studentsAccessGeneration = 0
+    private var dashboardFreshness = ReadSnapshotFreshness()
+    private var servicesFreshness = ReadSnapshotFreshness()
 
     init(session: URLSession? = nil, defaults: UserDefaults = .standard,
          accessAllowed: Bool = true, snapshotStore: DashboardSnapshotStore? = nil,
@@ -120,13 +123,20 @@ final class ServerAPI: ObservableObject {
     var canControl: Bool { accessAllowed && !needsVerification && connection == .connected && !loading && !actionBusy && hasSavedToken }
     var hasNotice: Bool { errorMessage != nil || actionNotice != nil }
 
-    func setAccessAllowed(_ allowed: Bool) {
-        guard accessAllowed != allowed else { return }
+    func setAccessAllowed(_ allowed: Bool, preservingSession: Bool = false) {
+        guard accessAllowed != allowed else {
+            // A real lock can expire while access is already suspended in background.
+            if !allowed && !preservingSession && retainsReadSnapshots {
+                retainsReadSnapshots = false; latestReportsContext = UUID(); needsVerification = true
+            }
+            return
+        }
+        retainsReadSnapshots = !allowed && preservingSession
         accessAllowed = allowed
         if !allowed {
-            latestReportsContext = UUID()
+            if !preservingSession { latestReportsContext = UUID() }
             studentsAccessGeneration += 1
-            needsVerification = true
+            if !preservingSession || !hasFreshDashboard() { needsVerification = true }
             classeraRecipients.removeAll()
             refreshGeneration += 1
             servicesGeneration += 1
@@ -281,6 +291,7 @@ final class ServerAPI: ObservableObject {
             let snapshot = try JSONDecoder().decode(DashboardResponse.self, from: data)
             dashboard = snapshot
             lastUpdated = Date()
+            dashboardFreshness.record(context: latestReportsContext)
             lastNetworkSeconds = received.timeIntervalSince(start)
             lastDecodeSeconds = Date().timeIntervalSince(received)
             connection = .connected
@@ -310,8 +321,22 @@ final class ServerAPI: ObservableObject {
         async let services: Void = loadServices()
         _ = await (dashboard, services)
     }
-    func ensureServicesFresh() async {
-        guard servicesUpdatedAt.map({ Date().timeIntervalSince($0) < 30 }) != true else { return }
+    private func hasFreshDashboard(at now: ContinuousClock.Instant = .now) -> Bool {
+        dashboard != nil && hasSavedToken && connection == .connected && !needsVerification &&
+            dashboardFreshness.isFresh(context: latestReportsContext, at: now)
+    }
+    func refreshIfNeeded(at now: ContinuousClock.Instant = .now) async {
+        guard accessAllowed else { return }
+        hasSavedToken = !tokenProvider().isEmpty
+        async let dashboard: Void = ensureDashboardFresh(at: now)
+        async let services: Void = ensureServicesFresh(at: now)
+        _ = await (dashboard, services)
+    }
+    private func ensureDashboardFresh(at now: ContinuousClock.Instant) async {
+        if !hasFreshDashboard(at: now) { await loadDashboard() }
+    }
+    func ensureServicesFresh(at now: ContinuousClock.Instant = .now) async {
+        guard !servicesFreshness.isFresh(context: latestReportsContext, at: now) else { return }
         await loadServices()
     }
     func loadServices() async {
@@ -334,6 +359,7 @@ final class ServerAPI: ObservableObject {
                 try self.validate(response)
                 self.serviceSnapshot = try JSONDecoder().decode(ServiceSnapshot.self, from: data)
                 self.servicesUpdatedAt = Date()
+                self.servicesFreshness.record(context: self.latestReportsContext)
                 self.servicesError = nil
             } catch {
                 guard self.accessAllowed && generation == self.servicesGeneration && !Self.isRefreshCancellation(error) else { return }
@@ -349,6 +375,7 @@ final class ServerAPI: ObservableObject {
     func cachedLogs(_ target: LogTarget) -> LogSnapshot? { logSnapshots[target] }
     private func resetSecondaryRequests() {
         latestReportsContext = UUID()
+        studentsAccessGeneration += 1
         classeraRecipients.removeAll()
         servicesGeneration += 1
         logGeneration += 1
@@ -530,6 +557,7 @@ final class ServerAPI: ObservableObject {
         do { (data, response) = try await session.data(for: command) }
         catch {
             if method != "GET" { throw ClasseraDirectoryFailure.uncertain }
+            if Self.isRefreshCancellation(error) || Task.isCancelled { throw CancellationError() }
             throw APIError.message("Classera could not be reached. Check the connection and retry.")
         }
         guard accessAllowed && epoch == studentsAccessGeneration && !Task.isCancelled else { throw CancellationError() }
@@ -947,10 +975,11 @@ extension ServerAPI {
         guard accessAllowed && !previewMode && !Task.isCancelled else { throw CancellationError() }
         guard !tokenProvider().isEmpty else { throw LatestClasseraReportsFailure.authenticationRequired }
         let context = latestReportsContext
+        let accessEpoch = studentsAccessGeneration
         // Reuse Orbit's Keychain-backed request builder and no-redirect session.
         let command = try request(path: "/api/classera/latest-reports", endpoint: baseURL)
         let (data, response) = try await session.data(for: command)
-        guard accessAllowed && context == latestReportsContext && !Task.isCancelled else { throw CancellationError() }
+        guard accessAllowed && context == latestReportsContext && accessEpoch == studentsAccessGeneration && !Task.isCancelled else { throw CancellationError() }
         guard let http = response as? HTTPURLResponse else { throw LatestClasseraReportsFailure.invalidResponse }
         if [401, 403].contains(http.statusCode) { throw LatestClasseraReportsFailure.authenticationRequired }
         guard [200, 503].contains(http.statusCode) else {
@@ -1181,13 +1210,14 @@ extension ServerAPI {
         guard accessAllowed && !previewMode && !Task.isCancelled else { throw CancellationError() }
         guard !tokenProvider().isEmpty else { throw OrbitDownloadsError.authentication }
         let context = latestReportsContext
+        let accessEpoch = studentsAccessGeneration
         var command = try request(path: path, endpoint: baseURL)
         command.timeoutInterval = file ? 30 : 10
         command.setValue(file ? "application/octet-stream" : "application/json", forHTTPHeaderField: "Accept")
         // The existing native session rejects redirects. Never give a preview URL
         // or permanent authorization header to a web view.
         let (bytes, response) = try await session.bytes(for: command)
-        guard accessAllowed && context == latestReportsContext && !Task.isCancelled else { throw CancellationError() }
+        guard accessAllowed && context == latestReportsContext && accessEpoch == studentsAccessGeneration && !Task.isCancelled else { throw CancellationError() }
         guard let http = response as? HTTPURLResponse, response.url == command.url else { throw OrbitDownloadsError.invalid }
         switch http.statusCode {
         case 200: break
@@ -1201,12 +1231,12 @@ extension ServerAPI {
         var data = Data()
         for try await byte in bytes {
             if data.count % 4096 == 0 {
-                guard accessAllowed && context == latestReportsContext && !Task.isCancelled else { throw CancellationError() }
+                guard accessAllowed && context == latestReportsContext && accessEpoch == studentsAccessGeneration && !Task.isCancelled else { throw CancellationError() }
             }
             guard data.count < limit else { throw OrbitDownloadsError.tooLarge }
             data.append(byte)
         }
-        guard accessAllowed && context == latestReportsContext && !Task.isCancelled else { throw CancellationError() }
+        guard accessAllowed && context == latestReportsContext && accessEpoch == studentsAccessGeneration && !Task.isCancelled else { throw CancellationError() }
         return data
     }
 }

@@ -55,6 +55,7 @@ struct DownloadsView: View {
     @State private var failure: String?
     @State private var search = ""
     @State private var generation = 0
+    @State private var freshness = ReadSnapshotFreshness()
     private var items: [OrbitDownloadItem] {
         (snapshot?.items ?? []).filter { search.isEmpty || $0.name.localizedCaseInsensitiveContains(search) }
     }
@@ -92,12 +93,20 @@ struct DownloadsView: View {
             .searchable(text: $search, prompt: "Search files")
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button { Task { await refresh() } } label: { Image(systemName: "arrow.clockwise") }.disabled(loading) } }
             .refreshable { await refresh() }
-            .task(id: api.accessAllowed) { if api.accessAllowed { await refresh() } else { clear() } }
-            .onDisappear { clear() }
+            .task(id: "\(api.accessAllowed)|\(api.latestReportsContext)") {
+                if api.accessAllowed {
+                    if snapshot == nil || !freshness.isFresh(context: api.latestReportsContext) { await refresh() }
+                } else { clear(preserveSnapshot: api.retainsReadSnapshots) }
+            }
+            .onDisappear { clear(preserveSnapshot: true) }
     }
-    private func clear() { generation += 1; snapshot = nil; failure = nil; loading = false; search = "" }
+    private func clear(preserveSnapshot: Bool = false) {
+        generation += 1; failure = nil; loading = false
+        if !preserveSnapshot { snapshot = nil; freshness.clear(); search = "" }
+    }
     @MainActor private func refresh(more: Bool = false) async {
         guard api.accessAllowed && !loading else { return }
+        if !freshness.belongs(to: api.latestReportsContext) { snapshot = nil }
         generation += 1; let epoch = generation; loading = true; failure = nil
         defer { if generation == epoch { loading = false } }
         do {
@@ -107,6 +116,7 @@ struct DownloadsView: View {
                 let existing = Set(previous.items.map(\.id))
                 snapshot = OrbitDownloadsResponse(version: result.version, items: previous.items + result.items.filter { !existing.contains($0.id) }, truncated: result.truncated, nextCursor: result.nextCursor)
             } else { snapshot = result }
+            freshness.record(context: api.latestReportsContext)
         } catch {
             guard epoch == generation && api.accessAllowed && !ServerAPI.isRefreshCancellation(error) else { return }
             snapshot = nil; failure = OrbitDownloadsError.message(error)
@@ -134,6 +144,7 @@ struct DownloadPreviewView: View {
     @State private var failure: String?
     @State private var loading = false
     @State private var generation = 0
+    @State private var snapshotContext: UUID?
     var body: some View {
         Group {
             if let data, (item.name as NSString).pathExtension.lowercased() == "pdf" { OrbitPDFPreview(data: data) }
@@ -147,10 +158,17 @@ struct DownloadPreviewView: View {
             } else { ContentUnavailableView("Preview unavailable", systemImage: "doc", description: Text("In-app previews support PDF, images and plain text files.")) }
         }.frame(maxWidth: .infinity, maxHeight: .infinity).background(Brand.background)
             .navigationTitle(item.name).navigationBarTitleDisplayMode(.inline)
-            .task(id: api.accessAllowed) { if api.accessAllowed { await load() } else { clear() } }
+            .task(id: "\(api.accessAllowed)|\(api.latestReportsContext)") {
+                if api.accessAllowed {
+                    if data == nil || snapshotContext != api.latestReportsContext { await load() }
+                } else { clear(preserveSnapshot: api.retainsReadSnapshots) }
+            }
             .onDisappear { clear() }
     }
-    private func clear() { generation += 1; data = nil; failure = nil; loading = false }
+    private func clear(preserveSnapshot: Bool = false) {
+        generation += 1; failure = nil; loading = false
+        if !preserveSnapshot { data = nil; snapshotContext = nil }
+    }
     @MainActor private func load() async {
         guard api.accessAllowed && !loading && item.previewable else { return }
         generation += 1; let epoch = generation; loading = true; failure = nil
@@ -163,6 +181,7 @@ struct DownloadPreviewView: View {
             else if ext == "txt" { guard String(data: result, encoding: .utf8) != nil else { throw OrbitDownloadsError.invalid } }
             else { guard UIImage(data: result) != nil else { throw OrbitDownloadsError.invalid } }
             data = result
+            snapshotContext = api.latestReportsContext
         } catch {
             guard epoch == generation && api.accessAllowed && !ServerAPI.isRefreshCancellation(error) else { return }
             failure = OrbitDownloadsError.message(error)

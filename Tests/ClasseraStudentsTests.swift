@@ -93,6 +93,16 @@ final class ClasseraStudentsTests: XCTestCase {
         XCTAssertEqual(ClasseraDirectoryFilter.current.apply(to: [student], search: "").count, 1)
         XCTAssertEqual(ClasseraDirectoryFilter.suspended.apply(to: [student], search: "").count, 0)
     }
+    func testClassPreferenceCannotClearAdministratorSuspension() throws {
+        let student = try directoryStudent("201000000001", statuses: ["paused"], activity: "suspended")
+        let rows = student.subscriptions.map { ClasseraSubscriptionMode.ai.applying(to: $0) }
+        let encoded = try JSONEncoder().encode(ClasseraStudentEdit(student: student, rows: rows))
+        let payload = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        XCTAssertNil(payload["activity_status"])
+        XCTAssertEqual(student.activityStatus, .suspended)
+        XCTAssertEqual(ClasseraSubscriptionMode.allCases, [.ai, .noAI])
+        XCTAssertTrue(StudentManagementAction.suspend.explanation.contains("Only an administrator"))
+    }
     func testDefaultListHidesOptOutAndStablePartitionsSuspendedWithoutSections() throws {
         let suspended = try directoryStudent("201000000001", statuses: ["active"], activity: "suspended")
         let opted = try directoryStudent("201000000002", statuses: ["opted_out"])

@@ -34,13 +34,18 @@ struct LatestClasseraReportsSection: View {
                 }
             }
         }
-        .task(id: requestID) { store.clear(); await refresh() }
-        .onDisappear { store.clear() }
+        .task(id: requestID) {
+            guard phase == .active && api.accessAllowed else {
+                store.clear(preserveSnapshot: api.accessAllowed || api.retainsReadSnapshots); return
+            }
+            await store.loadIfNeeded(context: api.latestReportsContext) { try await api.latestClasseraReports() }
+        }
+        .onDisappear { store.clear(preserveSnapshot: true) }
     }
 
     private func refresh() async {
         guard phase == .active && api.accessAllowed else { return }
-        await store.load { try await api.latestClasseraReports() }
+        await store.load(context: api.latestReportsContext) { try await api.latestClasseraReports() }
     }
 
     private func reportCard(_ classID: String, report: LatestClasseraReport?) -> some View {
@@ -71,3 +76,4 @@ struct LatestClasseraReportsSection: View {
         }
     }
 }
+

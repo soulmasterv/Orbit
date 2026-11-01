@@ -7,21 +7,25 @@ final class AIKeyUsageStore: ObservableObject {
     @Published private(set) var loading = false
     @Published private(set) var error: String?
     private var generation = 0
+    private var freshness = ReadSnapshotFreshness()
     private var inFlight: (key: String, task: Task<Void, Never>)?
 
-    func clear() {
+    func clear(preserveSnapshot: Bool = false) {
         generation += 1; inFlight?.task.cancel(); inFlight = nil
-        snapshot = nil; error = nil; loading = false
+        if !preserveSnapshot { snapshot = nil; freshness.clear(); error = nil }
+        loading = false
     }
 
-    func load(api: ServerAPI, days: Int, className: String) async {
+    func load(api: ServerAPI, days: Int, className: String, automatic: Bool = false) async {
         guard api.accessAllowed && !Task.isCancelled else { return }
+        if automatic, error == nil, snapshot?.days == days, snapshot?.class_name == className,
+           freshness.isFresh(context: api.latestReportsContext) { return }
         let key = "\(days)|\(className)|\(api.baseURL)"
         if let flight = inFlight, flight.key == key { await flight.task.value; return }
         inFlight?.task.cancel()
         generation += 1; let epoch = generation
         // Never label an old class/range snapshot as the newly selected filter.
-        if snapshot?.days != days || snapshot?.class_name != className { snapshot = nil }
+        if snapshot?.days != days || snapshot?.class_name != className || !freshness.belongs(to: api.latestReportsContext) { snapshot = nil }
         loading = true; error = nil
         let task = Task { @MainActor in
             defer { if epoch == generation { loading = false; inFlight = nil } }
@@ -29,6 +33,7 @@ final class AIKeyUsageStore: ObservableObject {
                 let value = try await api.aiKeyUsage(days: days, className: className)
                 guard epoch == generation && api.accessAllowed && !Task.isCancelled else { return }
                 snapshot = value
+                freshness.record(context: api.latestReportsContext)
             } catch {
                 guard epoch == generation && api.accessAllowed && !ServerAPI.isRefreshCancellation(error) else { return }
                 if let failure = error as? ClasseraMonitoringFailure, case .http(404, _) = failure {
@@ -55,7 +60,7 @@ struct AIKeyUsageView: View {
     init(api: ServerAPI, store: AIKeyUsageStore? = nil) {
         self.api = api; _store = StateObject(wrappedValue: store ?? AIKeyUsageStore())
     }
-    private var requestID: String { "\(days)|\(className)|\(api.baseURL)|\(api.accessAllowed)|\(phase == .active)" }
+    private var requestID: String { "\(days)|\(className)|\(api.baseURL)|\(api.accessAllowed)|\(phase == .active)|\(api.latestReportsContext)" }
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
@@ -81,14 +86,16 @@ struct AIKeyUsageView: View {
                     .disabled(store.loading || !api.accessAllowed).accessibilityLabel("Refresh AI key usage")
             }
         }
-        .task(id: requestID) { await refresh() }
+        .task(id: requestID) { await refresh(automatic: true) }
         .refreshable { await refresh() }
-        .onChange(of: api.accessAllowed) { _, allowed in if !allowed { store.clear() } }
-        .onDisappear { store.clear() }
+        .onChange(of: api.accessAllowed) { _, allowed in if !allowed { store.clear(preserveSnapshot: api.retainsReadSnapshots) } }
+        .onDisappear { store.clear(preserveSnapshot: true) }
     }
-    private func refresh() async {
-        guard phase == .active && api.accessAllowed else { return }
-        await store.load(api: api, days: days, className: className)
+    private func refresh(automatic: Bool = false) async {
+        guard phase == .active && api.accessAllowed else {
+            store.clear(preserveSnapshot: api.accessAllowed || api.retainsReadSnapshots); return
+        }
+        await store.load(api: api, days: days, className: className, automatic: automatic)
     }
     @ViewBuilder private func content(_ value: AIKeyUsageResponse) -> some View {
         Text("Today · \(value.timezone)").font(.caption).foregroundStyle(.secondary)
@@ -169,3 +176,4 @@ struct AIKeyUsageView: View {
         return date.formatted(date: .abbreviated, time: .shortened)
     }
 }
+

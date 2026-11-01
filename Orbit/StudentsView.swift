@@ -74,10 +74,10 @@ struct StudentsView: View {
         .onChange(of: grades) { _, available in
             if !selectedGrade.isEmpty && !available.contains(selectedGrade) { selectedGrade = "" }
         }
-        .onDisappear { visible = false; store.suspend(owner: refreshOwner) }
-        .task(id: refreshEnabled) {
-            guard refreshEnabled else { store.suspend(owner: refreshOwner, clear: !api.accessAllowed); return }
-            await store.refresh()
+        .onDisappear { visible = false; store.suspend(owner: refreshOwner, preserveVerification: api.accessAllowed || api.retainsReadSnapshots) }
+        .task(id: "\(refreshEnabled)|\(api.latestReportsContext)") {
+            guard refreshEnabled else { store.suspend(owner: refreshOwner, clear: !api.accessAllowed && !api.retainsReadSnapshots, preserveVerification: api.accessAllowed || api.retainsReadSnapshots); return }
+            await store.refreshIfNeeded()
             while !Task.isCancelled {
                 do { try await Task.sleep(for: .seconds(60)) } catch { return }
                 guard refreshEnabled && !Task.isCancelled else { return }
@@ -283,10 +283,10 @@ struct StudentDetailView: View {
         .navigationTitle("Student Details").navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(store.mutationBusy)
         .onAppear { store.claimVisibility(refreshOwner); visible = true }
-        .onDisappear { visible = false; store.suspend(owner: refreshOwner) }
-        .task(id: refreshEnabled) {
-            guard refreshEnabled else { store.suspend(owner: refreshOwner, clear: !api.accessAllowed); return }
-            await store.refresh()
+        .onDisappear { visible = false; store.suspend(owner: refreshOwner, preserveVerification: api.accessAllowed || api.retainsReadSnapshots) }
+        .task(id: "\(refreshEnabled)|\(api.latestReportsContext)") {
+            guard refreshEnabled else { store.suspend(owner: refreshOwner, clear: !api.accessAllowed && !api.retainsReadSnapshots, preserveVerification: api.accessAllowed || api.retainsReadSnapshots); return }
+            await store.refreshIfNeeded()
             while !Task.isCancelled {
                 do { try await Task.sleep(for: .seconds(60)) } catch { return }
                 guard refreshEnabled && !Task.isCancelled else { return }

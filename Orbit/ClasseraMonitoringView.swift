@@ -33,7 +33,7 @@ struct ClasseraMonitoringView: View {
                 "report": report]
     }
     private var requestKey: String {
-        "\(tab)|\(query.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: "&"))|\(phase == .active && api.accessAllowed)"
+        "\(tab)|\(query.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: "&"))|\(phase == .active && api.accessAllowed)|\(api.latestReportsContext)"
     }
     var body: some View {
         ScrollView {
@@ -76,10 +76,10 @@ struct ClasseraMonitoringView: View {
             }
         }
         .task(id: requestKey) {
-            guard phase == .active && api.accessAllowed else { return }
+            guard phase == .active && api.accessAllowed else { store.clear(preserveReadSnapshots: api.accessAllowed || api.retainsReadSnapshots); return }
             store.restore()
             do { try await Task.sleep(for: .milliseconds(300)) } catch { return }
-            await refresh()
+            await refresh(automatic: true)
             while !Task.isCancelled {
                 do { try await Task.sleep(for: .seconds(15)) } catch { return }
                 guard phase == .active && api.accessAllowed else { return }
@@ -89,17 +89,17 @@ struct ClasseraMonitoringView: View {
         .onChange(of: sort) { _, _ in offset = 0 }
         .onChange(of: ascending) { _, _ in offset = 0 }
         .onChange(of: classID) { _, _ in offset = 0 }
-        .onChange(of: phase) { _, value in if value == .background { store.clear() } }
-        .onChange(of: api.accessAllowed) { _, value in if !value { previewTarget = nil; store.clear() } }
-        .onDisappear { store.clear() }
+        .onChange(of: phase) { _, value in if value == .background { store.clear(preserveReadSnapshots: api.accessAllowed || api.retainsReadSnapshots) } }
+        .onChange(of: api.accessAllowed) { _, value in if !value { previewTarget = nil; store.clear(preserveReadSnapshots: api.retainsReadSnapshots) } }
+        .onDisappear { store.clear(preserveReadSnapshots: true) }
         .refreshable { await refresh() }
         .sheet(item: $previewTarget) { value in
             ClasseraNotificationPreview(api: api, store: store, classID: value.class_id)
         }
     }
-    private func refresh() async {
+    private func refresh(automatic: Bool = false) async {
         guard api.accessAllowed && phase == .active && !store.mutationBusy else { return }
-        await store.load(api: api, tab: tab, query: query)
+        await store.load(api: api, tab: tab, query: query, automatic: automatic)
     }
     private var waiting: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -496,6 +496,7 @@ struct ClasseraDeliveryDetail: View {
     @Environment(\.scenePhase) private var phase
     @State private var record: ClasseraDeliveryRecord
     @State private var failure: String?
+    @State private var freshness = ReadSnapshotFreshness()
     init(api: ServerAPI, record: ClasseraDeliveryRecord) {
         self.api = api; _record = State(initialValue: record)
     }
@@ -528,12 +529,13 @@ struct ClasseraDeliveryDetail: View {
                 .font(.caption).foregroundStyle(.secondary)
         }.scrollContentBackground(.hidden).modifier(StudentAppearance())
             .navigationTitle("Delivery record").navigationBarTitleDisplayMode(.inline)
-            .task(id: phase == .active && api.accessAllowed) {
+            .task(id: "\(phase == .active)|\(api.accessAllowed)|\(api.latestReportsContext)") {
                 guard phase == .active && api.accessAllowed else { return }
+                if !freshness.isFresh(context: api.latestReportsContext) { await refresh() }
                 while !Task.isCancelled {
-                    await refresh()
                     do { try await Task.sleep(for: .seconds(15)) } catch { return }
                     guard phase == .active && api.accessAllowed else { return }
+                    await refresh()
                 }
             }
             .refreshable { await refresh() }
@@ -545,6 +547,7 @@ struct ClasseraDeliveryDetail: View {
             guard api.accessAllowed && phase == .active && !Task.isCancelled else { return }
             if let latest = response.records.first(where: { $0.id == record.id }) {
                 record = latest; failure = nil
+                freshness.record(context: api.latestReportsContext)
             } else { failure = "This delivery record is no longer available." }
         } catch {
             if api.accessAllowed && !ServerAPI.isRefreshCancellation(error) {

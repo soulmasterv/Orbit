@@ -126,12 +126,14 @@ enum ClasseraSubscriptionSummary {
     static func modeLabel(_ row: ClasseraSubscription) -> String {
         if row.status == "opted_out" { return "Opted out" }
         if row.status == "paused" { return "Paused" }
+        if row.status == "disabled" { return "Suspended" }
         if row.status == "waiting_for_class" { return "Waiting" }
         return ClasseraSubscriptionMode.current(row)?.rawValue ?? "Not set"
     }
     static func aiLabel(_ row: ClasseraSubscription) -> String {
         if row.status == "opted_out" { return "Opted out" }
         if row.status == "paused" { return "Paused" }
+        if row.status == "disabled" { return "Suspended" }
         guard row.status != "waiting_for_class" else { return "Not set" }
         switch row.aiEnabled { case 1: return "On"; case 0: return "Off"; default: return "Not set" }
     }
@@ -184,17 +186,16 @@ extension ClasseraWhatsAppWindow {
 }
 
 enum ClasseraSubscriptionMode: String, CaseIterable, Identifiable {
-    case ai = "AI", noAI = "No AI", disabled = "Disabled"
+    case ai = "AI", noAI = "No AI"
     var id: String { rawValue }
     static func current(_ row: ClasseraSubscription) -> Self? {
-        if row.status == "disabled" { return .disabled }
         guard row.status == "active" else { return nil }
         switch row.aiEnabled { case 1: return .ai; case 0: return .noAI; default: return nil }
     }
     func applying(to row: ClasseraSubscription) -> ClasseraSubscription {
         var result = row
-        result.status = self == .disabled ? "disabled" : "active"
-        result.aiEnabled = self == .disabled ? nil : self == .ai ? 1 : 0
+        result.status = "active"
+        result.aiEnabled = self == .ai ? 1 : 0
         return result
     }
 }

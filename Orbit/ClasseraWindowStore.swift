@@ -8,18 +8,21 @@ final class ClasseraWindowStore: ObservableObject {
     @Published private(set) var receivedAt: Date?
     private(set) var receivedInstant = ContinuousClock.now
     private var generation = 0
+    private var freshness = ReadSnapshotFreshness()
     private var flight: (phone: String, task: Task<Void, Never>)?
     private let fetch: ((String) async throws -> ClasseraMessagingResponse)?
     init(fetch: ((String) async throws -> ClasseraMessagingResponse)? = nil) { self.fetch = fetch }
-    func clear() {
+    func clear(preserveSnapshot: Bool = false) {
         generation += 1; flight?.task.cancel(); flight = nil
-        response = nil; receivedAt = nil; loading = false; error = nil
+        if !preserveSnapshot { response = nil; receivedAt = nil; freshness.clear(); error = nil }
+        loading = false
     }
-    func refresh(api: ServerAPI, phone: String) async {
+    func refresh(api: ServerAPI, phone: String, automatic: Bool = false) async {
         guard api.accessAllowed && !Task.isCancelled else { return }
+        if automatic, response?.phone == phone, error == nil, freshness.isFresh(context: api.latestReportsContext) { return }
         if let flight, flight.phone == phone { await flight.task.value; return }
         flight?.task.cancel(); generation += 1; let epoch = generation
-        if response?.phone != phone { response = nil; receivedAt = nil }
+        if response?.phone != phone || !freshness.belongs(to: api.latestReportsContext) { response = nil; receivedAt = nil }
         loading = true; error = nil
         let task = Task { @MainActor in
             defer { if epoch == generation { loading = false; flight = nil } }
@@ -33,6 +36,7 @@ final class ClasseraWindowStore: ObservableObject {
                     throw APIError.message("Window response is incompatible.")
                 }
                 response = result; receivedAt = Date(); receivedInstant = .now
+                freshness.record(context: api.latestReportsContext)
             } catch {
                 guard epoch == generation && api.accessAllowed && !ServerAPI.isRefreshCancellation(error) else { return }
                 if let http = error as? HTTPFailure, [401, 403].contains(http.status) {

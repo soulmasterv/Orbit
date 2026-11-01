@@ -119,7 +119,7 @@ struct HomeView: View {
     private func refreshHome() async {
         async let dashboard: Void = api.refreshAll()
         if phase == .active && api.accessAllowed {
-            await latestReports.load { try await api.latestClasseraReports() }
+            await latestReports.load(context: api.latestReportsContext) { try await api.latestClasseraReports() }
         }
         await dashboard
     }

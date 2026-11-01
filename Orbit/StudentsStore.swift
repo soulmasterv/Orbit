@@ -19,6 +19,7 @@ final class StudentsStore: ObservableObject {
     private var refreshTask: Task<Void, Never>?
     private var generation = 0
     private var mutationGeneration = 0
+    private var freshness = ReadSnapshotFreshness()
 
     init(api: ServerAPI, connectionProvider: @escaping () throws -> StudentsConnection? = {
         try KeychainManager.loadStudentsConnection()
@@ -28,6 +29,12 @@ final class StudentsStore: ObservableObject {
         self.fetchSnapshot = fetchSnapshot ?? { try await api.fetchStudents(connection: $0) }
     }
 
+    func refreshIfNeeded() async {
+        if !requiresVerification, snapshot != nil, error == nil,
+           freshness.isFresh(context: api.latestReportsContext),
+           let configured = try? connectionProvider()?.validated(), configured == connection { return }
+        await refresh()
+    }
     func refresh() async {
         guard api.accessAllowed && !Task.isCancelled && !mutationBusy else { return }
         if let refreshTask { await refreshTask.value; return }
@@ -66,6 +73,7 @@ final class StudentsStore: ObservableObject {
                 self.snapshot = snapshot
                 self.error = nil
                 self.requiresVerification = false
+                self.freshness.record(context: self.api.latestReportsContext)
             } catch {
                 guard self.generation == current && self.api.accessAllowed && !ServerAPI.isRefreshCancellation(error) else { return }
                 if let http = error as? HTTPFailure, [401, 403].contains(http.status) {
@@ -83,14 +91,14 @@ final class StudentsStore: ObservableObject {
         if visibilityOwner != owner { suspend(); visibilityOwner = owner }
     }
 
-    func suspend(owner: UUID? = nil, clear: Bool = false) {
+    func suspend(owner: UUID? = nil, clear: Bool = false, preserveVerification: Bool = false) {
         if let owner, visibilityOwner != owner { return }
         generation += 1
         refreshTask?.cancel()
         refreshTask = nil
         loading = false
-        requiresVerification = true
-        if clear { mutationGeneration += 1; snapshot = nil; connection = nil; error = nil }
+        if !preserveVerification || !freshness.isFresh(context: api.latestReportsContext) { requiresVerification = true }
+        if clear { mutationGeneration += 1; snapshot = nil; connection = nil; error = nil; freshness.clear(); requiresVerification = true }
     }
 
     func managementUnavailableReason(for student: Student) -> String? {
@@ -190,4 +198,5 @@ final class StudentsStore: ObservableObject {
         return (error as? APIError)?.errorDescription ?? "The Students connection could not be loaded. Check Settings and try again."
     }
 }
+
 

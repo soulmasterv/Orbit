@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 from flask import Flask
 from classera_students import Directory, register
+from classera_access import can_reply
 
 class DirectoryTests(unittest.TestCase):
     def setUp(self):
@@ -76,6 +77,19 @@ class DirectoryTests(unittest.TestCase):
             response=self.client.put(self.url,headers=self.headers,json={'expected_revision':current['revision'],'subscriptions':rows})
             self.assertEqual(response.status_code,422)
             self.assertEqual(self.directory.get(self.phone),current)
+    def test_class_resume_keeps_admin_suspension_and_excludes_report_recipient(self):
+        with self.directory.connect() as c:
+            c.execute('INSERT INTO subscribers VALUES(?,?,?,?,?,?,?)',(self.phone,'Student','12F',1,'paused','old','before'))
+            c.execute('INSERT INTO orbit_student_controls VALUES(?,?,?)',(self.phone,'suspended','before'))
+        current=self.directory.get(self.phone)
+        response=self.client.put(self.url,headers=self.headers,json={
+            'expected_revision':current['revision'],'subscriptions':[self.row('12F',ai=1,status='active')]})
+        self.assertEqual(response.status_code,200)
+        self.assertEqual(response.get_json()['activity_status'],'suspended')
+        self.assertEqual(self.directory.recipients('classera-1'),[])
+        self.assertFalse(can_reply(self.phone,path=self.path))
+        with self.directory.connect() as c:
+            self.assertEqual(c.execute('SELECT activity_status FROM orbit_student_controls WHERE phone=?',(self.phone,)).fetchone()[0],'suspended')
     def row(self, klass="12F", ai=1, status="active"):
         return dict(class_name=klass, name="Test Student", ai_enabled=ai, status=status)
     def put(self, rows, revision=None):

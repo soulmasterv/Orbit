@@ -94,6 +94,7 @@ final class ClasseraReportSettingsStore: ObservableObject {
     private var classID = ""
     private var endpoint = ""
     private var generation = 0
+    private var freshness = ReadSnapshotFreshness()
     private let loadPending: () throws -> ClasseraReportPending?
     private let savePending: (ClasseraReportPending?) throws -> Void
     init(loadPending: @escaping () throws -> ClasseraReportPending? = ClasseraReportVault.load,
@@ -102,15 +103,24 @@ final class ClasseraReportSettingsStore: ObservableObject {
     }
     var canMutate: Bool { vaultReady && pending == nil && !busy && !loading && settings != nil }
     func setDraft(_ text: String) { draft = text; drafts[classID] = text }
-    func clear() {
-        generation += 1; settings = nil; preview = nil; loading = false; vaultReady = false
-        drafts.removeAll(); draft = ""; error = nil; notice = nil
+    func clear(preserveReadSnapshot: Bool = false) {
+        generation += 1; preview = nil; loading = false; vaultReady = false
+        if !preserveReadSnapshot || busy {
+            settings = nil; drafts.removeAll(); draft = ""; freshness.clear()
+        }
+        error = nil; notice = nil
     }
-    func refresh(api: ServerAPI, classID: String) async {
+    func refresh(api: ServerAPI, classID: String, automatic: Bool = false) async {
         guard api.accessAllowed && !busy && !Task.isCancelled else { return }
+        if automatic, settings?.class_id == classID, endpoint == api.baseURL,
+           error == nil, pending == nil, freshness.isFresh(context: api.latestReportsContext) {
+            do { pending = try loadPending(); vaultReady = true }
+            catch { vaultReady = false; self.error = Self.safe(error) }
+            return
+        }
         generation += 1; let epoch = generation
-        if self.classID != classID || endpoint != api.baseURL {
-            if endpoint != api.baseURL { drafts.removeAll() }
+        if self.classID != classID || endpoint != api.baseURL || !freshness.belongs(to: api.latestReportsContext) {
+            if endpoint != api.baseURL || !freshness.belongs(to: api.latestReportsContext) { drafts.removeAll() }
             settings = nil; preview = nil; error = nil; notice = nil
         }
         self.classID = classID; endpoint = api.baseURL; loading = true
@@ -121,6 +131,7 @@ final class ClasseraReportSettingsStore: ObservableObject {
             let value = try await api.classeraReportSettings(classID)
             guard generation == epoch && api.accessAllowed && !Task.isCancelled else { return }
             settings = value; draft = drafts[classID] ?? value.queued_notice?.text ?? ""; error = nil
+            freshness.record(context: api.latestReportsContext)
         } catch {
             guard generation == epoch && api.accessAllowed else { return }
             self.error = Self.safe(error)
@@ -155,6 +166,7 @@ final class ClasseraReportSettingsStore: ObservableObject {
     }
     private func mutate(api: ServerAPI, kind: String, requestID: String,
         submit: (_ before: () throws -> Void) async throws -> ClasseraReportOperation) async {
+        freshness.expire()
         generation += 1; let epoch = generation; busy = true; error = nil; notice = nil
         defer { busy = false }
         do {
@@ -307,14 +319,14 @@ struct ClasseraReportSettingsView: View {
         }.modifier(StudentAppearance())
         .navigationTitle("Report settings").navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(store.busy)
-        .task(id: "\(classID)|\(phase == .active)|\(api.accessAllowed)|\(api.baseURL)") {
-            guard api.accessAllowed && phase != .background else { store.clear(); return }
+        .task(id: "\(classID)|\(phase == .active)|\(api.accessAllowed)|\(api.baseURL)|\(api.latestReportsContext)") {
+            guard api.accessAllowed && phase != .background else { store.clear(preserveReadSnapshot: api.accessAllowed || api.retainsReadSnapshots); return }
             guard phase == .active else { return }
-            await store.refresh(api: api, classID: classID)
+            await store.refresh(api: api, classID: classID, automatic: true)
         }
         .onDisappear { store.clear() }
-        .onChange(of: api.accessAllowed) { _, allowed in if !allowed { aiConfirmation = nil; noticeConfirmation = nil; cancelConfirmation = false; store.clear() } }
-        .onChange(of: phase) { _, value in if value == .background { aiConfirmation = nil; noticeConfirmation = nil; cancelConfirmation = false; store.clear() } }
+        .onChange(of: api.accessAllowed) { _, allowed in if !allowed { aiConfirmation = nil; noticeConfirmation = nil; cancelConfirmation = false; store.clear(preserveReadSnapshot: api.retainsReadSnapshots) } }
+        .onChange(of: phase) { _, value in if value == .background { aiConfirmation = nil; noticeConfirmation = nil; cancelConfirmation = false; store.clear(preserveReadSnapshot: api.accessAllowed || api.retainsReadSnapshots) } }
         .refreshable { await store.refresh(api: api, classID: classID) }
         .confirmationDialog("Change selected class preferences?", isPresented: Binding(get: { aiConfirmation != nil }, set: { if !$0 { aiConfirmation = nil } }), titleVisibility: .visible, presenting: aiConfirmation) { preview in
             Button("Apply to \(preview.affected_count) subscriptions") { Task { await store.applyAI(api: api, confirmed: preview) } }

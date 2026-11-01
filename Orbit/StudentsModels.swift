@@ -165,7 +165,7 @@ enum StudentManagementAction: String, Identifiable, CaseIterable {
         case .remove: return "Remove this student's profile and activity restriction? Messaging the bot again starts onboarding. Already sent messages cannot be recalled."
         case .block: return "Block this student? The server must stop bot replies until you unblock them. Their profile is preserved."
         case .unblock: return "Unblock this student and allow bot replies again? Onboarding and the WhatsApp messaging window still apply."
-        case .suspend: return "Pause outgoing messages from this student database until you choose Resume? The profile and onboarding progress are preserved. Messages already submitted to WhatsApp cannot be recalled."
+        case .suspend: return "Suspend outgoing messages from this student database? Only an administrator can lift this restriction. The profile and onboarding progress are preserved. Messages already submitted to WhatsApp cannot be recalled."
         case .resume: return "Allow messages from this student database again? Normal onboarding, opt-in and WhatsApp messaging-window rules still apply."
         }
     }

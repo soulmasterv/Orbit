@@ -34,17 +34,21 @@ struct ClasseraStudentsView: View {
     @ObservedObject var api: ServerAPI
     var embedded = false
     @Environment(\.scenePhase) private var phase
-    @State private var students: [ClasseraStudent] = []
+    @StateObject private var directory = ClasseraDirectoryStore()
     @State private var search = ""
     @State private var directoryFilter: ClasseraDirectoryFilter = .current
-    @State private var error: String?
-    @State private var loading = false
     @State private var generation = 0
     @State private var add = false
     @State private var phone = ""
     @State private var newName = ""
     @State private var creating = false
     @State private var newPhone: String?
+    private var students: [ClasseraStudent] { directory.students }
+    private var loading: Bool { directory.loading }
+    private var error: String? {
+        get { directory.error }
+        nonmutating set { directory.error = newValue }
+    }
     @Environment(\.orbitNavigation) private var navigation
     @State private var localAnchor: String?
     private var scrollAnchor: Binding<String?> {
@@ -110,7 +114,7 @@ struct ClasseraStudentsView: View {
         .navigationTitle(embedded ? "Orbit" : "Classera subscribers").navigationBarTitleDisplayMode(.inline)
         .scrollDismissesKeyboard(.interactively)
         .onChange(of: api.accessAllowed) { _, allowed in
-            if !allowed { add = false; phone = ""; newName = "" }
+            if !allowed { generation += 1; directory.clear(removeSnapshot: !api.retainsReadSnapshots); add = false; phone = ""; newName = "" }
         }
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
@@ -147,11 +151,13 @@ struct ClasseraStudentsView: View {
         .navigationDestination(isPresented: Binding(get: { newPhone != nil }, set: { if !$0 { newPhone = nil } })) {
             if let newPhone { ClasseraStudentEditor(api: api, phone: newPhone) }
         }
-        .task(id: phase == .active && api.accessAllowed) {
-            guard phase == .active && api.accessAllowed else { generation += 1; students = []; loading = false; return }
-            await refresh()
+        .task(id: "\(phase == .active)|\(api.accessAllowed)|\(api.latestReportsContext)") {
+            guard phase == .active && api.accessAllowed else {
+                generation += 1; directory.clear(removeSnapshot: !api.accessAllowed && !api.retainsReadSnapshots); return
+            }
+            await directory.refresh(api: api, automatic: true)
         }
-        .onDisappear { generation += 1; loading = false }
+        .onDisappear { generation += 1; directory.clear(removeSnapshot: false) }
         .refreshable { await refresh() }
     }
     private func createProfile() async {
@@ -174,14 +180,8 @@ struct ClasseraStudentsView: View {
         }
     }
     private func refresh() async {
-        guard api.accessAllowed && phase == .active && !loading else { return }
-        generation += 1; let epoch = generation; loading = true
-        defer { if epoch == generation { loading = false } }
-        do {
-            let result = try await api.loadClasseraDirectory()
-            guard epoch == generation && api.accessAllowed && !Task.isCancelled else { return }
-            students = result; error = nil
-        } catch { if epoch == generation && !ServerAPI.isRefreshCancellation(error) { self.error = error.localizedDescription } }
+        guard api.accessAllowed && phase == .active else { return }
+        await directory.refresh(api: api)
     }
 }
 
@@ -203,6 +203,7 @@ struct ClasseraStudentEditor: View {
     @State private var reportClass: String?
     @State private var expandedClasses: Set<String> = []
     @StateObject private var windowStore = ClasseraWindowStore()
+    @State private var detailFreshness = ReadSnapshotFreshness()
     @Environment(\.orbitNavigation) private var navigation
     @State private var localAnchor: String?
     private var scrollAnchor: Binding<String?> {
@@ -261,20 +262,29 @@ struct ClasseraStudentEditor: View {
                     }
             }
         }
-        .task(id: phase == .active && api.accessAllowed) {
+        .task(id: "\(phase == .active)|\(api.accessAllowed)|\(api.latestReportsContext)") {
             guard phase == .active && api.accessAllowed else {
                 if phase == .background || !api.accessAllowed {
-                    generation += 1; loaded = false; busy = false; student = nil; rows = []
-                    windowStore.clear(); editName = false; nameDraft = ""
+                    let preserve = (api.accessAllowed || api.retainsReadSnapshots) && !busy
+                    generation += 1; busy = false
+                    if !preserve { loaded = false; student = nil; rows = []; detailFreshness.clear() }
+                    windowStore.clear(preserveSnapshot: preserve); editName = false; nameDraft = ""
                     pendingAction = nil; reportClass = nil; removeClass = nil
                 }
                 return
             }
             // Face ID can briefly make the scene inactive. Keep drafts and the
             // pending operation; only backgrounding/locking invalidates them.
-            if !loaded && !busy { await reload() }
+            if !detailFreshness.belongs(to: api.latestReportsContext) {
+                loaded = false; student = nil; rows = []; windowStore.clear()
+            }
+            if !busy && (!loaded || !detailFreshness.isFresh(context: api.latestReportsContext)) { await reload() }
         }
-        .onDisappear { generation += 1; loaded = false; windowStore.clear() }
+        .onDisappear {
+            generation += 1
+            if busy { loaded = false; detailFreshness.clear() }
+            windowStore.clear(preserveSnapshot: true)
+        }
         .confirmationDialog("Remove this subscription?", isPresented: Binding(get: { removeClass != nil }, set: { if !$0 { removeClass = nil } }), titleVisibility: .visible) {
             Button("Remove class", role: .destructive) {
                 rows.removeAll { $0.className == removeClass }; removeClass = nil
@@ -330,6 +340,8 @@ struct ClasseraStudentEditor: View {
         detailGroup("Subscriptions") {
             Text("Each change saves immediately after device authorization. No message is sent.")
                 .font(.caption).foregroundStyle(StudentPalette.secondary)
+            Text("Students can resume pauses. Only an administrator can lift a suspension.")
+                .font(.caption).foregroundStyle(StudentPalette.secondary)
             if rows.isEmpty {
                 Text("No subscriptions").foregroundStyle(StudentPalette.secondary)
             }
@@ -363,13 +375,18 @@ struct ClasseraStudentEditor: View {
                 Divider()
             }
             ForEach(["12F", "12E"].filter { klass in !rows.contains { $0.className == klass } }, id: \.self) { klass in
-                Button {
-                    rows.append(ClasseraSubscription(className: klass, name: student?.profileName ?? rows.first?.name ?? student?.signupSession?.name ?? "",
-                                                     aiEnabled: nil, status: "disabled"))
-                    expandedClasses.insert(klass)
-                    Task { await save() }
+                Menu {
+                    ForEach(ClasseraSubscriptionMode.allCases) { mode in
+                        Button(mode.rawValue) {
+                            guard canSave else { return }
+                            rows.append(ClasseraSubscription(className: klass, name: student?.profileName ?? rows.first?.name ?? student?.signupSession?.name ?? "",
+                                                             aiEnabled: mode == .ai ? 1 : 0, status: "active"))
+                            expandedClasses.insert(klass)
+                            Task { await save() }
+                        }
+                    }
                 } label: { Label("Add " + ClasseraClass.title(klass), systemImage: "plus.circle") }
-                    .disabled(!canSave)
+                .disabled(!canSave)
             }
             if student?.hasPendingClass == true {
                 NavigationLink { ClasseraMonitoringView(api: api) } label: {
@@ -409,6 +426,10 @@ struct ClasseraStudentEditor: View {
     private var managementSection: some View {
         detailGroup("Management") {
             if let student {
+                if student.activityStatus == .suspended || student.activityStatus == .blocked {
+                    Text("Only an administrator can lift this suspension. Changing AI preferences does not lift it.")
+                        .font(.caption).foregroundStyle(StudentPalette.secondary)
+                }
                 ForEach(managementActions(student.activityStatus)) { action in
                     Button(role: action == .remove ? .destructive : nil) { pendingAction = action } label: {
                         HStack {
@@ -453,6 +474,7 @@ struct ClasseraStudentEditor: View {
             let result = try await api.loadClasseraStudent(phone: phone)
             guard epoch == generation && api.accessAllowed && !Task.isCancelled else { return }
             student = result; rows = result.subscriptions; loaded = true; message = nil
+            detailFreshness.record(context: api.latestReportsContext)
             busy = false
             await windowStore.refresh(api: api, phone: phone)
         } catch { if epoch == generation && !ServerAPI.isRefreshCancellation(error) { message = error.localizedDescription } }
