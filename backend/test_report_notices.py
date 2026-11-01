@@ -155,7 +155,10 @@ class NoticePatchTests(unittest.TestCase):
         calls = []
         module = types.ModuleType('classera_report_notices')
         module.prepare = lambda *a, **k: calls.append(('prepare', k)) or {'fixture': True}
-        module.after_report = lambda *a, **k: calls.append(('after', k))
+        def after(*args, **kwargs):
+            self.assertEqual(context['accepted'], [True])
+            calls.append(('after', kwargs))
+        module.after_report = after
         old = sys.modules.get(module.__name__); sys.modules[module.__name__] = module
         try:
             context = {'os': types.SimpleNamespace(path=types.SimpleNamespace(basename=lambda _: 'fixture.pdf')),

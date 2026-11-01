@@ -35,7 +35,7 @@ _orbit_notice_batch = _orbit_notice_prepare(CLASSERA_CLASS, report_title, recipi
     already_started=any(get_status(report_title, recipient, CLASSERA_ID) is not None for recipient in recipients))
 '''
     additions = [(filenames[0].end_lineno, ''.join(indent + line + '\n' for line in prepare.splitlines()))]
-    additions.append((sends[0].end_lineno, ' ' * sends[0].col_offset + '_orbit_notice_after(_orbit_notice_batch, to, report_accepted=bool(result))\n'))
+    additions.append((tries[0].body[-1].end_lineno, ' ' * sends[0].col_offset + '_orbit_notice_after(_orbit_notice_batch, to, report_accepted=bool(result))\n'))
     handler = tries[0].handlers[0]
     additions.append((handler.body[0].lineno - 1, ' ' * handler.body[0].col_offset + '_orbit_notice_after(_orbit_notice_batch, to, report_accepted=False)\n'))
     lines = source.splitlines(keepends=True)
