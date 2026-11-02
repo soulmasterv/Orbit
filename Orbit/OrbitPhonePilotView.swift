@@ -49,7 +49,11 @@ struct OrbitPhonePilotView: View {
                         if value.health.at == nil || value.health.issues == nil || Date().timeIntervalSince1970 - (value.health.at ?? 0) > 60 { Text("Call health report is unavailable or stale.").foregroundStyle(.orange) }
                         else if (value.health.issues ?? []).isEmpty { Text("Call-system checks are passing.").foregroundStyle(.green) }
                         else { ForEach(value.health.issues ?? [], id: \.self) { Text($0).foregroundStyle(.orange) } }
-                    } else { Text(failure == nil ? "Loading phone status…" : "Phone status unavailable") }
+                    } else {
+                        Text(failure == nil ? "Checking phone backend…" : "Phone backend not verified")
+                        Text("The phone backend may not be activated yet. Controls stay disabled until a fresh status is received.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                     Button("Refresh") { Task { await load() } }.disabled(busy || loading)
                 }
                 Section("Notifications") {

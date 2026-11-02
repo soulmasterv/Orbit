@@ -69,6 +69,7 @@ struct HomeView: View {
     @EnvironmentObject private var library: HomelabStore
     @Environment(\.orbitNavigation) private var navigation
     @State private var localAnchor: String?
+    @State private var showingPhonePilot = false
     private var scrollAnchor: Binding<String?> {
         Binding(get: { navigation?.anchor(for: "home") ?? localAnchor }, set: { value in
             if let value { localAnchor = value; navigation?.remember(value, for: "home") }
@@ -89,6 +90,9 @@ struct HomeView: View {
                     NavigationLink(value: WorkspaceRoute.jarvis) {
                         CompactWorkspaceRow(title: "JARVIS", subtitle: "Voice chat and reviewed memory")
                     }
+                    Button { showingPhonePilot = true } label: {
+                        CompactWorkspaceRow(title: "Phone controls", subtitle: "JARVIS phone status, notifications and automation")
+                    }.disabled(!api.accessAllowed).accessibilityIdentifier("workspace.phoneControls")
                     NavigationLink(value: WorkspaceRoute.downloads) {
                         CompactWorkspaceRow(title: "Downloads", subtitle: "Browse files & daily reports")
                     }
@@ -117,6 +121,7 @@ struct HomeView: View {
             }.padding(16).scrollTargetLayout()
         }.background(Brand.background).navigationTitle("Orbit").navigationBarTitleDisplayMode(.inline)
         .scrollPosition(id: scrollAnchor, anchor: .top)
+        .sheet(isPresented: $showingPhonePilot) { OrbitPhonePilotView(api: api) }
         .toolbar { ToolbarItem(placement: .topBarTrailing) { RefreshIndicator(loading: api.loading || api.servicesLoading || latestReports.loading) { Task { await refreshHome() } } } }
         .task { await api.ensureServicesFresh() }.refreshable { await refreshHome() }
     }

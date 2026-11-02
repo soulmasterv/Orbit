@@ -62,5 +62,5 @@ still require verification on your iPhone.
 
 ## Optional JARVIS Phone pilot
 
-JARVIS options now includes Phone controls. Its backend must be activated separately;
+Home now includes Phone controls. Its backend must be activated separately;
 see [the pilot handoff](docs/PHONE_PILOT.md) for controls, safeguards and verification.

@@ -282,7 +282,6 @@ struct JarvisView: View {
     @EnvironmentObject private var mobile: MobileStore
     @StateObject private var session = JarvisSession()
     @State private var connection: JarvisAppConnection?
-    @State private var showingPhonePilot = false
     @Environment(\.scenePhase) private var phase
     @Environment(\.dismiss) private var dismiss
     var body: some View {
@@ -299,7 +298,6 @@ struct JarvisView: View {
             HStack(spacing: 10) {
                 if let connection {
                     Menu {
-                        Button("Phone controls", systemImage: "iphone.gen3.radiowaves.left.and.right") { session.stop(); showingPhonePilot = true }
                         Button("Stop voice", systemImage: "stop.fill") { session.stop("Stopped. Microphone released.") }
                         Button("Memory", systemImage: "brain") { session.showMemory() }
                             .disabled(!session.signedIn || !session.memoryAvailable)
@@ -327,7 +325,6 @@ struct JarvisView: View {
         .background(Brand.background)
         .toolbar(.hidden, for: .navigationBar, .tabBar)
         .navigationBarBackButtonHidden(true)
-        .sheet(isPresented: $showingPhonePilot) { OrbitPhonePilotView(api: api) }
         .alert("Confirm memory deletion", isPresented: Binding(get: { session.confirmation != nil }, set: { if !$0 { session.finishConfirmation(false) } })) {
             Button("Cancel", role: .cancel) { session.finishConfirmation(false) }
             Button("Delete", role: .destructive) { session.finishConfirmation(true) }

@@ -2,7 +2,7 @@
 
 Prepared for backend activation; activation has not been performed by this integration.
 
-Open JARVIS → options → Phone controls. Opening the sheet releases voice capture.
+Open Home → Phone controls. This entry is independent of JARVIS voice chat.
 The pilot shows phone/ADB/Bluetooth/battery/health, delivery mode (web, WhatsApp,
 SMS), Android acknowledgement, SMS forwarding and fixed automation controls.
 Web mode means the existing web notification channel; it does not add native APNs.
