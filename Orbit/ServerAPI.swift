@@ -100,12 +100,25 @@ final class ServerAPI: ObservableObject {
     let deliveryStatisticsCache = ScreenSnapshotCache<ClasseraStatisticsResponse>()
     private var preloadTask: Task<Void, Never>?
     private var preloadContext: UUID?
+    private final class SchoolReader {
+        weak var store: StudentsStore?
+        init(_ store: StudentsStore) { self.store = store }
+    }
+    private var schoolReaders: [SchoolReader] = []
+    func registerSchoolReader(_ store: StudentsStore) {
+        schoolReaders.removeAll { $0.store == nil }
+        schoolReaders.append(SchoolReader(store))
+    }
 
     private func suspendScreenReads(preservingSnapshots: Bool) {
         preloadTask?.cancel(); preloadTask = nil
         classeraDirectoryStore.clear(removeSnapshot: !preservingSnapshots)
         keyUsageStore.clear(preserveSnapshot: preservingSnapshots)
         latestReportsStore.clear(preserveSnapshot: preservingSnapshots)
+        schoolReaders.removeAll { $0.store == nil }
+        for reader in schoolReaders {
+            reader.store?.suspend(clear: !preservingSnapshots, preserveVerification: preservingSnapshots)
+        }
         if !preservingSnapshots {
             preloadContext = nil
             downloadsCache.clear(); waitingCache.clear()

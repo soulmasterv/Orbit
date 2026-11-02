@@ -27,6 +27,7 @@ final class StudentsStore: ObservableObject {
         self.api = api
         self.connectionProvider = connectionProvider
         self.fetchSnapshot = fetchSnapshot ?? { try await api.fetchStudents(connection: $0) }
+        api.registerSchoolReader(self)
     }
 
     func refreshIfNeeded() async {

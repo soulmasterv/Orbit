@@ -155,6 +155,19 @@ final class SessionScreenCacheTests: XCTestCase {
         XCTAssertEqual(store.students.first?.phone, "201000000001")
         XCTAssertEqual(MockURLProtocol.requests.count, 3)
     }
+    func testHiddenSchoolDirectoryIsPurgedSynchronouslyOnRealLock() async {
+        let server = api(); var reads = 0
+        let store = StudentsStore(api: server, connectionProvider: { StudentsConnection(baseURL: "https://school.example", apiKey: "school-fixture") }, fetchSnapshot: { _ in
+            reads += 1; return StudentsSnapshot(students: [], receivedAt: Date())
+        })
+        await store.refreshIfNeeded(); XCTAssertNotNil(store.snapshot)
+        server.setAccessAllowed(false, preservingSession: true)
+        XCTAssertNotNil(store.snapshot)
+        server.setAccessAllowed(false) // Expiry while backgrounded, even if School isn't visible.
+        XCTAssertNil(store.snapshot); XCTAssertTrue(store.requiresVerification)
+        server.setAccessAllowed(true); await store.refreshIfNeeded()
+        XCTAssertEqual(reads, 2)
+    }
     func testCachedUsageFilterCannotBeOverwrittenByOlderInFlightFilter() async {
         let server = api(); let store = server.keyUsageStore
         await store.load(api: server, days: 7, className: "All", automatic: true)
