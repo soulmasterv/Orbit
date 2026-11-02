@@ -23,7 +23,12 @@ final class LatestClasseraReportsStore: ObservableObject {
         guard !loading && !Task.isCancelled else { return }
         generation += 1
         let epoch = generation
-        if let context, !freshness.belongs(to: context) { snapshot = nil }
+        if let context {
+            if !freshness.belongs(to: context) { snapshot = nil }
+        } else {
+            // Callers without an authenticated context cannot reuse a snapshot.
+            snapshot = nil
+        }
         state = .loading
         do {
             let value = try await fetch()
@@ -46,7 +51,8 @@ final class LatestClasseraReportsStore: ObservableObject {
                 state = .idle
             } else if let failure = error as? LatestClasseraReportsFailure {
                 switch failure {
-                case .authenticationRequired: state = .authenticationRequired
+                case .authenticationRequired:
+                    snapshot = nil; freshness.clear(); state = .authenticationRequired
                 case .endpointUnavailable: state = .unavailable
                 case .invalidResponse: state = .failed
                 }

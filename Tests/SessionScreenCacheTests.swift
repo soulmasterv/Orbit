@@ -168,6 +168,25 @@ final class SessionScreenCacheTests: XCTestCase {
         server.setAccessAllowed(true); await store.refreshIfNeeded()
         XCTAssertEqual(reads, 2)
     }
+    func testReportRefreshRetainsSameContextSnapshotButClearsOnAuthenticationFailure() async throws {
+        let rows: [[String: Any]] = ["12F", "12E"].map { klass in
+            ["class_id":klass, "status":"available", "availability":"last_observed", "source":"log",
+             "title":"\(klass) 28/10", "classera_created_at":"2026-10-28 14:14:42",
+             "log_observed_at":"2026-10-29 14:45:06.572"]
+        }
+        let data = try JSONSerialization.data(withJSONObject: ["version":1,"status":"available","results":rows])
+        let value = try JSONDecoder().decode(LatestClasseraReportsResponse.self, from: data)
+        XCTAssertTrue(value.isValid)
+        let store = LatestClasseraReportsStore(); let context = UUID()
+        await store.load(context: context) { value }
+        await store.load(context: context) {
+            XCTAssertNotNil(store.snapshot)
+            throw URLError(.notConnectedToInternet)
+        }
+        XCTAssertNotNil(store.snapshot); XCTAssertEqual(store.state, .failed)
+        await store.load(context: context) { throw LatestClasseraReportsFailure.authenticationRequired }
+        XCTAssertNil(store.snapshot); XCTAssertEqual(store.state, .authenticationRequired)
+    }
     func testCachedUsageFilterCannotBeOverwrittenByOlderInFlightFilter() async {
         let server = api(); let store = server.keyUsageStore
         await store.load(api: server, days: 7, className: "All", automatic: true)
