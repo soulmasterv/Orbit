@@ -347,7 +347,7 @@ struct ClasseraStudentEditor: View {
                     }
                     Spacer()
                     Button(policy.allowMultiple ? "Remove override" : "Override") { pendingOverride = !policy.allowMultiple }
-                        .font(.subheadline).disabled(!canSave)
+                        .font(.subheadline).fixedSize(horizontal: true, vertical: true).disabled(!canSave)
                 }
                 if policy.overLimit {
                     Text("Existing subscriptions exceed the limit. They stay saved; additional classes are blocked.")
