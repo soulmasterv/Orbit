@@ -102,7 +102,8 @@ final class ClasseraStudentHistoryLayoutTests: XCTestCase {
         let dashboard = try JSONEncoder().encode(PreviewFixtures.dashboard)
         MockURLProtocol.handler = { request in (200, request.url?.path == "/api/dashboard" ? dashboard : services) }
         let server = api(); await server.refreshAll()
-        try await capture("gemini-tags-and-classera-usage-dark", content: ServiceDetailView(api: server, page: .gemini))
+        try await capture("gemini-tags-and-classera-usage-dark",
+                          content: ServiceDetailView(api: server, page: .gemini).environmentObject(HomelabStore(defaults: defaults)))
     }
     func testHistoryDetailDateTimeAndActualAIRequestLayout() async throws {
         let data = Data(#"{"id":"fixture","report":"12F 1/11/26","class_id":"12F","phone":"201000000001","student":"Student A","template":"classera_v9","message_id":"fixture-outbound","status":"read","created_at":1793536500,"updated_at":1793536860,"historical":false,"ai_analysis":{"status":"requested","requested_at":1793536980}}"#.utf8)
