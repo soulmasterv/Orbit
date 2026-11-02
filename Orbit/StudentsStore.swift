@@ -88,7 +88,7 @@ final class StudentsStore: ObservableObject {
     }
 
     func claimVisibility(_ owner: UUID) {
-        if visibilityOwner != owner { suspend(); visibilityOwner = owner }
+        if visibilityOwner != owner { suspend(preserveVerification: true); visibilityOwner = owner }
     }
 
     func suspend(owner: UUID? = nil, clear: Bool = false, preserveVerification: Bool = false) {

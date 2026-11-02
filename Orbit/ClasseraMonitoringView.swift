@@ -78,7 +78,9 @@ struct ClasseraMonitoringView: View {
         .task(id: requestKey) {
             guard phase == .active && api.accessAllowed else { store.clear(preserveReadSnapshots: api.accessAllowed || api.retainsReadSnapshots); return }
             store.restore()
-            do { try await Task.sleep(for: .milliseconds(300)) } catch { return }
+            if tab == 1 && !search.isEmpty {
+                do { try await Task.sleep(for: .milliseconds(300)) } catch { return }
+            }
             await refresh(automatic: true)
             while !Task.isCancelled {
                 do { try await Task.sleep(for: .seconds(15)) } catch { return }

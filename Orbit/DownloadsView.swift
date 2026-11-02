@@ -64,7 +64,7 @@ struct DownloadsView: View {
             if let failure {
                 Section { Text(failure).foregroundStyle(.orange); Button("Retry") { Task { await refresh() } }.disabled(loading) }
             }
-            if loading { ProgressView("Loading files…") }
+            if loading && snapshot == nil { ProgressView("Loading files…") }
             if snapshot != nil && items.isEmpty && !loading {
                 ContentUnavailableView(search.isEmpty ? "No downloads yet" : "No matching files", systemImage: "folder")
             }
@@ -95,7 +95,11 @@ struct DownloadsView: View {
             .refreshable { await refresh() }
             .task(id: "\(api.accessAllowed)|\(api.latestReportsContext)") {
                 if api.accessAllowed {
-                    if snapshot == nil || !freshness.isFresh(context: api.latestReportsContext) { await refresh() }
+                    let key = folder?.id ?? "root"
+                    if let cached = api.downloadsCache.value(for: key, context: api.latestReportsContext) {
+                        snapshot = cached; freshness.record(context: api.latestReportsContext)
+                    }
+                    if api.downloadsCache.value(for: key, context: api.latestReportsContext, freshOnly: true) == nil { await refresh() }
                 } else { clear(preserveSnapshot: api.retainsReadSnapshots) }
             }
             .onDisappear { clear(preserveSnapshot: true) }
@@ -108,18 +112,20 @@ struct DownloadsView: View {
         guard api.accessAllowed && !loading else { return }
         if !freshness.belongs(to: api.latestReportsContext) { snapshot = nil }
         generation += 1; let epoch = generation; loading = true; failure = nil
+        let context = api.latestReportsContext
         defer { if generation == epoch { loading = false } }
         do {
             let result = try await api.downloads(folder: folder?.id, cursor: more ? snapshot?.nextCursor : nil)
-            guard epoch == generation && api.accessAllowed && !Task.isCancelled else { return }
+            guard epoch == generation && api.accessAllowed && api.latestReportsContext == context && !Task.isCancelled else { return }
             if more, let previous = snapshot {
                 let existing = Set(previous.items.map(\.id))
                 snapshot = OrbitDownloadsResponse(version: result.version, items: previous.items + result.items.filter { !existing.contains($0.id) }, truncated: result.truncated, nextCursor: result.nextCursor)
             } else { snapshot = result }
             freshness.record(context: api.latestReportsContext)
+            if let snapshot { api.downloadsCache.record(snapshot, for: folder?.id ?? "root", context: context) }
         } catch {
-            guard epoch == generation && api.accessAllowed && !ServerAPI.isRefreshCancellation(error) else { return }
-            snapshot = nil; failure = OrbitDownloadsError.message(error)
+            guard epoch == generation && api.accessAllowed && api.latestReportsContext == context && !ServerAPI.isRefreshCancellation(error) else { return }
+            failure = OrbitDownloadsError.message(error)
         }
     }
 }

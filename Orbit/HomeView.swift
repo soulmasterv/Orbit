@@ -59,8 +59,12 @@ extension ServerAPI {
 }
 struct HomeView: View {
     @ObservedObject var api: ServerAPI
-    @StateObject private var latestReports = LatestClasseraReportsStore()
+    @StateObject private var latestReports: LatestClasseraReportsStore
     let requestCommand: (PendingCommand) -> Void
+    init(api: ServerAPI, requestCommand: @escaping (PendingCommand) -> Void) {
+        self.api = api; self.requestCommand = requestCommand
+        _latestReports = StateObject(wrappedValue: api.latestReportsStore)
+    }
     @Environment(\.scenePhase) private var phase
     @EnvironmentObject private var library: HomelabStore
     @Environment(\.orbitNavigation) private var navigation

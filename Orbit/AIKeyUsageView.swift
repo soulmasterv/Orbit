@@ -8,32 +8,39 @@ final class AIKeyUsageStore: ObservableObject {
     @Published private(set) var error: String?
     private var generation = 0
     private var freshness = ReadSnapshotFreshness()
+    private let snapshots = ScreenSnapshotCache<AIKeyUsageResponse>()
     private var inFlight: (key: String, task: Task<Void, Never>)?
 
     func clear(preserveSnapshot: Bool = false) {
         generation += 1; inFlight?.task.cancel(); inFlight = nil
-        if !preserveSnapshot { snapshot = nil; freshness.clear(); error = nil }
+        if !preserveSnapshot { snapshot = nil; freshness.clear(); snapshots.clear(); error = nil }
         loading = false
     }
 
     func load(api: ServerAPI, days: Int, className: String, automatic: Bool = false) async {
         guard api.accessAllowed && !Task.isCancelled else { return }
-        if automatic, error == nil, snapshot?.days == days, snapshot?.class_name == className,
-           freshness.isFresh(context: api.latestReportsContext) { return }
+        let context = api.latestReportsContext
         let key = "\(days)|\(className)|\(api.baseURL)"
         if let flight = inFlight, flight.key == key { await flight.task.value; return }
+        if automatic, let cached = snapshots.value(for: key, context: context, freshOnly: true) {
+            inFlight?.task.cancel(); inFlight = nil; generation += 1; loading = false
+            snapshot = cached; freshness.record(context: context); error = nil; return
+        }
         inFlight?.task.cancel()
         generation += 1; let epoch = generation
         // Never label an old class/range snapshot as the newly selected filter.
-        if snapshot?.days != days || snapshot?.class_name != className || !freshness.belongs(to: api.latestReportsContext) { snapshot = nil }
+        if snapshot?.days != days || snapshot?.class_name != className || !freshness.belongs(to: context) {
+            snapshot = snapshots.value(for: key, context: context)
+        }
         loading = true; error = nil
         let task = Task { @MainActor in
             defer { if epoch == generation { loading = false; inFlight = nil } }
             do {
                 let value = try await api.aiKeyUsage(days: days, className: className)
-                guard epoch == generation && api.accessAllowed && !Task.isCancelled else { return }
+                guard epoch == generation && api.accessAllowed && api.latestReportsContext == context && !Task.isCancelled else { return }
                 snapshot = value
-                freshness.record(context: api.latestReportsContext)
+                freshness.record(context: context)
+                snapshots.record(value, for: key, context: context)
             } catch {
                 guard epoch == generation && api.accessAllowed && !ServerAPI.isRefreshCancellation(error) else { return }
                 if let failure = error as? ClasseraMonitoringFailure, case .http(404, _) = failure {
@@ -58,7 +65,7 @@ struct AIKeyUsageView: View {
     @State private var className = "All"
 
     init(api: ServerAPI, store: AIKeyUsageStore? = nil) {
-        self.api = api; _store = StateObject(wrappedValue: store ?? AIKeyUsageStore())
+        self.api = api; _store = StateObject(wrappedValue: store ?? api.keyUsageStore)
     }
     private var requestID: String { "\(days)|\(className)|\(api.baseURL)|\(api.accessAllowed)|\(phase == .active)|\(api.latestReportsContext)" }
     var body: some View {
@@ -70,7 +77,7 @@ struct AIKeyUsageView: View {
                 Picker("Classera class", selection: $className) {
                     Text("All").tag("All"); Text("Classera 12F").tag("12F"); Text("Classera 12E").tag("12E")
                 }.pickerStyle(.menu)
-                if store.loading { ProgressView("Refreshing usage…").font(.caption) }
+                if store.loading && store.snapshot == nil { ProgressView("Refreshing usage…").font(.caption) }
                 if let error = store.error { Text(error).font(.subheadline).foregroundStyle(.orange) }
                 if let value = store.snapshot {
                     content(value)

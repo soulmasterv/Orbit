@@ -68,25 +68,52 @@ final class ClasseraMonitoringStore: ObservableObject {
         }
     }
     func load(api: ServerAPI, tab: Int, query: [String: String] = [:], automatic: Bool = false) async {
+        guard api.accessAllowed && !Task.isCancelled else { return }
+        let context = api.latestReportsContext
         if !freshness.belongs(to: api.latestReportsContext) { waiting = nil; history = nil; statistics = nil }
         let key = "\(tab)|\(query.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: "&"))"
-        if automatic, error == nil, lastReadKey == key, freshness.isFresh(context: api.latestReportsContext) { return }
+        // Reopening a destination reuses its read snapshot, never its mutation state.
+        if automatic {
+            switch tab {
+            case 0:
+                waiting = api.waitingCache.value(for: key, context: context)
+                if api.waitingCache.value(for: key, context: context, freshOnly: true) != nil {
+                    generation += 1; loading = false
+                    error = nil; lastReadKey = key; freshness.record(context: context); return
+                }
+            case 1:
+                history = api.deliveryHistoryCache.value(for: key, context: context)
+                if api.deliveryHistoryCache.value(for: key, context: context, freshOnly: true) != nil {
+                    generation += 1; loading = false
+                    error = nil; lastReadKey = key; freshness.record(context: context); return
+                }
+            default:
+                statistics = api.deliveryStatisticsCache.value(for: key, context: context)
+                if api.deliveryStatisticsCache.value(for: key, context: context, freshOnly: true) != nil {
+                    generation += 1; loading = false
+                    error = nil; lastReadKey = key; freshness.record(context: context); return
+                }
+            }
+        }
         generation += 1; let epoch = generation; loading = true
         defer { if epoch == generation { loading = false } }
         do {
             switch tab {
             case 0:
                 let value = try await api.classeraWaitingList()
-                guard epoch == generation && api.accessAllowed && !Task.isCancelled else { return }
+                guard epoch == generation && api.accessAllowed && api.latestReportsContext == context && !Task.isCancelled else { return }
                 waiting = value
+                api.waitingCache.record(value, for: key, context: context)
             case 1:
                 let value = try await api.classeraDeliveryHistory(query)
-                guard epoch == generation && api.accessAllowed && !Task.isCancelled else { return }
+                guard epoch == generation && api.accessAllowed && api.latestReportsContext == context && !Task.isCancelled else { return }
                 history = value
+                api.deliveryHistoryCache.record(value, for: key, context: context)
             default:
                 let value = try await api.classeraDailyStatistics(query)
-                guard epoch == generation && api.accessAllowed && !Task.isCancelled else { return }
+                guard epoch == generation && api.accessAllowed && api.latestReportsContext == context && !Task.isCancelled else { return }
                 statistics = value
+                api.deliveryStatisticsCache.record(value, for: key, context: context)
             }
             error = nil
             lastReadKey = key; freshness.record(context: api.latestReportsContext)
@@ -113,6 +140,7 @@ final class ClasseraMonitoringStore: ObservableObject {
         do { payload = try ClasseraReadyPayload(preview: preview) }
         catch { self.error = safe(error); return }
         freshness.expire()
+        api.waitingCache.clear(); api.deliveryHistoryCache.clear(); api.deliveryStatisticsCache.clear()
         generation += 1; let epoch = generation; mutationBusy = true
         defer { mutationBusy = false }
         do {

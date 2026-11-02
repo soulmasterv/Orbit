@@ -2,7 +2,12 @@ import SwiftUI
 
 struct StudentDatabasesView: View {
     @ObservedObject var api: ServerAPI
+    @StateObject private var schoolStore: StudentsStore
     var onWorkspace: (() -> Void)? = nil
+    init(api: ServerAPI, onWorkspace: (() -> Void)? = nil) {
+        self.api = api; self.onWorkspace = onWorkspace
+        _schoolStore = StateObject(wrappedValue: StudentsStore(api: api))
+    }
     @State private var classeraSelected = true
     @Environment(\.dismiss) private var dismiss
     var body: some View {
@@ -16,7 +21,7 @@ struct StudentDatabasesView: View {
                 }.padding(3).background(StudentPalette.surface, in: RoundedRectangle(cornerRadius: 10))
             }.padding(.horizontal, 16).padding(.top, 6).padding(.bottom, 14)
             if classeraSelected { ClasseraStudentsView(api: api, embedded: true) }
-            else { StudentsView(api: api, embedded: true) }
+            else { StudentsView(api: api, store: schoolStore, embedded: true) }
         }
         .modifier(StudentAppearance())
         .toolbar(.visible, for: .tabBar)
@@ -34,7 +39,11 @@ struct ClasseraStudentsView: View {
     @ObservedObject var api: ServerAPI
     var embedded = false
     @Environment(\.scenePhase) private var phase
-    @StateObject private var directory = ClasseraDirectoryStore()
+    @StateObject private var directory: ClasseraDirectoryStore
+    init(api: ServerAPI, embedded: Bool = false) {
+        self.api = api; self.embedded = embedded
+        _directory = StateObject(wrappedValue: api.classeraDirectoryStore)
+    }
     @State private var search = ""
     @State private var directoryFilter: ClasseraDirectoryFilter = .current
     @State private var generation = 0
@@ -188,6 +197,16 @@ struct ClasseraStudentsView: View {
 struct ClasseraStudentEditor: View {
     @ObservedObject var api: ServerAPI
     let phone: String
+    init(api: ServerAPI, phone: String) {
+        self.api = api; self.phone = phone
+        let cached = api.accessAllowed ? api.classeraDirectoryStore.students.first { $0.phone == phone } : nil
+        _student = State(initialValue: cached)
+        _rows = State(initialValue: cached?.subscriptions ?? [])
+        var freshness = ReadSnapshotFreshness()
+        if cached != nil { freshness.record(context: api.latestReportsContext) }
+        _detailFreshness = State(initialValue: freshness)
+        // loaded stays false: cached presentation never enables edits or sends.
+    }
     @Environment(\.scenePhase) private var phase
     @State private var student: ClasseraStudent?
     @State private var rows: [ClasseraSubscription] = []

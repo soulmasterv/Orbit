@@ -126,7 +126,10 @@ struct AppRootView: View {
             let wasAllowed = api.accessAllowed
             api.setAccessAllowed(unlocked && phase == .active)
             if unlocked && phase == .active && !wasAllowed {
-                Task { await api.refreshIfNeeded() }
+                Task {
+                    await api.refreshIfNeeded()
+                    await api.preloadCommonScreens()
+                }
             }
         }
     }
@@ -140,6 +143,7 @@ struct AppRootView: View {
         guard phase == .active && session.isUnlocked && !api.accessAllowed else { return }
         api.setAccessAllowed(true)
         await api.refreshIfNeeded()
+        await api.preloadCommonScreens()
     }
 }
 

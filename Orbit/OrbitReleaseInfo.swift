@@ -19,6 +19,12 @@ struct OrbitChangelogEntry: Identifiable {
     let title: String
     let changes: [String]
     static let entries: [Self] = [
+        .init(id: "2026-11-session-read-cache", title: "Faster navigation and quieter loading", changes: [
+            "Classera students and the default key-usage summary preload after unlocking, without delaying Home or starting voice, reports or messages.",
+            "Reopening student directories, usage filters, delivery pages and Downloads reuses recent read-only data instead of starting from an empty screen.",
+            "Manual refresh and post-edit verification still fetch current data. Delivery polling and WhatsApp window validation remain in place.",
+            "Session caches stay in memory and are cleared on a real lock, sign-out or connection change. Brief app switches preserve recent snapshots."
+        ]),
         .init(id: "2026-11-optout-removal-key-tags", title: "Opted-out cleanup and key labels", changes: [
             "Remove a Classera profile only after every subscription is opted out. Delivery history and administrator restrictions remain saved.",
             "The directory refreshes after a successful removal so an old cached row cannot return.",

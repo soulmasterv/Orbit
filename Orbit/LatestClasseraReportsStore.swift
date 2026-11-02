@@ -23,7 +23,7 @@ final class LatestClasseraReportsStore: ObservableObject {
         guard !loading && !Task.isCancelled else { return }
         generation += 1
         let epoch = generation
-        snapshot = nil
+        if let context, !freshness.belongs(to: context) { snapshot = nil }
         state = .loading
         do {
             let value = try await fetch()

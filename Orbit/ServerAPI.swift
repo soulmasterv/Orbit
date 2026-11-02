@@ -56,7 +56,10 @@ final class ServerAPI: ObservableObject {
     @Published private(set) var retainsReadSnapshots = false
     @Published private(set) var classeraDirectoryRevision = 0
     func invalidateClasseraDirectorySnapshot() {
-        if accessAllowed { classeraDirectoryRevision += 1 }
+        if accessAllowed {
+            classeraDirectoryRevision += 1
+            waitingCache.clear()
+        }
     }
     @Published private(set) var lastNetworkSeconds: Double?
     @Published private(set) var lastDecodeSeconds: Double?
@@ -87,6 +90,48 @@ final class ServerAPI: ObservableObject {
     private var studentsAccessGeneration = 0
     private var dashboardFreshness = ReadSnapshotFreshness()
     private var servicesFreshness = ReadSnapshotFreshness()
+    // Owned by the authenticated app session, rather than a transient destination.
+    lazy var classeraDirectoryStore = ClasseraDirectoryStore()
+    lazy var keyUsageStore = AIKeyUsageStore()
+    lazy var latestReportsStore = LatestClasseraReportsStore()
+    let downloadsCache = ScreenSnapshotCache<OrbitDownloadsResponse>()
+    let waitingCache = ScreenSnapshotCache<ClasseraWaitingResponse>()
+    let deliveryHistoryCache = ScreenSnapshotCache<ClasseraHistoryResponse>()
+    let deliveryStatisticsCache = ScreenSnapshotCache<ClasseraStatisticsResponse>()
+    private var preloadTask: Task<Void, Never>?
+    private var preloadContext: UUID?
+
+    private func suspendScreenReads(preservingSnapshots: Bool) {
+        preloadTask?.cancel(); preloadTask = nil
+        classeraDirectoryStore.clear(removeSnapshot: !preservingSnapshots)
+        keyUsageStore.clear(preserveSnapshot: preservingSnapshots)
+        latestReportsStore.clear(preserveSnapshot: preservingSnapshots)
+        if !preservingSnapshots {
+            preloadContext = nil
+            downloadsCache.clear(); waitingCache.clear()
+            deliveryHistoryCache.clear(); deliveryStatisticsCache.clear()
+        }
+    }
+
+    func preloadCommonScreens() async {
+        guard accessAllowed, hasSavedToken, !previewMode, !Task.isCancelled else { return }
+        if let preloadTask { await preloadTask.value; return }
+        let context = latestReportsContext
+        guard preloadContext != context else { return }
+        let task = Task { @MainActor in
+            async let directory: Void = self.classeraDirectoryStore.refresh(api: self, automatic: true)
+            // Do not replace an analytics filter the user has already opened.
+            if self.keyUsageStore.snapshot == nil && !self.keyUsageStore.loading {
+                await self.keyUsageStore.load(api: self, days: 7, className: "All", automatic: true)
+            }
+            await directory
+            guard self.accessAllowed, self.latestReportsContext == context, !Task.isCancelled else { return }
+            self.preloadContext = context
+            self.preloadTask = nil
+        }
+        preloadTask = task
+        await task.value
+    }
 
     init(session: URLSession? = nil, defaults: UserDefaults = .standard,
          accessAllowed: Bool = true, snapshotStore: DashboardSnapshotStore? = nil,
@@ -132,12 +177,14 @@ final class ServerAPI: ObservableObject {
             // A real lock can expire while access is already suspended in background.
             if !allowed && !preservingSession && retainsReadSnapshots {
                 retainsReadSnapshots = false; latestReportsContext = UUID(); needsVerification = true
+                suspendScreenReads(preservingSnapshots: false)
             }
             return
         }
         retainsReadSnapshots = !allowed && preservingSession
         accessAllowed = allowed
         if !allowed {
+            suspendScreenReads(preservingSnapshots: preservingSession)
             if !preservingSession { latestReportsContext = UUID() }
             studentsAccessGeneration += 1
             if !preservingSession || !hasFreshDashboard() { needsVerification = true }
@@ -378,6 +425,7 @@ final class ServerAPI: ObservableObject {
 
     func cachedLogs(_ target: LogTarget) -> LogSnapshot? { logSnapshots[target] }
     private func resetSecondaryRequests() {
+        suspendScreenReads(preservingSnapshots: false)
         latestReportsContext = UUID()
         studentsAccessGeneration += 1
         classeraRecipients.removeAll()
@@ -624,7 +672,7 @@ final class ServerAPI: ObservableObject {
             guard let record = try? JSONDecoder().decode(ClasseraStudent.self, from: data), record.phone == student.phone, record.activityStatus == action.activityStatus else { throw ClasseraDirectoryFailure.uncertain }
             result = record
         }
-        classeraDirectoryRevision += 1
+        invalidateClasseraDirectorySnapshot()
         servicesGeneration += 1; servicesRefresh?.cancel(); servicesRefresh = nil; servicesLoading = false
         classeraRecipients.removeAll(); await loadServices()
         return result
@@ -643,6 +691,7 @@ final class ServerAPI: ObservableObject {
         guard let result = try? JSONDecoder().decode(ClasseraStudent.self, from: data), result.phone == student.phone,
               result.subscriptionPolicy?.isValid == true, result.subscriptionPolicy?.enforced == true,
               result.subscriptionPolicy?.allowMultiple == allowMultiple else { throw ClasseraDirectoryFailure.uncertain }
+        invalidateClasseraDirectorySnapshot()
         return result
     }
     func saveClasseraStudent(phone: String, payload: ClasseraStudentEdit) async throws -> ClasseraStudent {
@@ -658,6 +707,7 @@ final class ServerAPI: ObservableObject {
         }
         servicesGeneration += 1; servicesRefresh?.cancel(); servicesRefresh = nil; servicesLoading = false
         classeraRecipients.removeAll()
+        invalidateClasseraDirectorySnapshot()
         await loadServices()
         return result
     }
@@ -672,6 +722,7 @@ final class ServerAPI: ObservableObject {
             body: JSONEncoder().encode(ClasseraCreatePayload(phone: phone, name: name)))
         guard let result = try? JSONDecoder().decode(ClasseraStudent.self, from: data),
               result.phone == phone, result.revision.count == 64 else { throw ClasseraDirectoryFailure.uncertain }
+        invalidateClasseraDirectorySnapshot()
         return result
     }
     func renameClasseraStudent(student: ClasseraStudent, name: String) async throws -> ClasseraStudent {
@@ -689,6 +740,7 @@ final class ServerAPI: ObservableObject {
             body: JSONEncoder().encode(ClasseraProfilePayload(name: trimmed, expectedRevision: student.revision)))
         guard let result = try? JSONDecoder().decode(ClasseraStudent.self, from: data),
               result.phone == student.phone, result.revision.count == 64 else { throw ClasseraDirectoryFailure.uncertain }
+        invalidateClasseraDirectorySnapshot()
         return result
     }
     func loadClasseraMessaging(phone: String) async throws -> ClasseraMessagingResponse {
