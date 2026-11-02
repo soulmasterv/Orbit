@@ -340,15 +340,14 @@ struct ClasseraStudentEditor: View {
             Text("Students can resume pauses. Only an administrator can lift a suspension.")
                 .font(.caption).foregroundStyle(StudentPalette.secondary)
             if let policy = student?.subscriptionPolicy, policy.isValid, policy.enforced {
-                HStack {
+                VStack(alignment: .leading, spacing: 8) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(policy.allowMultiple ? "Multiple classes allowed" : "One class per student").font(.subheadline.weight(.semibold))
                         Text("Active and paused classes count.").font(.caption).foregroundStyle(StudentPalette.secondary)
                     }
-                    Spacer()
                     Button(policy.allowMultiple ? "Remove override" : "Override") { pendingOverride = !policy.allowMultiple }
-                        .font(.subheadline).fixedSize(horizontal: true, vertical: true).disabled(!canSave)
-                }
+                        .font(.subheadline).fixedSize(horizontal: false, vertical: true).disabled(!canSave)
+                }.frame(maxWidth: .infinity, alignment: .leading)
                 if policy.overLimit {
                     Text("Existing subscriptions exceed the limit. They stay saved; additional classes are blocked.")
                         .font(.caption).foregroundStyle(.yellow)
