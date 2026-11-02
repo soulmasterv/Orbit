@@ -38,74 +38,71 @@ struct OrbitPhonePilotView: View {
     @State private var loading = false
     private var fresh: Bool { phase == .active && api.phonePilotStatusIsFresh && (refreshed.map { Date().timeIntervalSince($0) < 20 } ?? false) }
     var body: some View {
-        NavigationStack {
-            Form {
-                Section("Phone connection") {
-                    if let value {
-                        LabeledContent("Companion", value: fresh ? (value.phone_seen_seconds.map { $0 < 20 ? "Connected" : "Last seen \($0)s ago" } ?? "Not connected") : "Status is stale")
-                        LabeledContent("USB / ADB", value: value.runtime.adb.capitalized)
-                        LabeledContent("Bluetooth", value: value.runtime.bluetooth.capitalized)
-                        LabeledContent("Battery", value: value.runtime.battery.map { "\($0)%" } ?? "Unavailable")
-                        if value.health.at == nil || value.health.issues == nil || Date().timeIntervalSince1970 - (value.health.at ?? 0) > 60 { Text("Call health report is unavailable or stale.").foregroundStyle(.orange) }
-                        else if (value.health.issues ?? []).isEmpty { Text("Call-system checks are passing.").foregroundStyle(.green) }
-                        else { ForEach(value.health.issues ?? [], id: \.self) { Text($0).foregroundStyle(.orange) } }
-                    } else {
-                        Text(failure == nil ? "Checking phone backend…" : "Phone backend not verified")
-                        Text("The phone backend may not be activated yet. Controls stay disabled until a fresh status is received.")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                    Button("Refresh") { Task { await load() } }.disabled(busy || loading)
+        Form {
+            Section("Phone connection") {
+                if let value {
+                    LabeledContent("Companion", value: fresh ? (value.phone_seen_seconds.map { $0 < 20 ? "Connected" : "Last seen \($0)s ago" } ?? "Not connected") : "Status is stale")
+                    LabeledContent("USB / ADB", value: value.runtime.adb.capitalized)
+                    LabeledContent("Bluetooth", value: value.runtime.bluetooth.capitalized)
+                    LabeledContent("Battery", value: value.runtime.battery.map { "\($0)%" } ?? "Unavailable")
+                    if value.health.at == nil || value.health.issues == nil || Date().timeIntervalSince1970 - (value.health.at ?? 0) > 60 { Text("Call health report is unavailable or stale.").foregroundStyle(.orange) }
+                    else if (value.health.issues ?? []).isEmpty { Text("Call-system checks are passing.").foregroundStyle(.green) }
+                    else { ForEach(value.health.issues ?? [], id: \.self) { Text($0).foregroundStyle(.orange) } }
+                } else {
+                    Text(failure == nil ? "Checking phone backend…" : "Phone backend not verified")
+                    Text("The phone backend may not be activated yet. Controls stay disabled until a fresh status is received.")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
-                Section("Notifications") {
-                    Picker("Delivery", selection: Binding(get: { mode }, set: { mode = $0; dirty = true })) {
-                        Text("Web notifications").tag("web")
-                        Text("WhatsApp").tag("whatsapp")
-                        Text("SMS (paid)").tag("sms")
-                    }
-                    Toggle("Forward incoming SMS", isOn: Binding(get: { forwarding }, set: { forwarding = $0; dirty = true }))
-                    Text("SMS forwarding is separate and uses SIM credit, even with web notifications selected.").font(.caption).foregroundStyle(.secondary)
-                    Button("Save settings") {
-                        guard let value else { return }
-                        pendingCommand = OrbitPhonePilotCommand(request_id: UUID().uuidString.lowercased(), kind: "settings", revision: value.settings.revision, mode: mode, forward_enabled: forwarding)
-                    }.disabled(!dirty || busy || !fresh || !api.canControl || loading || pendingCommand != nil)
-                    if let value { Text(value.settings_applied ? "Android confirmed the saved settings." : "Waiting for Android to apply settings. Monitoring must be active; SMS features need permission.").font(.caption).foregroundStyle(value.settings_applied ? Color.secondary : Color.orange) }
-                }
-                Section("Call automation") {
-                    if let value {
-                        worker("Incoming AI answering", target: "answering", name: "jarvis-phone-worker", state: value)
-                        worker("Outgoing call jobs", target: "outgoing", name: "jarvis-outgoing", state: value)
-                        worker("Bluetooth recovery", target: "bluetooth", name: "jarvis-bluetooth-watch", state: value)
-                    }
-                    Text("Resuming outgoing jobs may place queued calls. Changes are refused during a call or when call state cannot be verified.").font(.caption).foregroundStyle(.secondary)
-                    Button("Pause automation and SMS forwarding", role: .destructive) { prepareAutomation("all", enabled: false) }
-                        .disabled(busy || !fresh || !api.canControl || loading || pendingCommand != nil)
-                }
-                if let failure { Section { Text(failure).foregroundStyle(.red) } }
-                if let notice { Section { Text(notice).foregroundStyle(.secondary) } }
+                Button("Refresh") { Task { await load() } }.disabled(busy || loading)
             }
-            .navigationTitle("JARVIS Phone Pilot")
-            .confirmationDialog("Confirm phone change", isPresented: Binding(get: { pendingCommand != nil }, set: { if !$0 { pendingCommand = nil } }), titleVisibility: .visible) {
-                if let command = pendingCommand {
-                    Button("Confirm") { pendingCommand = nil; Task { await send(command) } }
+            Section("Notifications") {
+                Picker("Delivery", selection: Binding(get: { mode }, set: { mode = $0; dirty = true })) {
+                    Text("Web notifications").tag("web")
+                    Text("WhatsApp").tag("whatsapp")
+                    Text("SMS (paid)").tag("sms")
                 }
-                Button("Cancel", role: .cancel) { pendingCommand = nil }
-            } message: { Text(pendingCommand?.confirmationMessage ?? "") }
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
-            .task {
-                while !Task.isCancelled {
-                    if phase == .active && api.accessAllowed { await load() }
-                    do { try await Task.sleep(for: .seconds(5)) } catch { return }
+                Toggle("Forward incoming SMS", isOn: Binding(get: { forwarding }, set: { forwarding = $0; dirty = true }))
+                Text("SMS forwarding is separate and uses SIM credit, even with web notifications selected.").font(.caption).foregroundStyle(.secondary)
+                Button("Save settings") {
+                    guard let value else { return }
+                    pendingCommand = OrbitPhonePilotCommand(request_id: UUID().uuidString.lowercased(), kind: "settings", revision: value.settings.revision, mode: mode, forward_enabled: forwarding)
+                }.disabled(!dirty || busy || !fresh || !api.canControl || loading || pendingCommand != nil)
+                if let value { Text(value.settings_applied ? "Android confirmed the saved settings." : "Waiting for Android to apply settings. Monitoring must be active; SMS features need permission.").font(.caption).foregroundStyle(value.settings_applied ? Color.secondary : Color.orange) }
+            }
+            Section("Call automation") {
+                if let value {
+                    worker("Incoming AI answering", target: "answering", name: "jarvis-phone-worker", state: value)
+                    worker("Outgoing call jobs", target: "outgoing", name: "jarvis-outgoing", state: value)
+                    worker("Bluetooth recovery", target: "bluetooth", name: "jarvis-bluetooth-watch", state: value)
                 }
+                Text("Resuming outgoing jobs may place queued calls. Changes are refused during a call or when call state cannot be verified.").font(.caption).foregroundStyle(.secondary)
+                Button("Pause automation and SMS forwarding", role: .destructive) { prepareAutomation("all", enabled: false) }
+                    .disabled(busy || !fresh || !api.canControl || loading || pendingCommand != nil)
             }
-            .onDisappear { api.invalidatePhonePilotStatus() }
-            .onChange(of: phase) { _, next in
-                if next == .background { api.invalidatePhonePilotStatus(); refreshed = nil; pendingCommand = nil }
-            }
-            .onChange(of: api.latestReportsContext) { _, _ in
-                value = nil; refreshed = nil; dirty = false; pendingCommand = nil
-            }
-            .onChange(of: api.accessAllowed) { _, allowed in if !allowed { value = nil; refreshed = nil; dismiss() } }
+            if let failure { Section { Text(failure).foregroundStyle(.red) } }
+            if let notice { Section { Text(notice).foregroundStyle(.secondary) } }
         }
+        .navigationTitle("Phone controls")
+        .confirmationDialog("Confirm phone change", isPresented: Binding(get: { pendingCommand != nil }, set: { if !$0 { pendingCommand = nil } }), titleVisibility: .visible) {
+            if let command = pendingCommand {
+                Button("Confirm") { pendingCommand = nil; Task { await send(command) } }
+            }
+            Button("Cancel", role: .cancel) { pendingCommand = nil }
+        } message: { Text(pendingCommand?.confirmationMessage ?? "") }
+        .task {
+            while !Task.isCancelled {
+                if phase == .active && api.accessAllowed { await load() }
+                do { try await Task.sleep(for: .seconds(5)) } catch { return }
+            }
+        }
+        .onDisappear { api.invalidatePhonePilotStatus() }
+        .onChange(of: phase) { _, next in
+            if next == .background { api.invalidatePhonePilotStatus(); refreshed = nil; pendingCommand = nil }
+        }
+        .onChange(of: api.latestReportsContext) { _, _ in
+            value = nil; refreshed = nil; dirty = false; pendingCommand = nil
+        }
+        .onChange(of: api.accessAllowed) { _, allowed in if !allowed { value = nil; refreshed = nil; dismiss() } }
     }
     private func worker(_ title: String, target: String, name: String, state: OrbitPhonePilotStatus) -> some View {
         let running = state.runtime.workers[name] == "online"

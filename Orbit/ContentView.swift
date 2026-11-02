@@ -67,6 +67,7 @@ struct ContentView: View {
                     }
                     .navigationDestination(for: WorkspaceRoute.self) { route in
                         switch route {
+                        case .phoneControls: OrbitPhonePilotView(api: api)
                         case .jarvis: JarvisView(api: api)
                         case .downloads: DownloadsView(api: api)
                         case .services: CompactServicesOverview(api: api)

@@ -20,9 +20,9 @@ final class WorkspaceNavigationTests: XCTestCase {
     func testWorkspaceDestinationsCanRetainIndependentTypedRoutes() {
         let navigation = OrbitNavigationState()
         for route in WorkspaceRoute.allCases { navigation.homePath.append(route) }
-        XCTAssertEqual(navigation.homePath.count, 4)
+        XCTAssertEqual(navigation.homePath.count, 5)
         navigation.openStudents()
         navigation.selectedTab = 0
-        XCTAssertEqual(navigation.homePath.count, 4)
+        XCTAssertEqual(navigation.homePath.count, 5)
     }
 }
