@@ -77,6 +77,7 @@ final class ServerAPI: ObservableObject {
     private let session: URLSession
     private let tokenProvider: () -> String
     private let authorize: (String) async throws -> Void
+    private let phonePilotIsForeground: () -> Bool
     let library: HomelabStore
     private let defaults: UserDefaults
     private var previewMode = false
@@ -156,7 +157,7 @@ final class ServerAPI: ObservableObject {
          tokenProvider: @escaping () -> String = { KeychainManager.load() },
          authorize: @escaping (String) async throws -> Void = { reason in
              try await DeviceAuthorization.authorize(reason: reason)
-         }) {
+         }, phonePilotIsForeground: @escaping () -> Bool = { UIApplication.shared.applicationState == .active }) {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.urlCache = nil
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
@@ -168,6 +169,7 @@ final class ServerAPI: ObservableObject {
         self.library = HomelabStore(defaults: defaults)
         self.tokenProvider = tokenProvider
         self.authorize = authorize
+        self.phonePilotIsForeground = phonePilotIsForeground
         self.accessAllowed = accessAllowed
         self.snapshotStore = snapshotStore
         hasSavedToken = !tokenProvider().isEmpty
@@ -1378,7 +1380,7 @@ extension ServerAPI {
     }
     func phonePilotSend(_ command: OrbitPhonePilotCommand) async throws -> OrbitPhonePilotResult {
         guard canControl && !previewMode && !Task.isCancelled,
-              command.isValid, phonePilotStatusIsFresh else { throw CancellationError() }
+              command.isValid, phonePilotStatusIsFresh, phonePilotIsForeground() else { throw CancellationError() }
         let context = latestReportsContext
         let epoch = studentsAccessGeneration
         let endpoint = activeBaseURL
@@ -1387,7 +1389,7 @@ extension ServerAPI {
         defer { actionBusy = false; actionProgress = "" }
         try await authorizeConfirmed(command.confirmationMessage)
         guard accessAllowed && !needsVerification && connection == .connected,
-              UIApplication.shared.applicationState == .active,
+              phonePilotIsForeground(),
               context == latestReportsContext && epoch == studentsAccessGeneration,
               endpoint == activeBaseURL && phonePilotStatusIsFresh && !Task.isCancelled else { throw CancellationError() }
         // Consume freshness before the only POST, including uncertain outcomes.

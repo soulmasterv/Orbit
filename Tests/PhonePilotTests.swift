@@ -14,10 +14,10 @@ final class PhonePilotTests: XCTestCase {
         defaults.removePersistentDomain(forName: suite)
         MockURLProtocol.handler = nil; MockURLProtocol.onStart = nil
     }
-    private func api(authorize: @escaping (String) async throws -> Void = { _ in }) -> ServerAPI {
+    private func api(authorize: @escaping (String) async throws -> Void = { _ in }, foreground: @escaping () -> Bool = { true }) -> ServerAPI {
         let config = URLSessionConfiguration.ephemeral; config.protocolClasses = [MockURLProtocol.self]
         return ServerAPI(session: URLSession(configuration: config), defaults: defaults,
-                         tokenProvider: { "phone-test-placeholder" }, authorize: authorize)
+                         tokenProvider: { "phone-test-placeholder" }, authorize: authorize, phonePilotIsForeground: foreground)
     }
     private func ready(_ api: ServerAPI) async throws {
         MockURLProtocol.handler = { _ in (200, try JSONEncoder().encode(PreviewFixtures.dashboard)) }
@@ -118,5 +118,19 @@ final class PhonePilotTests: XCTestCase {
         XCTAssertFalse(invalid.isValid)
         do { _ = try await api.phonePilotSend(invalid); XCTFail() } catch { }
         XCTAssertTrue(MockURLProtocol.requests.isEmpty)
+    }
+    func testBackgroundBeforeAuthorizationSendsNothing() async throws {
+        var authorized = false
+        let api = api(authorize: { _ in authorized = true }, foreground: { false })
+        try await ready(api)
+        do { _ = try await api.phonePilotSend(command()); XCTFail() } catch { }
+        XCTAssertFalse(authorized); XCTAssertTrue(MockURLProtocol.requests.isEmpty)
+    }
+    func testBackgroundDuringAuthorizationSendsNothing() async throws {
+        var foreground = true
+        let api = api(authorize: { _ in foreground = false }, foreground: { foreground })
+        try await ready(api)
+        do { _ = try await api.phonePilotSend(command()); XCTFail() } catch { }
+        XCTAssertTrue(MockURLProtocol.requests.isEmpty); XCTAssertFalse(api.actionBusy)
     }
 }
