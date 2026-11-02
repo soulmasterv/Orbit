@@ -42,6 +42,23 @@ class UsageTests(unittest.TestCase):
         self.assertEqual(len(value['keys']), 4)
         self.assertTrue(all(r['requests'] == 0 for r in value['keys']))
 
+    def test_unattributed_classera_requests_are_counted_only_in_all(self):
+        self.database()
+        with sqlite3.connect(self.path) as c:
+            c.execute('INSERT INTO ai_requests VALUES(?,?,?,?,?,?)',
+                ('2026-10-28', '2026-10-28T00:04:00+03:00', 'Unknown Class', 'ddd', 'success', 200))
+        before = self.path.read_bytes()
+        value = self.usage.snapshot(7)
+        self.assertEqual(value['requests_today'], 3)
+        self.assertEqual(value['active_keys_today'], 3)
+        self.assertEqual(value['keys'][3]['requests'], 1)
+        self.assertEqual(sum(p['requests'] for p in value['daily'] if p['day']=='2026-10-28'), 3)
+        self.assertIn('1 requests in the last 7 days have no recorded class', value['recommendation'])
+        self.assertEqual(self.usage.snapshot(7,'12F')['requests_today'],2)
+        self.assertEqual(self.usage.snapshot(7,'12E')['requests_today'],0)
+        self.assertNotIn('no recorded class',self.usage.snapshot(7,'12F')['recommendation'])
+        self.assertEqual(self.path.read_bytes(),before)
+
     def test_missing_table_is_waiting(self):
         sqlite3.connect(self.path).close()
         self.assertEqual(self.usage.snapshot()['state'], 'waiting')
@@ -120,3 +137,4 @@ class UsageTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+

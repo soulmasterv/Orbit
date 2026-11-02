@@ -76,6 +76,7 @@ class Usage:
         chart_start = (today - timedelta(days=chart_days - 1)).isoformat()
         labels = {key: ('key-' + str(i), 'Key ' + str(i)) for i, key in enumerate(ordered, 1)}
         rows, daily, lasts, after_limit = [], [], [], False
+        unattributed = 0
         waiting = not self.path.exists()
         if not waiting:
             # mode=ro never creates an empty DB. query_only additionally rejects writes.
@@ -85,7 +86,9 @@ class Usage:
                     columns = {r[1] for r in c.execute('PRAGMA table_info(ai_requests)')}
                     if not {'day', 'timestamp', 'class_name', 'key_id', 'status', 'http_status'}.issubset(columns):
                         raise Unavailable()
-                    classes = ('12F', '12E') if class_name == 'All' else (class_name,)
+                    # The shared Classera producer historically omitted the class.
+                    # Include its explicit sentinel only in All; never guess 12F/E.
+                    classes = ('12F', '12E', 'Unknown Class') if class_name == 'All' else (class_name,)
                     clause = 'class_name IN (' + ','.join('?' for _ in classes) + ')'
                     # Exclude unrelated classes/future days. Raw keys, hashes, errors and models are never returned.
                     daily = c.execute('SELECT day,key_id,COUNT(*) FROM ai_requests WHERE ' + clause +
@@ -95,6 +98,9 @@ class Usage:
                         ' AND day>=? AND day<=? GROUP BY day,key_id', (*classes, min(start, today.isoformat()), today.isoformat())).fetchall()
                     lasts = c.execute('SELECT key_id,MAX(timestamp) FROM ai_requests WHERE ' + clause +
                         ' AND day<=? GROUP BY key_id', (*classes, today.isoformat())).fetchall()
+                    if class_name == 'All':
+                        unattributed = c.execute("SELECT COUNT(*) FROM ai_requests WHERE class_name='Unknown Class' "
+                            'AND day>=? AND day<=?', (start, today.isoformat())).fetchone()[0]
                     # Evidence of ordering only, not a claim that adding keys will fix quota.
                     after_limit = bool(c.execute('SELECT 1 FROM ai_requests a WHERE ' +
                         clause.replace('class_name', 'a.class_name') +
@@ -125,6 +131,8 @@ class Usage:
             f'All {len(selected)} configured keys used {period}.')
         if after_limit:
             recommendation += ' Additional keys were used after rate-limit errors; this alone does not prove more keys are needed.'
+        if unattributed:
+            recommendation += f' {unattributed} requests {period} have no recorded class; included in All only, not assigned to 12F or 12E.'
         chart_counts = {(day, key): count for day, key, count in daily}
         chart = [dict(day=(today-timedelta(days=offset)).isoformat(), key_id=labels[key][0], label=labels[key][1],
             requests=chart_counts.get(((today-timedelta(days=offset)).isoformat(), key), 0))
@@ -182,3 +190,4 @@ def register(app, owner_token, usage=None):
         response.headers['Cache-Control'] = 'no-store'
         return response
     app.add_url_rule('/api/classera/ai-key-usage', 'orbit_ai_key_usage', get_usage, methods=['GET'])
+
