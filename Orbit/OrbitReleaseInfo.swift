@@ -19,6 +19,12 @@ struct OrbitChangelogEntry: Identifiable {
     let title: String
     let changes: [String]
     static let entries: [Self] = [
+        .init(id: "2026-11-optout-removal-key-tags", title: "Opted-out cleanup and key labels", changes: [
+            "Remove a Classera profile only after every subscription is opted out. Delivery history and administrator restrictions remain saved.",
+            "The directory refreshes after a successful removal so an old cached row cannot return.",
+            "Gemini Monitor shows existing key names and project tags, verified Classera configuration, and recorded Classera usage over 30 days.",
+            "Keys and fingerprints stay on Ubuntu. Other service usage is not inferred from Classera records."
+        ]),
         .init(id: "2026-11-classera-one-class", title: "Class limits and student-owned opt-out", changes: [
             "Classera defaults to one active or paused class per student, with a confirmed administrator override for selected students.",
             "Students control opt-out. Classera administrators use Suspend/Resume rather than removing subscriptions or profiles.",

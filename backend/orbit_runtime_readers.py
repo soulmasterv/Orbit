@@ -14,7 +14,7 @@ def checked_time(value):
     except (ValueError,TypeError,OverflowError,OSError):pass
     return None
 
-def monitor_snapshot(loader,mapper,http=None):
+def monitor_snapshot(loader,mapper,http=None,metadata_reader=None):
     module=loader()
     client=http or requests.Session()
     # Existing password is used server-to-server only; no new login bypass.
@@ -27,6 +27,9 @@ def monitor_snapshot(loader,mapper,http=None):
         if response.status_code!=200:return {}
         records=response.json()
         if not isinstance(records,list) or len(records)>1000:return {}
+        from gemini_key_metadata import build_metadata
+        # Injected fixture transports never read real configuration implicitly.
+        metadata=(metadata_reader or build_metadata)(records) if http is None or metadata_reader is not None else {}
         result={}
         for index,record in enumerate(records,start=1):
             if not isinstance(record,dict):continue
@@ -36,6 +39,7 @@ def monitor_snapshot(loader,mapper,http=None):
                 "lastAuthenticationCheck":checked_time(auth.get("checked")),
                 "lastGenerationCheck":checked_time(manual.get("checked")),
                 "enabled":record.get("enabled",True) is True,
+                "metadata":metadata.get("key-"+str(index)),
             }
         return result
     except (requests.RequestException,ValueError,TypeError,AttributeError):return {}
@@ -60,3 +64,4 @@ def process_logs(processes,names,roots=("/home/local/.pm2/logs",)):
             except (OSError,ValueError):continue
         if streams:registered[ident]=streams
     return LogsAdapter(log_roots=roots,processes=registered,docker_readers={})
+

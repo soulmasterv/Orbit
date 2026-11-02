@@ -14,6 +14,38 @@ struct GeminiKeyStatus: Codable, Identifiable {
     let lastAuthenticationCheck: String?
     let lastGenerationCheck: String?
     let canTest: Bool?
+    var metadata: GeminiKeyMetadata? = nil
+    enum CodingKeys: String, CodingKey { case id, name, status, lastAuthenticationCheck, lastGenerationCheck, canTest, metadata }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id); name = try c.decode(String.self, forKey: .name)
+        status = try c.decode(String.self, forKey: .status)
+        lastAuthenticationCheck = try c.decodeIfPresent(String.self, forKey: .lastAuthenticationCheck)
+        lastGenerationCheck = try c.decodeIfPresent(String.self, forKey: .lastGenerationCheck)
+        canTest = try c.decodeIfPresent(Bool.self, forKey: .canTest)
+        metadata = try? c.decode(GeminiKeyMetadata.self, forKey: .metadata)
+        if metadata?.isValid != true { metadata = nil }
+    }
+    init(id: String, name: String, status: String, lastAuthenticationCheck: String? = nil, lastGenerationCheck: String? = nil, canTest: Bool? = nil, metadata: GeminiKeyMetadata? = nil) {
+        self.id = id; self.name = name; self.status = status; self.lastAuthenticationCheck = lastAuthenticationCheck
+        self.lastGenerationCheck = lastGenerationCheck; self.canTest = canTest; self.metadata = metadata
+    }
+}
+struct GeminiKeyMetadata: Codable {
+    let tag: String?
+    let project: String?
+    let configured_for: [String]
+    let configuration_state: String
+    let observed_in: [String]
+    let usage_state: String
+    let usage_days: Int
+    var isValid: Bool {
+        ["verified", "unavailable"].contains(configuration_state) && ["ready", "waiting", "unavailable"].contains(usage_state) &&
+        usage_days == 30 && configured_for.allSatisfy { ["12F", "12E"].contains($0) } && observed_in.allSatisfy { ["12F", "12E"].contains($0) } &&
+        [tag, project].compactMap { $0 }.allSatisfy { value in
+            !value.isEmpty && value.count <= 64 && value.range(of: #"(?i)AIza|bearer|secret|token|password|[\p{Cc}]"#, options: .regularExpression) == nil
+        }
+    }
 }
 struct ClasseraAssessment: Codable, Identifiable {
     let date: String
@@ -145,5 +177,6 @@ enum ClasseraRecipientValidation {
         return clean
     }
 }
+
 
 

@@ -18,6 +18,10 @@ class Invalid(Exception): pass
 class Conflict(Exception): pass
 class ConsentRequired(Exception): pass
 
+def removable_profile(record):
+    return (record['signup_session'] is None and bool(record['subscriptions'])
+            and all(row['status']=='opted_out' for row in record['subscriptions']))
+
 def phone_value(value):
     if not isinstance(value, str) or not re.fullmatch(r"[1-9][0-9]{7,14}", value):
         raise Invalid()
@@ -102,7 +106,7 @@ class Directory:
     def listing(self):
         with self.connect() as conn:
             conn.execute("BEGIN")
-            phones = conn.execute("SELECT phone FROM (SELECT phone,updated_at FROM subscribers UNION ALL SELECT phone,updated_at FROM signup_sessions UNION ALL SELECT phone,updated_at FROM orbit_student_controls UNION ALL SELECT phone,updated_at FROM orbit_classera_profiles) GROUP BY phone ORDER BY MAX(updated_at) DESC,phone").fetchall()
+            phones = conn.execute("SELECT phone FROM (SELECT phone,updated_at FROM subscribers UNION ALL SELECT phone,updated_at FROM signup_sessions UNION ALL SELECT phone,updated_at FROM orbit_classera_profiles) GROUP BY phone ORDER BY MAX(updated_at) DESC,phone").fetchall()
             return {"version": 1, "students": [self.record(conn, r["phone"]) for r in phones],
                     "classes": [{"id": k, "class_name": v} for k,v in CLASSES.items()]}
 
@@ -155,7 +159,6 @@ class Directory:
 
     def manage(self, phone, data, remove=False):
         phone_value(phone)
-        if remove: raise ConsentRequired()
         keys = {'expected_revision'} if remove else {'expected_revision','activity_status'}
         if not isinstance(data,dict) or set(data)!=keys: raise Invalid()
         revision=data.get('expected_revision')
@@ -165,7 +168,15 @@ class Directory:
         with self.connect() as conn:
             conn.execute('BEGIN IMMEDIATE')
             current=self.record(conn,phone)
+            if remove and not removable_profile(current):raise ConsentRequired()
             if not hmac.compare_digest(current['revision'],revision): raise Conflict()
+            if remove:
+                conn.execute('DELETE FROM subscribers WHERE phone=?',(phone,))
+                conn.execute('DELETE FROM orbit_classera_profiles WHERE phone=?',(phone,))
+                conn.execute('DELETE FROM orbit_classera_subscription_policy WHERE phone=?',(phone,))
+                # Restrictions and delivery/audit history remain intact. A retained
+                # restriction alone does not recreate a directory profile.
+                return {'ok':True}
             conn.execute('INSERT INTO orbit_student_controls(phone,activity_status,updated_at) VALUES(?,?,?) ON CONFLICT(phone) DO UPDATE SET activity_status=excluded.activity_status,updated_at=excluded.updated_at',
                 (phone,status,datetime.now(ZoneInfo('Africa/Cairo')).isoformat()))
             return self.record(conn,phone)

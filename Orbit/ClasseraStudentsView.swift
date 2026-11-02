@@ -151,7 +151,7 @@ struct ClasseraStudentsView: View {
         .navigationDestination(isPresented: Binding(get: { newPhone != nil }, set: { if !$0 { newPhone = nil } })) {
             if let newPhone { ClasseraStudentEditor(api: api, phone: newPhone) }
         }
-        .task(id: "\(phase == .active)|\(api.accessAllowed)|\(api.latestReportsContext)") {
+        .task(id: "\(phase == .active)|\(api.accessAllowed)|\(api.latestReportsContext)|\(api.classeraDirectoryRevision)") {
             guard phase == .active && api.accessAllowed else {
                 generation += 1; directory.clear(removeSnapshot: !api.accessAllowed && !api.retainsReadSnapshots); return
             }
@@ -293,7 +293,7 @@ struct ClasseraStudentEditor: View {
             Button(action.title, role: action == .block || action == .remove ? .destructive : nil) { Task { await manage(action) } }
             Button("Cancel", role: .cancel) {}
         } message: { action in
-            Text(action == .remove ? "Delete all Classera subscriptions and signup progress for this phone. Messaging Classera again starts onboarding. The other student database is untouched." : "Update Classera replies and daily-report eligibility. Authorize on your iPhone next.")
+            Text(action == .remove ? "Remove this fully opted-out Classera profile and its saved subscriptions. Delivery history and administrator restrictions stay saved. No message is sent." : "Update Classera replies and daily-report eligibility. Authorize on your iPhone next.")
         }
         .confirmationDialog("Force-send to ONE PERSON ONLY?", isPresented: Binding(get: { reportClass != nil }, set: { if !$0 { reportClass = nil } }), titleVisibility: .visible, presenting: reportClass) { klass in
             Button("Force-send report", role: .destructive) { Task { await sendReport(klass) } }
@@ -546,7 +546,8 @@ struct ClasseraStudentEditor: View {
         if epoch == generation { busy = false }
     }
     private func managementActions(_ status: StudentActivityStatus) -> [StudentManagementAction] {
-        StudentManagementAction.available(for: status).filter { $0 != .remove && $0 != .block }
+        let actions = StudentManagementAction.available(for: status).filter { $0 != .remove && $0 != .block }
+        return student?.isOptedOut == true && status != .unknown ? actions + [.remove] : actions
     }
     private var canAddClass: Bool {
         guard let policy = student?.subscriptionPolicy, policy.isValid, policy.enforced else { return false }
@@ -581,7 +582,12 @@ struct ClasseraStudentEditor: View {
             guard epoch == generation else { return }
             busy = false; loaded = false
             if error is ClasseraDirectoryFailure {
-                await reload(); message = "The action may have completed or the database changed. Review the refreshed state before trying again."
+                await reload()
+                if action == .remove, loaded, let current = self.student,
+                   current.profileName == nil, current.subscriptions.isEmpty, current.signupSession == nil {
+                    api.invalidateClasseraDirectorySnapshot(); dismiss(); return
+                }
+                message = "The action may have completed or the database changed. Review the refreshed state before trying again."
             } else { message = error.localizedDescription }
         }
         if epoch == generation { busy = false }

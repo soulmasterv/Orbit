@@ -93,6 +93,17 @@ final class ClasseraStudentHistoryLayoutTests: XCTestCase {
                               content: ClasseraStudentEditor(api: api, phone: "201000000001"))
         }
     }
+    func testGeminiTagsAndSeparateConfiguredObservedLocationsLayout() async throws {
+        let metadata: [String: Any] = ["tag": "School primary", "project": "School", "configured_for": ["12F", "12E"],
+            "configuration_state": "verified", "observed_in": ["12F"], "usage_state": "ready", "usage_days": 30]
+        let services = try JSONSerialization.data(withJSONObject: ["geminiHealth": "Working",
+            "gemini": [["id": "key-3", "name": "Gemini 3", "status": "Working", "canTest": true, "metadata": metadata]],
+            "classera": [], "padel": []] as [String: Any])
+        let dashboard = try JSONEncoder().encode(PreviewFixtures.dashboard)
+        MockURLProtocol.handler = { request in (200, request.url?.path == "/api/dashboard" ? dashboard : services) }
+        let server = api(); await server.refreshAll()
+        try await capture("gemini-tags-and-classera-usage-dark", content: ServiceDetailView(api: server, page: .gemini))
+    }
     func testHistoryDetailDateTimeAndActualAIRequestLayout() async throws {
         let data = Data(#"{"id":"fixture","report":"12F 1/11/26","class_id":"12F","phone":"201000000001","student":"Student A","template":"classera_v9","message_id":"fixture-outbound","status":"read","created_at":1793536500,"updated_at":1793536860,"historical":false,"ai_analysis":{"status":"requested","requested_at":1793536980}}"#.utf8)
         let record = try JSONDecoder().decode(ClasseraDeliveryRecord.self, from: data)

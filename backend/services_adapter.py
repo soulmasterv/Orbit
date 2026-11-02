@@ -82,12 +82,14 @@ class ServicesAdapter:
         padel = raw.get("padel", {})
         result = {"geminiHealth": state(raw.get("geminiHealth")), "gemini": [], "classera": [], "padel": []}
         identities=sorted((k for k in gemini if valid_key_id(k)),key=lambda k:int(k.split("-")[1]))
+        from gemini_key_metadata import public_metadata
         for ident in identities:
             item = gemini.get(ident, {})
             # Friendly names are generated locally, not copied from unsafe upstream fields.
             result["gemini"].append({"id": ident, "name": "Gemini " + ident.split("-")[-1],
                 "status": state(item.get("status")), "lastAuthenticationCheck": timestamp(item.get("lastAuthenticationCheck")),
-                "lastGenerationCheck": timestamp(item.get("lastGenerationCheck")), "canTest": ident in self.tests})
+                "lastGenerationCheck": timestamp(item.get("lastGenerationCheck")), "canTest": ident in self.tests,
+                "metadata": public_metadata(item.get("metadata"))})
         for ident in CLASSERA_IDS:
             item = classera.get(ident, {})
 
@@ -181,3 +183,4 @@ class ServicesAdapter:
                 "status": state(item.get("status")), "deliveryStatus": state(item.get("deliveryStatus"), DELIVERY),
                 "lastNotification": timestamp(item.get("lastNotification"))})
         return result
+

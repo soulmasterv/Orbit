@@ -54,6 +54,10 @@ final class ServerAPI: ObservableObject {
     @Published private(set) var hasSavedToken = false
     @Published private(set) var accessAllowed: Bool
     @Published private(set) var retainsReadSnapshots = false
+    @Published private(set) var classeraDirectoryRevision = 0
+    func invalidateClasseraDirectorySnapshot() {
+        if accessAllowed { classeraDirectoryRevision += 1 }
+    }
     @Published private(set) var lastNetworkSeconds: Double?
     @Published private(set) var lastDecodeSeconds: Double?
     @Published private(set) var serviceSnapshot: ServiceSnapshot?
@@ -574,7 +578,7 @@ final class ServerAPI: ObservableObject {
         switch http.statusCode {
         case 200: return data
         case 403 where (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String == "student_consent_required":
-            throw APIError.message("Only the student can opt out or remove a Classera subscription. Use Suspend instead.")
+            throw APIError.message("This Classera profile is not fully opted out and cannot be removed. Reload its current status.")
         case 409 where (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String == "subscription_limit_reached":
             throw APIError.message("One class per student, including paused classes. Enable the administrator override to add another class.")
         case 401, 403: throw APIError.message("Owner authentication failed. Check the Orbit connection in Settings.")
@@ -602,7 +606,7 @@ final class ServerAPI: ObservableObject {
         return result
     }
     func manageClasseraStudent(student: ClasseraStudent, action: StudentManagementAction) async throws -> ClasseraStudent? {
-        guard action != .remove else { throw APIError.message("Only the student can remove their Classera subscription. Use Suspend instead.") }
+        guard action != .remove || student.isOptedOut else { throw APIError.message("Only a fully opted-out Classera profile can be removed. Use Suspend for other students.") }
         guard ClasseraPhone.valid(student.phone), action.isValid(for: student.activityStatus), accessAllowed, !actionBusy, !Task.isCancelled else { throw CancellationError() }
         actionBusy = true; actionProgress = "Updating Classera student…"
         defer { actionBusy = false; actionProgress = "" }
@@ -610,9 +614,17 @@ final class ServerAPI: ObservableObject {
         try await authorizeConfirmed("\(action.title) for this Classera student. This affects replies and daily reports.")
         guard accessAllowed && epoch == studentsAccessGeneration && !Task.isCancelled else { throw CancellationError() }
         let payload = ClasseraManagementPayload(expectedRevision: student.revision, activityStatus: action.activityStatus?.rawValue)
-        let path = "/api/classera-students/\(student.phone)/activity"
-        let data = try await classeraDirectoryData(path: path, method: "PUT", body: JSONEncoder().encode(payload))
-        guard let result = try? JSONDecoder().decode(ClasseraStudent.self, from: data), result.phone == student.phone, result.activityStatus == action.activityStatus else { throw ClasseraDirectoryFailure.uncertain }
+        let path = "/api/classera-students/\(student.phone)" + (action == .remove ? "" : "/activity")
+        let data = try await classeraDirectoryData(path: path, method: action == .remove ? "DELETE" : "PUT", body: JSONEncoder().encode(payload))
+        let result: ClasseraStudent?
+        if action == .remove {
+            guard (try? JSONDecoder().decode(StudentMutationAcknowledgement.self, from: data))?.ok == true else { throw ClasseraDirectoryFailure.uncertain }
+            result = nil
+        } else {
+            guard let record = try? JSONDecoder().decode(ClasseraStudent.self, from: data), record.phone == student.phone, record.activityStatus == action.activityStatus else { throw ClasseraDirectoryFailure.uncertain }
+            result = record
+        }
+        classeraDirectoryRevision += 1
         servicesGeneration += 1; servicesRefresh?.cancel(); servicesRefresh = nil; servicesLoading = false
         classeraRecipients.removeAll(); await loadServices()
         return result

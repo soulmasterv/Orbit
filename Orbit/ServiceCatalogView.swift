@@ -93,6 +93,20 @@ struct ServiceDetailView: View {
                             if reason(key.canTest) == nil { Button("Test") { pending = ServiceCommand(kind: .testGeminiKey, id: key.id, name: safeGeminiName(key)) }.font(.subheadline).frame(minWidth: 44, minHeight: 44) }
                         }
                         HStack { Text("Auth \(HumanTime.label(key.lastAuthenticationCheck))"); Spacer(); Text("Generation \(HumanTime.label(key.lastGenerationCheck))") }.font(.caption).foregroundStyle(.secondary)
+                        if let metadata = key.metadata, metadata.isValid {
+                            if let tag = metadata.tag {
+                                Text(tag).font(.caption.weight(.medium)).padding(.horizontal, 8).padding(.vertical, 4)
+                                    .background(Brand.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+                            }
+                            if let project = metadata.project { Text("Project: \(project)").font(.caption).foregroundStyle(.secondary) }
+                            Text(metadata.configuration_state == "verified" ?
+                                 "Classera configuration: " + (metadata.configured_for.isEmpty ? "Not configured" : metadata.configured_for.map { ClasseraClass.title($0) }.joined(separator: ", ")) :
+                                 "Classera configuration unavailable").font(.caption).foregroundStyle(.secondary)
+                            Text(metadata.usage_state == "ready" ?
+                                 "Recorded use · 30 days: " + (metadata.observed_in.isEmpty ? "No Classera requests recorded" : metadata.observed_in.map { ClasseraClass.title($0) }.joined(separator: ", ")) :
+                                 metadata.usage_state == "waiting" ? "Recorded use: Waiting for Classera data" : "Recorded Classera use unavailable")
+                                .font(.caption).foregroundStyle(.secondary)
+                        } else { Text("Key tags and usage locations unavailable").font(.caption).foregroundStyle(.secondary) }
                         if let why = reason(key.canTest) { Text("Test unavailable: \(why)").font(.caption).foregroundStyle(.secondary) }
                     }
                 }
