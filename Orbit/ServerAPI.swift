@@ -560,7 +560,10 @@ final class ServerAPI: ObservableObject {
             if Self.isRefreshCancellation(error) || Task.isCancelled { throw CancellationError() }
             throw APIError.message("Classera could not be reached. Check the connection and retry.")
         }
-        guard accessAllowed && epoch == studentsAccessGeneration && !Task.isCancelled else { throw CancellationError() }
+        guard accessAllowed && epoch == studentsAccessGeneration && !Task.isCancelled else {
+            if method != "GET" { throw ClasseraDirectoryFailure.uncertain }
+            throw CancellationError()
+        }
         guard let http = response as? HTTPURLResponse else { throw APIError.message("Classera returned an invalid response.") }
         if method == "POST" && path.hasSuffix("/messaging"), (400..<500).contains(http.statusCode),
            let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -570,6 +573,10 @@ final class ServerAPI: ObservableObject {
         }
         switch http.statusCode {
         case 200: return data
+        case 403 where (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String == "student_consent_required":
+            throw APIError.message("Only the student can opt out or remove a Classera subscription. Use Suspend instead.")
+        case 409 where (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String == "subscription_limit_reached":
+            throw APIError.message("One class per student, including paused classes. Enable the administrator override to add another class.")
         case 401, 403: throw APIError.message("Owner authentication failed. Check the Orbit connection in Settings.")
         case 409: throw ClasseraDirectoryFailure.conflict
         case 404, 501: throw APIError.message("The Classera directory API is not available on this server.")
@@ -595,6 +602,7 @@ final class ServerAPI: ObservableObject {
         return result
     }
     func manageClasseraStudent(student: ClasseraStudent, action: StudentManagementAction) async throws -> ClasseraStudent? {
+        guard action != .remove else { throw APIError.message("Only the student can remove their Classera subscription. Use Suspend instead.") }
         guard ClasseraPhone.valid(student.phone), action.isValid(for: student.activityStatus), accessAllowed, !actionBusy, !Task.isCancelled else { throw CancellationError() }
         actionBusy = true; actionProgress = "Updating Classera student…"
         defer { actionBusy = false; actionProgress = "" }
@@ -602,18 +610,27 @@ final class ServerAPI: ObservableObject {
         try await authorizeConfirmed("\(action.title) for this Classera student. This affects replies and daily reports.")
         guard accessAllowed && epoch == studentsAccessGeneration && !Task.isCancelled else { throw CancellationError() }
         let payload = ClasseraManagementPayload(expectedRevision: student.revision, activityStatus: action.activityStatus?.rawValue)
-        let path = "/api/classera-students/\(student.phone)" + (action == .remove ? "" : "/activity")
-        let data = try await classeraDirectoryData(path: path, method: action == .remove ? "DELETE" : "PUT", body: JSONEncoder().encode(payload))
-        let result: ClasseraStudent?
-        if action == .remove {
-            guard (try? JSONDecoder().decode(StudentMutationAcknowledgement.self, from: data))?.ok == true else { throw ClasseraDirectoryFailure.uncertain }
-            result = nil
-        } else {
-            guard let record = try? JSONDecoder().decode(ClasseraStudent.self, from: data), record.phone == student.phone, record.activityStatus == action.activityStatus else { throw ClasseraDirectoryFailure.uncertain }
-            result = record
-        }
+        let path = "/api/classera-students/\(student.phone)/activity"
+        let data = try await classeraDirectoryData(path: path, method: "PUT", body: JSONEncoder().encode(payload))
+        guard let result = try? JSONDecoder().decode(ClasseraStudent.self, from: data), result.phone == student.phone, result.activityStatus == action.activityStatus else { throw ClasseraDirectoryFailure.uncertain }
         servicesGeneration += 1; servicesRefresh?.cancel(); servicesRefresh = nil; servicesLoading = false
         classeraRecipients.removeAll(); await loadServices()
+        return result
+    }
+
+    func setClasseraSubscriptionOverride(student: ClasseraStudent, allowMultiple: Bool) async throws -> ClasseraStudent {
+        guard ClasseraPhone.valid(student.phone), student.subscriptionPolicy?.isValid == true,
+              student.subscriptionPolicy?.enforced == true, accessAllowed, !actionBusy, !Task.isCancelled else { throw CancellationError() }
+        actionBusy = true; actionProgress = "Updating class limit…"
+        defer { actionBusy = false; actionProgress = "" }
+        let epoch = studentsAccessGeneration
+        try await authorizeConfirmed(allowMultiple ? "Allow this Classera student more than one class." : "Restore the one-class limit. Existing subscriptions will be preserved.")
+        guard accessAllowed && epoch == studentsAccessGeneration && !Task.isCancelled else { throw CancellationError() }
+        let body = try JSONSerialization.data(withJSONObject: ["expected_revision": student.revision, "allow_multiple": allowMultiple])
+        let data = try await classeraDirectoryData(path: "/api/classera-students/\(student.phone)/subscription-policy", method: "PUT", body: body)
+        guard let result = try? JSONDecoder().decode(ClasseraStudent.self, from: data), result.phone == student.phone,
+              result.subscriptionPolicy?.isValid == true, result.subscriptionPolicy?.enforced == true,
+              result.subscriptionPolicy?.allowMultiple == allowMultiple else { throw ClasseraDirectoryFailure.uncertain }
         return result
     }
     func saveClasseraStudent(phone: String, payload: ClasseraStudentEdit) async throws -> ClasseraStudent {

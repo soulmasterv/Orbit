@@ -73,6 +73,26 @@ final class ClasseraStudentHistoryLayoutTests: XCTestCase {
         let api = api()
         try await capture("classera-subscriptions-paused-optedout-dark", content: ClasseraStudentEditor(api: api, phone: "201000000001"))
     }
+    func testOneClassLimitAndAdministratorOverrideLayouts() async throws {
+        for multiple in [false, true] {
+            let record: [String: Any] = ["phone": "201000000001", "profile_name": "Student A", "activity_status": "allowed",
+                "revision": String(repeating: "a", count: 64),
+                "subscriptions": [["class_name": "12F", "name": "Student A", "status": "paused", "ai_enabled": 1]],
+                "subscription_policy": ["version": 1, "enforced": true, "allow_multiple": multiple,
+                    "max_classes": multiple ? NSNull() as Any : 1, "occupied_classes": 1,
+                    "over_limit": false, "counted_statuses": ["active", "paused"]] as [String: Any]]
+            let data = try JSONSerialization.data(withJSONObject: record)
+            MockURLProtocol.handler = { request in
+                if request.url?.path.hasSuffix("/messaging") == true {
+                    return (200, Data(#"{"version":1,"phone":"201000000001","whatsapp_windows":[],"updated_at":1793536980}"#.utf8))
+                }
+                return (200, data)
+            }
+            let api = api()
+            try await capture(multiple ? "classera-class-limit-override-dark" : "classera-one-class-limit-dark",
+                              content: ClasseraStudentEditor(api: api, phone: "201000000001"))
+        }
+    }
     func testHistoryDetailDateTimeAndActualAIRequestLayout() async throws {
         let data = Data(#"{"id":"fixture","report":"12F 1/11/26","class_id":"12F","phone":"201000000001","student":"Student A","template":"classera_v9","message_id":"fixture-outbound","status":"read","created_at":1793536500,"updated_at":1793536860,"historical":false,"ai_analysis":{"status":"requested","requested_at":1793536980}}"#.utf8)
         let record = try JSONDecoder().decode(ClasseraDeliveryRecord.self, from: data)

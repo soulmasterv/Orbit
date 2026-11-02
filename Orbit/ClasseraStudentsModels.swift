@@ -27,6 +27,7 @@ struct ClasseraStudent: Codable, Identifiable {
     let revision: String
     let profileName: String?
     let whatsappWindows: [ClasseraWhatsAppWindow]?
+    let subscriptionPolicy: ClasseraSubscriptionPolicy?
     private let activityStatusValue: String?
     var activityStatus: StudentActivityStatus { StudentActivityStatus(rawValue: activityStatusValue ?? "") ?? .unknown }
     var id: String { phone }
@@ -37,7 +38,39 @@ struct ClasseraStudent: Codable, Identifiable {
     var isOptedOut: Bool {
         signupSession == nil && !subscriptions.isEmpty && subscriptions.allSatisfy { $0.status == "opted_out" }
     }
-    enum CodingKeys: String, CodingKey { case phone, subscriptions, revision; case signupSession = "signup_session", activityStatusValue = "activity_status", whatsappWindows = "whatsapp_windows", profileName = "profile_name" }
+    enum CodingKeys: String, CodingKey { case phone, subscriptions, revision; case signupSession = "signup_session", activityStatusValue = "activity_status", whatsappWindows = "whatsapp_windows", profileName = "profile_name", subscriptionPolicy = "subscription_policy" }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        phone = try c.decode(String.self, forKey: .phone)
+        subscriptions = try c.decode([ClasseraSubscription].self, forKey: .subscriptions)
+        revision = try c.decode(String.self, forKey: .revision)
+        signupSession = try c.decodeIfPresent(ClasseraSignup.self, forKey: .signupSession)
+        profileName = try c.decodeIfPresent(String.self, forKey: .profileName)
+        whatsappWindows = try c.decodeIfPresent([ClasseraWhatsAppWindow].self, forKey: .whatsappWindows)
+        activityStatusValue = try c.decodeIfPresent(String.self, forKey: .activityStatusValue)
+        // A missing/malformed rollout field must never hide the existing directory
+        // or grant the new controls permission to write.
+        subscriptionPolicy = try? c.decode(ClasseraSubscriptionPolicy.self, forKey: .subscriptionPolicy)
+    }
+}
+
+struct ClasseraSubscriptionPolicy: Codable {
+    let version: Int
+    let enforced: Bool
+    let allowMultiple: Bool
+    let maxClasses: Int?
+    let occupiedClasses: Int
+    let overLimit: Bool
+    let countedStatuses: [String]
+    var isValid: Bool {
+        version == 1 && occupiedClasses >= 0 && countedStatuses.count == 2 && Set(countedStatuses) == Set(["active", "paused"]) &&
+        (allowMultiple ? maxClasses == nil : maxClasses == 1) && overLimit == (!allowMultiple && occupiedClasses > 1)
+    }
+    enum CodingKeys: String, CodingKey {
+        case version, enforced
+        case allowMultiple = "allow_multiple", maxClasses = "max_classes", occupiedClasses = "occupied_classes"
+        case overLimit = "over_limit", countedStatuses = "counted_statuses"
+    }
 }
 
 enum ClasseraDirectoryFilter: String, CaseIterable, Identifiable {
@@ -92,6 +125,10 @@ struct ClasseraStudentEdit: Encodable {
     enum CodingKeys: String, CodingKey { case expectedRevision = "expected_revision", subscriptions }
     init(student: ClasseraStudent, rows: [ClasseraSubscription]) throws {
         let known = rows.filter(\.editable)
+        guard student.subscriptions.filter(\.editable).allSatisfy({ original in known.contains { $0.className == original.className } }),
+              known.filter({ ["opted_out", "paused", "disabled"].contains($0.status) }).allSatisfy({ row in
+                  student.subscriptions.contains { $0.className == row.className && $0.status == row.status && $0.aiEnabled == row.aiEnabled }
+              }) else { throw APIError.message("Only the student can opt out or remove a class subscription. Use Suspend to restrict access.") }
         guard student.signupSession == nil, student.revision.count == 64,
               Set(known.map(\.className)).count == known.count,
               known.allSatisfy({ !$0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && $0.name.count <= 120 &&

@@ -2,7 +2,7 @@ import json,sqlite3,tempfile,time,unittest,uuid
 from pathlib import Path
 from unittest.mock import Mock
 from flask import Flask
-from classera_students import Directory,register
+from classera_students import Directory,register,Invalid
 from classera_messaging import Messaging,Kapso,MessageProblem
 
 class MessagingTests(unittest.TestCase):
@@ -23,14 +23,15 @@ class MessagingTests(unittest.TestCase):
         self.provider=Fake();self.service=Messaging(self.directory,self.provider)
     def tearDown(self):self.tmp.cleanup()
     def body(self):return {"request_id":str(uuid.uuid4()),"class_name":"12F","text":"Only a fake send"}
-    def test_profile_creation_name_save_and_disabled_are_independent(self):
+    def test_profile_creation_and_rename_cannot_create_a_disabled_subscription(self):
         phone="201000000002";created=self.directory.create({"phone":phone,"name":"New Student"})
         self.assertEqual(created["subscriptions"],[])
         self.assertIn(phone,[x["phone"] for x in self.directory.listing()["students"]])
         renamed=self.directory.rename(phone,{"expected_revision":created["revision"],"name":"Renamed"})
         self.assertEqual(renamed["profile_name"],"Renamed")
-        saved=self.directory.save(phone,{"expected_revision":renamed["revision"],"subscriptions":[{"class_name":"12F","name":"Renamed","ai_enabled":None,"status":"disabled"}]})
-        self.assertEqual(saved["subscriptions"][0]["status"],"disabled")
+        with self.assertRaises(Invalid):
+            self.directory.save(phone,{"expected_revision":renamed["revision"],"subscriptions":[{"class_name":"12F","name":"Renamed","ai_enabled":None,"status":"disabled"}]})
+        self.assertEqual(self.directory.get(phone),renamed)
         self.assertNotIn(phone,self.directory.recipients("classera-1"))
         self.assertEqual(self.calls,[])
     def test_send_once_and_replay_does_not_dispatch_again(self):
@@ -100,6 +101,9 @@ class MessagingTests(unittest.TestCase):
         self.assertEqual(len(self.calls),1)
         self.assertEqual({r["id"] for r in results},{body["request_id"]})
     def test_disabled_class_does_not_remove_profile_or_other_class(self):
+        # Simulate an existing legacy row, never a new administrator disable action.
+        with self.directory.connect() as c:
+            c.execute("UPDATE subscribers SET status='disabled',ai_enabled=NULL WHERE phone=? AND class_name='12F'",(self.phone,))
         current=self.directory.get(self.phone)
         rows=current["subscriptions"]
         rows=[{k:r[k] for k in ("class_name","name","ai_enabled","status")} for r in rows]
@@ -111,3 +115,4 @@ class MessagingTests(unittest.TestCase):
         self.assertEqual(self.directory.recipients("classera-2"),[self.phone])
         with self.assertRaises(MessageProblem):self.service.submit(self.phone,self.body())
         self.assertEqual(self.calls,[])
+

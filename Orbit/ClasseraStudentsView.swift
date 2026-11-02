@@ -198,7 +198,7 @@ struct ClasseraStudentEditor: View {
     @State private var editName = false
     @State private var nameDraft = ""
     @State private var nameError: String?
-    @State private var removeClass: String?
+    @State private var pendingOverride: Bool?
     @State private var pendingAction: StudentManagementAction?
     @State private var reportClass: String?
     @State private var expandedClasses: Set<String> = []
@@ -269,7 +269,7 @@ struct ClasseraStudentEditor: View {
                     generation += 1; busy = false
                     if !preserve { loaded = false; student = nil; rows = []; detailFreshness.clear() }
                     windowStore.clear(preserveSnapshot: preserve); editName = false; nameDraft = ""
-                    pendingAction = nil; reportClass = nil; removeClass = nil
+                    pendingAction = nil; reportClass = nil; pendingOverride = nil
                 }
                 return
             }
@@ -285,13 +285,10 @@ struct ClasseraStudentEditor: View {
             if busy { loaded = false; detailFreshness.clear() }
             windowStore.clear(preserveSnapshot: true)
         }
-        .confirmationDialog("Remove this subscription?", isPresented: Binding(get: { removeClass != nil }, set: { if !$0 { removeClass = nil } }), titleVisibility: .visible) {
-            Button("Remove class", role: .destructive) {
-                rows.removeAll { $0.className == removeClass }; removeClass = nil
-                Task { await save() }
-            }
-            Button("Cancel", role: .cancel) { removeClass = nil }
-        } message: { Text("This saves immediately after device authorization. Other classes and the other student database remain unchanged.") }
+        .confirmationDialog(pendingOverride == true ? "Allow multiple classes?" : "Restore one-class limit?", isPresented: Binding(get: { pendingOverride != nil }, set: { if !$0 { pendingOverride = nil } }), titleVisibility: .visible) {
+            Button("Confirm") { if let value = pendingOverride { pendingOverride = nil; Task { await setOverride(value) } } }
+            Button("Cancel", role: .cancel) { pendingOverride = nil }
+        } message: { Text("Applies only to this student. Existing subscriptions stay saved. No WhatsApp message is sent.") }
         .confirmationDialog(pendingAction.map { "\($0.title)?" } ?? "Confirm action", isPresented: Binding(get: { pendingAction != nil }, set: { if !$0 { pendingAction = nil } }), titleVisibility: .visible, presenting: pendingAction) { action in
             Button(action.title, role: action == .block || action == .remove ? .destructive : nil) { Task { await manage(action) } }
             Button("Cancel", role: .cancel) {}
@@ -342,6 +339,24 @@ struct ClasseraStudentEditor: View {
                 .font(.caption).foregroundStyle(StudentPalette.secondary)
             Text("Students can resume pauses. Only an administrator can lift a suspension.")
                 .font(.caption).foregroundStyle(StudentPalette.secondary)
+            if let policy = student?.subscriptionPolicy, policy.isValid, policy.enforced {
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(policy.allowMultiple ? "Multiple classes allowed" : "One class per student").font(.subheadline.weight(.semibold))
+                        Text("Active and paused classes count.").font(.caption).foregroundStyle(StudentPalette.secondary)
+                    }
+                    Spacer()
+                    Button(policy.allowMultiple ? "Remove override" : "Override") { pendingOverride = !policy.allowMultiple }
+                        .font(.subheadline).disabled(!canSave)
+                }
+                if policy.overLimit {
+                    Text("Existing subscriptions exceed the limit. They stay saved; additional classes are blocked.")
+                        .font(.caption).foregroundStyle(.yellow)
+                }
+            } else {
+                Text("Class limit unavailable. Refresh after the server update to add a class or change an override.")
+                    .font(.caption).foregroundStyle(StudentPalette.secondary)
+            }
             if rows.isEmpty {
                 Text("No subscriptions").foregroundStyle(StudentPalette.secondary)
             }
@@ -378,7 +393,7 @@ struct ClasseraStudentEditor: View {
                 Menu {
                     ForEach(ClasseraSubscriptionMode.allCases) { mode in
                         Button(mode.rawValue) {
-                            guard canSave else { return }
+                            guard canSave && canAddClass else { return }
                             rows.append(ClasseraSubscription(className: klass, name: student?.profileName ?? rows.first?.name ?? student?.signupSession?.name ?? "",
                                                              aiEnabled: mode == .ai ? 1 : 0, status: "active"))
                             expandedClasses.insert(klass)
@@ -386,7 +401,7 @@ struct ClasseraStudentEditor: View {
                         }
                     }
                 } label: { Label("Add " + ClasseraClass.title(klass), systemImage: "plus.circle") }
-                .disabled(!canSave)
+                .disabled(!canSave || !canAddClass)
             }
             if student?.hasPendingClass == true {
                 NavigationLink { ClasseraMonitoringView(api: api) } label: {
@@ -532,7 +547,28 @@ struct ClasseraStudentEditor: View {
         if epoch == generation { busy = false }
     }
     private func managementActions(_ status: StudentActivityStatus) -> [StudentManagementAction] {
-        StudentManagementAction.available(for: status)
+        StudentManagementAction.available(for: status).filter { $0 != .remove && $0 != .block }
+    }
+    private var canAddClass: Bool {
+        guard let policy = student?.subscriptionPolicy, policy.isValid, policy.enforced else { return false }
+        return policy.allowMultiple || policy.occupiedClasses < 1
+    }
+    private func setOverride(_ value: Bool) async {
+        guard canSave, let student else { return }
+        generation += 1; let epoch = generation; busy = true
+        do {
+            let result = try await api.setClasseraSubscriptionOverride(student: student, allowMultiple: value)
+            guard epoch == generation && api.accessAllowed else { return }
+            self.student = result; rows = result.subscriptions; message = "Class limit updated. No message was sent."
+        } catch {
+            guard epoch == generation else { return }
+            busy = false
+            if error is ClasseraDirectoryFailure {
+                loaded = false; await reload()
+                message = "Latest settings loaded. Review the class limit before another attempt."
+            } else { message = DeviceAuthorization.isCancellation(error) ? "Change cancelled." : error.localizedDescription }
+        }
+        if epoch == generation { busy = false }
     }
     private func manage(_ action: StudentManagementAction) async {
         guard loaded, !busy, let student, action.isValid(for: student.activityStatus) else { return }

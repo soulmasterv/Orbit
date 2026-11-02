@@ -219,7 +219,7 @@ final class ClasseraStudentsTests: XCTestCase {
     }
     func testTimeoutAndConflictNeverRepeatMutation() async throws {
         let student = try JSONDecoder().decode(ClasseraStudent.self,from:record)
-        let payload = try ClasseraStudentEdit(student:student,rows:[])
+        let payload = try ClasseraStudentEdit(student:student,rows:student.subscriptions)
         for status in [0,409,401,422] {
             MockURLProtocol.requests = []
             MockURLProtocol.handler = { _ in if status == 0 { throw URLError(.timedOut) }; return (status,Data()) }
@@ -238,7 +238,7 @@ final class ClasseraStudentsTests: XCTestCase {
         XCTAssertThrowsError(try ClasseraStudentEdit(student:student,rows:rows))
         XCTAssertFalse(ClasseraPhone.valid("+201000000001")); XCTAssertFalse(ClasseraPhone.valid("abc"))
         XCTAssertTrue(ClasseraPhone.valid(student.phone))
-        let payload = try ClasseraStudentEdit(student:student,rows:[])
+        let payload = try ClasseraStudentEdit(student:student,rows:student.subscriptions)
         do { _ = try await api(authorize:{ _ in throw CancellationError() }).saveClasseraStudent(phone:student.phone,payload:payload); XCTFail() } catch {}
         XCTAssertTrue(MockURLProtocol.requests.isEmpty)
         let locked=api(); locked.setAccessAllowed(false)
@@ -247,7 +247,7 @@ final class ClasseraStudentsTests: XCTestCase {
     }
     func testLockDuringAuthorizationCannotSend() async throws {
         let student=try JSONDecoder().decode(ClasseraStudent.self,from:record)
-        let payload=try ClasseraStudentEdit(student:student,rows:[])
+        let payload=try ClasseraStudentEdit(student:student,rows:student.subscriptions)
         var server: ServerAPI!
         server=api(authorize:{ _ in server.setAccessAllowed(false) })
         do { _ = try await server.saveClasseraStudent(phone:student.phone,payload:payload); XCTFail() } catch {}
@@ -255,7 +255,7 @@ final class ClasseraStudentsTests: XCTestCase {
     }
     func testManagementPutDeleteAndNoMutationRetry() async throws {
         let student = try JSONDecoder().decode(ClasseraStudent.self, from: record)
-        for action in [StudentManagementAction.block, .suspend, .remove] {
+        for action in [StudentManagementAction.block, .suspend] {
             MockURLProtocol.requests = []
             MockURLProtocol.handler = { _ in throw URLError(.timedOut) }
             do { _ = try await api().manageClasseraStudent(student: student, action: action); XCTFail() }

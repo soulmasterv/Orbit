@@ -84,7 +84,11 @@ final class ClasseraUXTests: XCTestCase {
         }
         let record = try JSONDecoder().decode(ClasseraStudent.self, from: student)
         let legacy = ClasseraSubscription(className: "12F", name: "Name", aiEnabled: nil, status: "disabled", joinedAt: "old")
-        _ = try ClasseraStudentEdit(student: record, rows: [legacy])
+        XCTAssertThrowsError(try ClasseraStudentEdit(student: record, rows: [legacy]))
+        var existing = try XCTUnwrap(JSONSerialization.jsonObject(with: student) as? [String: Any])
+        existing["subscriptions"] = [["class_name": "12F", "name": "Name", "ai_enabled": NSNull(), "status": "disabled"]]
+        let preserved = try JSONDecoder().decode(ClasseraStudent.self, from: JSONSerialization.data(withJSONObject: existing))
+        _ = try ClasseraStudentEdit(student: preserved, rows: [legacy])
         XCTAssertNil(ClasseraSubscriptionMode.current(legacy))
         XCTAssertEqual(ClasseraSubscriptionSummary.modeLabel(legacy), "Suspended")
         XCTAssertEqual(legacy.status, "disabled")

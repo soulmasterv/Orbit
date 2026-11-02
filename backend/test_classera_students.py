@@ -121,8 +121,8 @@ class DirectoryTests(unittest.TestCase):
         joined = current["subscriptions"][0]["joined_at"]
         self.assertEqual(self.put([self.row(ai=0)]).status_code,200)
         self.assertEqual(self.directory.get(self.phone)["subscriptions"][0]["joined_at"],joined)
-        self.assertEqual(self.put([]).status_code,200)
-        self.assertEqual([r["class_name"] for r in self.directory.get(self.phone)["subscriptions"]],["OLD"])
+        self.assertEqual(self.put([]).status_code,403)
+        self.assertEqual([r["class_name"] for r in self.directory.get(self.phone)["subscriptions"]],["12F","OLD"])
         self.assertEqual(len(self.directory.get("201000000002")["subscriptions"]),1)
     def test_signup_session_preserved_and_conflicts(self):
         with sqlite3.connect(self.path) as c:
@@ -149,9 +149,9 @@ class DirectoryTests(unittest.TestCase):
             self.assertEqual(can_reply('+'+self.phone,self.path),status=='allowed')
             self.assertEqual(self.directory.recipients('classera-1'),[self.phone] if status=='allowed' else [])
         before=self.directory.get(self.phone)
-        self.assertEqual(self.client.delete(self.url,headers=self.headers,json={'expected_revision':'0'*64}).status_code,409)
-        self.assertEqual(self.client.delete(self.url,headers=self.headers,json={'expected_revision':before['revision']}).status_code,200)
-        self.assertEqual(self.directory.get(self.phone)['subscriptions'],[])
+        self.assertEqual(self.client.delete(self.url,headers=self.headers,json={'expected_revision':'0'*64}).status_code,403)
+        self.assertEqual(self.client.delete(self.url,headers=self.headers,json={'expected_revision':before['revision']}).status_code,403)
+        self.assertEqual(self.directory.get(self.phone)['subscriptions'],before['subscriptions'])
         self.assertTrue(can_reply(self.phone,self.path))
 
     def test_reply_gate_fails_closed(self):

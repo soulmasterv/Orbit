@@ -9,12 +9,14 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 from flask import jsonify, request
+from classera_subscription_policy import prepare_schema, read as subscription_policy, set_override, is_limit_error
 
 CLASSES = {"classera-1": "12F", "classera-2": "12E"}
 DB = "/home/local/classera/shared/subscribers.sqlite3"
 
 class Invalid(Exception): pass
 class Conflict(Exception): pass
+class ConsentRequired(Exception): pass
 
 def phone_value(value):
     if not isinstance(value, str) or not re.fullmatch(r"[1-9][0-9]{7,14}", value):
@@ -36,6 +38,7 @@ class Directory:
 
     def migrate(self):
         with self.connect() as c:
+            prepare_schema(c)
             c.execute("""CREATE TABLE IF NOT EXISTS orbit_classera_profiles(
                 phone TEXT PRIMARY KEY,name TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL)""")
 
@@ -84,9 +87,10 @@ class Directory:
                 latest=max((r for r in rows if r["class_name"] in CLASSES.values()),key=lambda r:r["updated_at"],default=None)
                 if latest and datetime.fromisoformat(latest["updated_at"])>datetime.fromisoformat(profile["updated_at"]):profile_name=latest["name"]
             except (ValueError,TypeError):pass
-        raw = json.dumps([phone, rows, session, dict(control) if control else None, dict(profile) if profile else None], ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        policy=subscription_policy(conn,phone)
+        raw = json.dumps([phone, rows, session, dict(control) if control else None, dict(profile) if profile else None,policy], ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         return {"phone": phone, "subscriptions": rows, "signup_session": session,
-                "activity_status": activity, "profile_name": profile_name,
+                "activity_status": activity, "profile_name": profile_name, "subscription_policy":policy,
                 "revision": hashlib.sha256(raw.encode()).hexdigest()}
 
     def get(self, phone):
@@ -125,17 +129,16 @@ class Directory:
             # Do not overwrite a live WhatsApp onboarding conversation.
             if current["signup_session"] is not None: raise Conflict()
             existing={row['class_name']:row for row in current['subscriptions']}
+            if any(klass in CLASSES.values() and klass not in seen for klass in existing):
+                raise ConsentRequired()
             for row in rows:
-                if row['status'] in ('opted_out','paused'):
+                if row['status'] in ('opted_out','paused','disabled'):
                     original=existing.get(row['class_name'])
                     # Preserve existing self-service states during other edits;
                     # this route cannot invent them or alter their AI state.
                     if not original or original['status']!=row['status'] or row['ai_enabled']!=original['ai_enabled']:
                         raise Invalid()
             ts = datetime.now(ZoneInfo("Africa/Cairo")).isoformat()
-            for klass in CLASSES.values():
-                if klass not in seen:
-                    conn.execute("DELETE FROM subscribers WHERE phone=? AND class_name=?", (phone, klass))
             for row in rows:
                 conn.execute("""INSERT INTO subscribers(phone,name,class_name,ai_enabled,status,joined_at,updated_at)
                     VALUES(?,?,?,?,?,?,?) ON CONFLICT(phone,class_name) DO UPDATE SET
@@ -152,6 +155,7 @@ class Directory:
 
     def manage(self, phone, data, remove=False):
         phone_value(phone)
+        if remove: raise ConsentRequired()
         keys = {'expected_revision'} if remove else {'expected_revision','activity_status'}
         if not isinstance(data,dict) or set(data)!=keys: raise Invalid()
         revision=data.get('expected_revision')
@@ -162,15 +166,22 @@ class Directory:
             conn.execute('BEGIN IMMEDIATE')
             current=self.record(conn,phone)
             if not hmac.compare_digest(current['revision'],revision): raise Conflict()
-            if remove:
-                conn.execute('DELETE FROM subscribers WHERE phone=?',(phone,))
-                conn.execute('DELETE FROM signup_sessions WHERE phone=?',(phone,))
-                conn.execute('DELETE FROM orbit_student_controls WHERE phone=?',(phone,))
-                conn.execute('DELETE FROM orbit_classera_profiles WHERE phone=?',(phone,))
-                return {'ok':True}
             conn.execute('INSERT INTO orbit_student_controls(phone,activity_status,updated_at) VALUES(?,?,?) ON CONFLICT(phone) DO UPDATE SET activity_status=excluded.activity_status,updated_at=excluded.updated_at',
                 (phone,status,datetime.now(ZoneInfo('Africa/Cairo')).isoformat()))
             return self.record(conn,phone)
+
+    def set_subscription_policy(self,phone,data):
+        phone_value(phone)
+        if not isinstance(data,dict) or set(data)!={'expected_revision','allow_multiple'} or type(data['allow_multiple']) is not bool:raise Invalid()
+        revision=data['expected_revision']
+        if not isinstance(revision,str) or not re.fullmatch(r'[a-f0-9]{64}',revision):raise Invalid()
+        with self.connect() as c:
+            c.execute('BEGIN IMMEDIATE')
+            current=self.record(c,phone)
+            if not hmac.compare_digest(current['revision'],revision):raise Conflict()
+            if not current['subscription_policy']['enforced']:raise sqlite3.OperationalError('Policy not activated')
+            set_override(c,phone,data['allow_multiple'],datetime.now(ZoneInfo('Africa/Cairo')).isoformat())
+            return self.record(c,phone)
 
 def register(app, owner_token, directory=None):
     directory = directory or Directory()
@@ -190,6 +201,7 @@ def register(app, owner_token, directory=None):
                 data=request.get_json(silent=True)
                 if request.method=='POST':result=directory.create(data)
                 elif request.path.endswith('/name'):result=directory.rename(phone,data)
+                elif request.path.endswith('/subscription-policy'):result=directory.set_subscription_policy(phone,data)
                 elif request.method=='DELETE' or request.path.endswith('/activity'):
                     result=directory.manage(phone,data,remove=request.method=='DELETE')
                 else: result = directory.save(phone,data)
@@ -197,11 +209,16 @@ def register(app, owner_token, directory=None):
             return jsonify(result), 200
         except Invalid: return jsonify(error="invalid_input"), 422
         except Conflict: return jsonify(error="review_latest_or_finish_signup"), 409
+        except ConsentRequired: return jsonify(error="student_consent_required"), 403
+        except sqlite3.IntegrityError as error:
+            if is_limit_error(error):return jsonify(error='subscription_limit_reached'),409
+            return jsonify(error='directory_unavailable'),503
         except (sqlite3.Error, OSError): return jsonify(error="directory_unavailable"), 503
 
     app.add_url_rule("/api/classera-students", "classera_student_list", handle, methods=["GET","POST"])
     app.add_url_rule("/api/classera-students/<phone>", "classera_student_detail", handle, methods=["GET", "PUT", "DELETE"])
     app.add_url_rule("/api/classera-students/<phone>/activity", "classera_student_activity", handle, methods=["PUT"])
+    app.add_url_rule("/api/classera-students/<phone>/subscription-policy", "classera_subscription_policy", handle, methods=["PUT"])
 
     app.add_url_rule("/api/classera-students/<phone>/name", "classera_student_name", handle, methods=["PUT"])
     from classera_messaging import register as register_messaging
