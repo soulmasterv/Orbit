@@ -27,6 +27,7 @@ jobs:
           python3 -m venv .ci-venv
           .ci-venv/bin/pip install 'Flask>=3.0,<4' 'requests>=2.32,<3'
           .ci-venv/bin/python -m unittest discover -s backend -p 'test_*.py'
+          .ci-venv/bin/python -m unittest discover -s backend/phone_pilot -p 'test_*.py'
       - name: Test JARVIS frontend lifecycle
         run: node --test backend/jarvis/frontend.test.cjs backend/jarvis/app-sessions.test.mjs
       - name: Generate Xcode project

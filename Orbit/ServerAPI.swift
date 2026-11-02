@@ -69,6 +69,11 @@ final class ServerAPI: ObservableObject {
     @Published private(set) var servicesUpdatedAt: Date?
     @Published private(set) var latestReportsContext = UUID()
 
+    private var phonePilotGeneration = 0
+    private var phonePilotRefreshed: Date?
+    private var phonePilotContext: UUID?
+    private var phonePilotEpoch: Int?
+    private var phonePilotBase: String?
     private let session: URLSession
     private let tokenProvider: () -> String
     private let authorize: (String) async throws -> Void
@@ -1336,3 +1341,59 @@ extension ServerAPI {
 }
 
 
+
+// Append this extension to ServerAPI.swift so it reuses the existing private session.
+extension ServerAPI {
+    var phonePilotStatusIsFresh: Bool {
+        guard let refreshed = phonePilotRefreshed else { return false }
+        return Date().timeIntervalSince(refreshed) < 20 && phonePilotContext == latestReportsContext
+            && phonePilotEpoch == studentsAccessGeneration && phonePilotBase == activeBaseURL
+    }
+    func invalidatePhonePilotStatus() { phonePilotGeneration += 1; phonePilotRefreshed = nil }
+    private func phonePilotRequest<T: Decodable>(_ path: String, method: String = "GET", body: Data? = nil) async throws -> T {
+        guard accessAllowed && !previewMode && !Task.isCancelled else { throw CancellationError() }
+        let context = latestReportsContext
+        let epoch = studentsAccessGeneration
+        let originalBase = activeBaseURL
+        var command = try request(path: path, method: method, endpoint: originalBase)
+        command.timeoutInterval = 25
+        command.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        command.httpBody = body
+        let (data, response) = try await session.data(for: command)
+        guard accessAllowed && context == latestReportsContext && epoch == studentsAccessGeneration && originalBase == activeBaseURL && !Task.isCancelled else { throw CancellationError() }
+        guard let response = response as? HTTPURLResponse, response.statusCode == 200, response.url == command.url, data.count < 32768 else { throw URLError(.badServerResponse) }
+        return try JSONDecoder().decode(T.self, from: data)
+    }
+    func phonePilotStatus() async throws -> OrbitPhonePilotStatus {
+        invalidatePhonePilotStatus()
+        let generation = phonePilotGeneration
+        let result: OrbitPhonePilotStatus = try await phonePilotRequest("/api/jarvis-phone/status")
+        guard generation == phonePilotGeneration else { throw CancellationError() }
+        guard result.version == 1 else { throw URLError(.cannotParseResponse) }
+        phonePilotRefreshed = Date()
+        phonePilotContext = latestReportsContext
+        phonePilotEpoch = studentsAccessGeneration
+        phonePilotBase = activeBaseURL
+        return result
+    }
+    func phonePilotSend(_ command: OrbitPhonePilotCommand) async throws -> OrbitPhonePilotResult {
+        guard canControl && !previewMode && !Task.isCancelled,
+              command.isValid, phonePilotStatusIsFresh else { throw CancellationError() }
+        let context = latestReportsContext
+        let epoch = studentsAccessGeneration
+        let endpoint = activeBaseURL
+        actionBusy = true
+        actionProgress = "Authorize phone controls…"
+        defer { actionBusy = false; actionProgress = "" }
+        try await authorizeConfirmed(command.confirmationMessage)
+        guard accessAllowed && !needsVerification && connection == .connected,
+              UIApplication.shared.applicationState == .active,
+              context == latestReportsContext && epoch == studentsAccessGeneration,
+              endpoint == activeBaseURL && phonePilotStatusIsFresh && !Task.isCancelled else { throw CancellationError() }
+        // Consume freshness before the only POST, including uncertain outcomes.
+        phonePilotRefreshed = nil
+        let result: OrbitPhonePilotResult = try await phonePilotRequest("/api/jarvis-phone/commands", method: "POST", body: JSONEncoder().encode(command))
+        guard result.request_id == command.request_id, ["applied", "pending_phone", "failed", "unknown"].contains(result.status) else { throw URLError(.cannotParseResponse) }
+        return result
+    }
+}

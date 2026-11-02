@@ -59,3 +59,8 @@ Download the successful run's IPA artifact, extract its ZIP and import
 `Orbit.ipa` into SideStore. Retain your Apple account and bundle identity
 for in-place updates. Real-device biometric presentation and live integration health
 still require verification on your iPhone.
+
+## Optional JARVIS Phone pilot
+
+JARVIS options now includes Phone controls. Its backend must be activated separately;
+see [the pilot handoff](docs/PHONE_PILOT.md) for controls, safeguards and verification.
