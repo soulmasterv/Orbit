@@ -1128,6 +1128,10 @@ extension ServerAPI {
 
 
 extension ServerAPI {
+    func classeraActionsHistory() async throws -> ClasseraActionsHistory {
+        try await classeraMonitoringRequest("/api/classera/report-settings/history")
+    }
+
     private func classeraMonitoringRequest<T: ClasseraVersioned>(_ path: String,
         query: [String: String] = [:], method: String = "GET", body: Data? = nil) async throws -> T {
         guard accessAllowed && !previewMode && !Task.isCancelled else { throw CancellationError() }

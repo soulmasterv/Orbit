@@ -73,6 +73,18 @@ struct ClasseraStudentsView: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 12) {
+                    NavigationLink {
+                        ClasseraActionsView(api: api)
+                    } label: {
+                        HStack {
+                            Label("Actions", systemImage: "slider.horizontal.3")
+                            Spacer()
+                            Image(systemName: "chevron.right").font(.caption.weight(.semibold))
+                        }
+                        .padding(.horizontal, 12)
+                        .frame(minHeight: 44)
+                        .background(StudentPalette.surface, in: RoundedRectangle(cornerRadius: 9))
+                    }.buttonStyle(.plain)
                     StudentSearchField(text: $search)
                     HStack {
                         Text("\(filtered.count) \(directoryFilter == .optedOut ? "opted out" : "subscribers")")

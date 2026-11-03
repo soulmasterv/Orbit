@@ -4,7 +4,7 @@ Bulk preferences share the existing subscriber database. Notices remain unavaila
 unless a verified producer/template adapter explicitly advertises compatibility.
 """
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 import hashlib
 import hmac
 import json
@@ -78,6 +78,10 @@ class ReportSettings:
               PRIMARY KEY(class_id,batch_id));
             ''')
 
+            c.execute('BEGIN IMMEDIATE')
+            if 'scheduled_report_date' not in {row['name'] for row in c.execute('PRAGMA table_info(orbit_report_notices)')}:
+                c.execute('ALTER TABLE orbit_report_notices ADD COLUMN scheduled_report_date TEXT')
+
     @staticmethod
     def class_name(class_id):
         if class_id not in CLASSES:
@@ -93,13 +97,13 @@ class ReportSettings:
             EXISTS(SELECT 1 FROM signup_sessions p WHERE p.phone=s.phone) AS signup
           FROM subscribers s LEFT JOIN orbit_student_controls a ON a.phone=s.phone
           WHERE s.class_name=? ORDER BY s.phone''', (name,))]
-        latest = c.execute('SELECT id,text,state,batch_id,created_at FROM orbit_report_notices '
+        latest = c.execute('SELECT id,text,state,batch_id,created_at,scheduled_report_date FROM orbit_report_notices '
                            'WHERE class_id=? ORDER BY created_at DESC,rowid DESC LIMIT 1', (class_id,)).fetchone()
         latest = dict(latest) if latest else None
         if latest:
             latest['outcomes'] = {r['outcome']: r['n'] for r in c.execute('SELECT outcome,COUNT(*) n FROM orbit_report_notice_targets WHERE notice_id=? GROUP BY outcome', (latest['id'],))}
         eligible = [r for r in rows if self._eligible(r)]
-        queued = c.execute("SELECT id,text,state,batch_id,created_at FROM orbit_report_notices WHERE class_id=? AND state='queued'", (class_id,)).fetchone()
+        queued = c.execute("SELECT id,text,state,batch_id,created_at,scheduled_report_date FROM orbit_report_notices WHERE class_id=? AND state='queued'", (class_id,)).fetchone()
         notice_available = bool(self.notice_ready())
         return {'version': 1, 'class_id': class_id, 'class_name': name,
             'revision': digest([rows, dict(queued) if queued else None, latest]),
@@ -119,6 +123,28 @@ class ReportSettings:
         with self.connect(True) as c:
             c.execute('BEGIN')
             return self._snapshot(c, class_id)
+
+    def history(self):
+        with self.connect(True) as c:
+            c.execute('BEGIN')
+            operations = [dict(row) for row in c.execute("""
+                SELECT request_id, class_id, kind, created_at,
+                       json_extract(result_json, '$.affected_count') AS affected_count
+                FROM orbit_report_admin_operations
+                WHERE kind IN ('bulk-ai', 'next-notice')
+                ORDER BY created_at DESC, rowid DESC LIMIT 100
+            """)]
+            notices = [dict(row) for row in c.execute("""
+                SELECT id, class_id, text, state, created_at, scheduled_report_date
+                FROM orbit_report_notices
+                ORDER BY created_at DESC, rowid DESC LIMIT 100
+            """)]
+            for notice in notices:
+                notice['outcomes'] = dict(c.execute("""
+                    SELECT outcome, COUNT(*) FROM orbit_report_notice_targets
+                    WHERE notice_id=? GROUP BY outcome
+                """, (notice['id'],)).fetchall())
+            return {'version': 1, 'operations': operations, 'notices': notices}
 
     def preview(self, class_id, body):
         self._ai_body(body)
@@ -160,6 +186,8 @@ class ReportSettings:
     def mutate(self, class_id, kind, body):
         name = self.class_name(class_id)
         expected = {'request_id', 'expected_revision', 'ai_enabled', 'expected_affected_count'} if kind == 'bulk-ai' else {'request_id', 'expected_revision', 'text'}
+        if kind == 'next-notice' and isinstance(body, dict) and 'scheduled_report_date' in body:
+            expected.add('scheduled_report_date')
         if not isinstance(body, dict) or set(body) != expected:
             raise Problem('invalid_request')
         request_id = identifier(body['request_id']); revision_value(body['expected_revision'])
@@ -168,6 +196,13 @@ class ReportSettings:
             if type(body['expected_affected_count']) is not int or not 0 <= body['expected_affected_count'] <= 100000:
                 raise Problem('invalid_request')
         elif kind == 'next-notice':
+            scheduled = body.get('scheduled_report_date')
+            if scheduled is not None:
+                try:
+                    if not isinstance(scheduled, str) or date.fromisoformat(scheduled).isoformat() != scheduled:
+                        raise ValueError()
+                except ValueError:
+                    raise Problem('invalid_request')
             text = body['text']
             if not isinstance(text, str) or len(text) > 1000 or any(ord(ch) < 32 and ch not in '\n\t' for ch in text):
                 raise Problem('invalid_request')
@@ -203,7 +238,8 @@ class ReportSettings:
                     raise Problem('notice_contract_unverified', 503)
                 c.execute("UPDATE orbit_report_notices SET state='cancelled' WHERE class_id=? AND state='queued'", (class_id,))
                 if body['text'].strip():
-                    c.execute("INSERT INTO orbit_report_notices VALUES(?,?,?,'queued',NULL,?)", (request_id, class_id, body['text'].strip(), now))
+                    c.execute("INSERT INTO orbit_report_notices(id,class_id,text,state,created_at,scheduled_report_date) VALUES(?,?,?,'queued',?,?)",
+                              (request_id, class_id, body['text'].strip(), now, scheduled))
             result = {'version': 1, 'request_id': request_id, 'class_id': class_id,
                 'kind': kind, 'status': 'completed', 'affected_count': affected,
                 'settings': self._snapshot(c, class_id)}
@@ -211,7 +247,7 @@ class ReportSettings:
                 (request_id, class_id, kind, body_hash, json.dumps(result), now))
             return result
 
-    def claim_notice(self, class_id, batch_id, recipients, *, forced=False, single=False, already_started=False):
+    def claim_notice(self, class_id, batch_id, recipients, *, forced=False, single=False, already_started=False, report_date=None):
         """Producer hook. One immutable class batch; forced/single sends never consume.
 
         It does not send. A verified sender must call only after report generation
@@ -235,7 +271,7 @@ class ReportSettings:
             if already_started:
                 return None
             queued = c.execute("SELECT * FROM orbit_report_notices WHERE class_id=? AND state='queued'", (class_id,)).fetchone()
-            if not queued:
+            if not queued or (queued['scheduled_report_date'] and queued['scheduled_report_date'] != report_date):
                 return None
             c.execute("UPDATE orbit_report_notices SET state='claimed',batch_id=? WHERE id=?", (batch_id, queued['id']))
             c.execute('UPDATE orbit_notice_batches SET notice_id=? WHERE class_id=? AND batch_id=?', (queued['id'], class_id, batch_id))
@@ -271,7 +307,7 @@ def register(app, owner_token, settings=None):
         settings = ReportSettings(notice_ready=producer_ready)
     settings.migrate()
 
-    def handle(class_id, action=None, request_id=None):
+    def handle(class_id=None, action=None, request_id=None):
         supplied = request.headers.get('Authorization', '')
         if not owner_token or not hmac.compare_digest(supplied.encode(), ('Bearer ' + owner_token).encode()):
             return jsonify(error='unauthorized'), 401
@@ -281,7 +317,10 @@ def register(app, owner_token, settings=None):
             if request.method == 'GET':
                 if request.args:
                     raise Problem('invalid_request')
-                result = settings.operation(class_id, request_id) if request_id else settings.snapshot(class_id)
+                if action == 'history':
+                    result = settings.history()
+                else:
+                    result = settings.operation(class_id, request_id) if request_id else settings.snapshot(class_id)
             else:
                 if request.content_length is None or request.content_length > 8192 or not request.is_json:
                     raise Problem('invalid_request')
@@ -299,6 +338,8 @@ def register(app, owner_token, settings=None):
             return jsonify(error='report_settings_unavailable'), 503
 
     root = '/api/classera/report-settings/<class_id>'
+    app.add_url_rule('/api/classera/report-settings/history', 'orbit_report_history',
+                     handle, defaults={'action': 'history'}, methods=['GET'])
     app.add_url_rule(root, 'orbit_report_settings', handle, methods=['GET'])
     app.add_url_rule(root + '/bulk-ai/preview', 'orbit_report_ai_preview', handle, defaults={'action': 'preview'}, methods=['POST'])
     app.add_url_rule(root + '/bulk-ai/operations', 'orbit_report_ai_apply', handle, defaults={'action': 'bulk-ai'}, methods=['POST'])

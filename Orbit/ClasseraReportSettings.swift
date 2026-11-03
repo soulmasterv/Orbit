@@ -236,7 +236,128 @@ final class ClasseraReportSettingsStore: ObservableObject {
     }
 }
 
+struct ClasseraActionsView: View {
+    @ObservedObject var api: ServerAPI
+
+    var body: some View {
+        List {
+            NavigationLink("Custom notice") {
+                ClasseraReportSettingsView(api: api, section: .notice)
+            }
+            NavigationLink("Class AI settings") {
+                ClasseraReportSettingsView(api: api, section: .ai)
+            }
+            NavigationLink("History") {
+                ClasseraActionsHistoryView(api: api)
+            }
+        }
+        .modifier(StudentAppearance())
+        .navigationTitle("Actions")
+        .toolbar(.visible, for: .tabBar)
+    }
+}
+
+struct ClasseraActionsHistory: ClasseraVersioned {
+    struct Operation: Decodable, Identifiable {
+        let request_id: String
+        let class_id: String
+        let kind: String
+        let created_at: String
+        let affected_count: Int?
+        var id: String { request_id }
+    }
+
+    struct Notice: Decodable, Identifiable {
+        let id: String
+        let class_id: String
+        let text: String
+        let state: String
+        let created_at: String
+        let scheduled_report_date: String?
+        let outcomes: [String: Int]
+    }
+
+    let version: Int
+    let operations: [Operation]
+    let notices: [Notice]
+}
+
+struct ClasseraActionsHistoryView: View {
+    @ObservedObject var api: ServerAPI
+    @State private var history: ClasseraActionsHistory?
+    @State private var failed = false
+
+    var body: some View {
+        List {
+            if api.accessAllowed, let history {
+                Section("Notices") {
+                    if history.notices.isEmpty { Text("No recorded notices") }
+                    ForEach(history.notices) { notice in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(notice.text)
+                            Text("\(classLabel(notice.class_id)) · \(notice.state.capitalized)")
+                            if let date = notice.scheduled_report_date { Text("Report date \(date)") }
+                            timestamp(notice.created_at)
+                            ForEach(notice.outcomes.keys.sorted(), id: \.self) { key in
+                                LabeledContent(ClasseraReportSettingsView.outcomeLabel(key), value: String(notice.outcomes[key] ?? 0))
+                            }
+                        }
+                    }
+                }
+                Section("Class AI changes") {
+                    let changes = history.operations.filter { $0.kind == "bulk-ai" }
+                    if changes.isEmpty { Text("No recorded class AI changes") }
+                    ForEach(changes) { operation in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(classLabel(operation.class_id))
+                            if let count = operation.affected_count { Text("\(count) subscriptions changed") }
+                            timestamp(operation.created_at)
+                        }
+                    }
+                }
+            } else if failed && api.accessAllowed {
+                Button("History unavailable. Retry") { Task { await load() } }
+            } else if api.accessAllowed {
+                ProgressView()
+            }
+        }
+        .modifier(StudentAppearance())
+        .navigationTitle("History")
+        .task(id: api.latestReportsContext) { await load() }
+        .refreshable { await load() }
+        .onChange(of: api.accessAllowed) { _, allowed in
+            if !allowed { history = nil }
+        }
+    }
+
+    private func load() async {
+        let context = api.latestReportsContext
+        guard api.accessAllowed else { return }
+        do {
+            let result = try await api.classeraActionsHistory()
+            guard !Task.isCancelled, api.accessAllowed, context == api.latestReportsContext else { return }
+            history = result
+            failed = false
+        } catch {
+            guard !Task.isCancelled, api.accessAllowed, context == api.latestReportsContext else { return }
+            history = nil
+            failed = true
+        }
+    }
+
+    private func classLabel(_ id: String) -> String {
+        ["classera-1": "Classera 1 (F)", "classera-2": "Classera 2 (E)"][id] ?? id
+    }
+
+    private func timestamp(_ value: String) -> Text {
+        let format = Date.ISO8601FormatStyle(includingFractionalSeconds: true)
+        return (try? format.parse(value)).map { Text($0.formatted(date: .abbreviated, time: .shortened)) } ?? Text(value)
+    }
+}
+
 struct ClasseraReportSettingsView: View {
+    enum Section { case all, notice, ai }
+    private let section: Section
     @ObservedObject var api: ServerAPI
     @StateObject private var store: ClasseraReportSettingsStore
     @Environment(\.scenePhase) private var phase
@@ -245,7 +366,8 @@ struct ClasseraReportSettingsView: View {
     @State private var noticeConfirmation: NoticeReview?
     @State private var cancelConfirmation = false
     private struct NoticeReview: Identifiable { let id = UUID(); let text: String; let revision: String }
-    init(api: ServerAPI, store: ClasseraReportSettingsStore? = nil) {
+    init(api: ServerAPI, store: ClasseraReportSettingsStore? = nil, section: Section = .all) {
+        self.section = section
         self.api = api; _store = StateObject(wrappedValue: store ?? ClasseraReportSettingsStore())
     }
     var body: some View {
@@ -268,13 +390,16 @@ struct ClasseraReportSettingsView: View {
                     }
                 }
                 if let value = store.settings {
+                    if section != .ai {
                     Panel {
                         VStack(alignment: .leading, spacing: 10) {
                             Text("Next report notice").font(.headline)
                             Text("For the next class-wide daily report only. Manual one-person sends do not consume it.").font(.caption).foregroundStyle(.secondary)
                             Text("Uses plain text only inside a verified 24-hour window; otherwise it requires the approved classera_wa_notice template. Unavailable notices are skipped and recorded; report delivery continues.").font(.caption).foregroundStyle(.secondary)
                             TextEditor(text: Binding(get: { store.draft }, set: store.setDraft))
-                                .frame(minHeight: 110).scrollContentBackground(.hidden)
+                                .frame(minHeight: 175).scrollContentBackground(.hidden)
+                                .padding(8)
+                                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(StudentPalette.accent))
                                 .disabled(!value.capabilities.next_notice || !store.canMutate)
                                 .accessibilityLabel("Next report notice")
                             Text("\(store.draft.count)/1000 characters").font(.caption).foregroundStyle(.secondary)
@@ -293,6 +418,8 @@ struct ClasseraReportSettingsView: View {
                             }.disabled(!store.canMutate || !value.capabilities.next_notice || store.draft.count > 1000 || store.draft == (value.queued_notice?.text ?? ""))
                         }
                     }
+                    }
+                    if section != .notice {
                     Panel {
                         VStack(alignment: .leading, spacing: 12) {
                             Text("Class subscription preferences").font(.headline)
@@ -313,11 +440,12 @@ struct ClasseraReportSettingsView: View {
                         }
                     }
                 }
+                }
                 Button("Refresh settings") { Task { await store.refresh(api: api, classID: classID) } }
                     .disabled(store.busy || store.loading || !api.accessAllowed)
             }.padding(16)
         }.modifier(StudentAppearance())
-        .navigationTitle("Report settings").navigationBarTitleDisplayMode(.inline)
+        .navigationTitle(section == .notice ? "Custom notice" : section == .ai ? "Class AI settings" : "Report settings").navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(store.busy)
         .task(id: "\(classID)|\(phase == .active)|\(api.accessAllowed)|\(api.baseURL)|\(api.latestReportsContext)") {
             guard api.accessAllowed && phase != .background else { store.clear(preserveReadSnapshot: api.accessAllowed || api.retainsReadSnapshots); return }
@@ -341,7 +469,7 @@ struct ClasseraReportSettingsView: View {
             Button("Keep checking", role: .cancel) {}
         } message: { Text("If it already completed, its result is shown. Otherwise the server prevents a delayed copy from applying. This does not undo completed changes.") }
     }
-    private static func outcomeLabel(_ key: String) -> String {
+    static func outcomeLabel(_ key: String) -> String {
         ["accepted": "Accepted by provider", "failed": "Failed", "unknown": "Outcome unknown",
          "pending": "Waiting for report", "reserved": "Dispatch unconfirmed",
          "skipped_window_closed": "Skipped: closed window / template unavailable",

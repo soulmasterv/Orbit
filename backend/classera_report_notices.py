@@ -131,8 +131,14 @@ class NoticeDispatch:
     def prepare(self, class_name, report_title, recipients, *, single=False, forced=False, already_started=False):
         if class_name not in CLASSES or single or forced or not self.ready(): return None
         batch = hashlib.sha256(json.dumps([class_name, report_title], ensure_ascii=False).encode()).hexdigest()
-        claimed = self.settings.claim_notice(CLASSES[class_name], batch, list(recipients), already_started=already_started)
-        return {'notice_id': claimed['id'], 'class_name': class_name, 'report_date': report_date_label(report_title)} if claimed else None
+        label = report_date_label(report_title)
+        report_date = None
+        if label:
+            day, month, year = map(int, label.split('/'))
+            report_date = date(year, month, day).isoformat()
+        claimed = self.settings.claim_notice(CLASSES[class_name], batch, list(recipients),
+                                             already_started=already_started, report_date=report_date)
+        return {'notice_id': claimed['id'], 'class_name': class_name, 'report_date': label} if claimed else None
 
     def after_report(self, batch, phone, report_accepted):
         if not batch: return
