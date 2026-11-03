@@ -34,7 +34,10 @@ def changes():
     worker = HOME / 'jarvis-phone-integration/allowed_caller.py'
     source = worker.read_text()
     source = replace_once(source, 'def main():\n', 'from phone_controls import answering_paused\n\ndef main():\n')
-    source = replace_once(source, '        elif armed:\n', '        elif armed and not answering_paused():\n')
+    source = replace_once(
+        source, '        elif armed:\n',
+        '        elif answering_paused():\n            armed=False\n        elif armed:\n'
+    )
     source = replace_once(
         source, "if single(snapshot,phone,'1') and single(read_precise(serial),phone,'1'):",
         "if single(snapshot,phone,'1') and single(read_precise(serial),phone,'1') and not answering_paused():"
@@ -50,7 +53,12 @@ def changes():
         queue.read_text(), "      if(req.url==='/internal/call-jobs/claim')",
         QUEUE_ROUTES + "      if(req.url==='/internal/call-jobs/claim')"
     )
-    result = {worker: source, broker: broker_code, queue: queue_code}
+    gateway = HOME / 'jarvis/whatsapp-adapter/notification-http.mjs'
+    gateway_code = replace_once(
+        gateway.read_text(), "   if(seen[m.id])",
+        "   if(m.expectedRecipient!==undefined&&m.expectedRecipient!==recipient)return reply(409,{});\n   if(seen[m.id])"
+    )
+    result = {worker: source, broker: broker_code, queue: queue_code, gateway: gateway_code}
     for directory in ('ios-swift-app', 'school-bot'):
         result[HOME / directory / 'orbit_phone_pilot.py'] = (SOURCE / 'orbit_phone_pilot.py').read_text()
         result[HOME / directory / 'phone_controls.py'] = (SOURCE / 'phone_controls.py').read_text()

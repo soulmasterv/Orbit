@@ -91,9 +91,9 @@ def destination(channel):
         return None
 
 
-def send_whatsapp(ident, body):
+def send_whatsapp(ident, body, recipient):
     status, result = local_request(
         18085, ROOT / 'jarvis/whatsapp-secrets/gateway.key',
-        '/notify', {'id': ident, 'body': body}
+        '/notify', {'id': ident, 'body': body, 'expectedRecipient': recipient}
     )
     return 'accepted' if status == 200 and result.get('status') == 'accepted' else 'unknown'

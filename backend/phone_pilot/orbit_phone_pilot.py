@@ -245,7 +245,7 @@ def register(app,token):
                     elif kind == 'test_notification':
                         message = 'Orbit phone controls test notification.'
                         if channel == 'whatsapp':
-                            result['status'] = controls.send_whatsapp(ident, message)
+                            result['status'] = controls.send_whatsapp(ident, message, expected)
                         else:
                             now = time.time()
                             with db() as c:

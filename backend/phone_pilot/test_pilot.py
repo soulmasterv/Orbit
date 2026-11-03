@@ -88,4 +88,11 @@ class Tests(unittest.TestCase):
    self.assertEqual(self.send(command).json['status'], 'failed')
    self.assertEqual(self.send(command).json['status'], 'failed')
    queue.assert_called_once_with('queue-id')
+ def test_whatsapp_binds_confirmation_to_gateway_recipient(self):
+  with patch.object(p.controls, 'capability', return_value=True), patch.object(p.controls, 'destination', return_value='12345678'), patch.object(p.controls, 'local_request', return_value=(409, {})) as gateway:
+   command = dict(request_id=str(uuid.uuid4()),kind='test_notification',channel='whatsapp',destination='12345678')
+   self.assertEqual(self.send(command).json['status'], 'unknown')
+   self.assertEqual(self.send(command).json['status'], 'unknown')
+   gateway.assert_called_once()
+   self.assertEqual(gateway.call_args.args[3]['expectedRecipient'], '12345678')
 if __name__=='__main__':unittest.main()
