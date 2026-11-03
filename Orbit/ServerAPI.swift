@@ -1395,7 +1395,10 @@ extension ServerAPI {
         // Consume freshness before the only POST, including uncertain outcomes.
         phonePilotRefreshed = nil
         let result: OrbitPhonePilotResult = try await phonePilotRequest("/api/jarvis-phone/commands", method: "POST", body: JSONEncoder().encode(command))
-        guard result.request_id == command.request_id, ["applied", "pending_phone", "failed", "unknown"].contains(result.status) else { throw URLError(.cannotParseResponse) }
+        guard result.request_id == command.request_id, ["applied", "pending_phone", "failed", "unknown", "queued", "accepted"].contains(result.status) else { throw URLError(.cannotParseResponse) }
         return result
+    }
+    func phonePilotQueue() async throws -> OrbitPhoneQueue {
+        try await phonePilotRequest("/api/jarvis-phone/queue")
     }
 }

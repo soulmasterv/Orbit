@@ -1,11 +1,12 @@
 import gc,importlib.util,json,sqlite3,tempfile,time,unittest,uuid
 from pathlib import Path
 from flask import Flask
+from unittest.mock import patch
 import orbit_phone_pilot as p
 class Tests(unittest.TestCase):
  def setUp(self):
   self.tmp=tempfile.TemporaryDirectory();p.BROKER_DB=Path(self.tmp.name)/'broker.db';p.OPS_DB=Path(self.tmp.name)/'ops.db'
-  with p.db() as c:c.executescript('CREATE TABLE alert_meta(id TEXT PRIMARY KEY,value TEXT); CREATE TABLE alert_events(sms TEXT,dispatched REAL);')
+  with p.db() as c:c.executescript('CREATE TABLE alert_meta(id TEXT PRIMARY KEY,value TEXT); CREATE TABLE alert_events(id TEXT PRIMARY KEY,kind TEXT,body TEXT,created REAL,expires REAL,sms TEXT,dispatched REAL,push TEXT);')
   p.runtime=lambda:{'adb':'connected','bluetooth':'connected','battery':70,'workers':{}}
   p.idle=lambda:True
   self.calls=[]
@@ -45,4 +46,46 @@ class Tests(unittest.TestCase):
  def test_origin_blocked(self):
   h=dict(self.headers,Origin='https://untrusted.example')
   self.assertEqual(self.client.post('/api/jarvis-phone/commands',json=self.settings(),headers=h).status_code,403)
+ def test_web_test_is_single_channel_and_idempotent(self):
+  with patch.object(p.controls, 'capability', return_value=True):
+   command = dict(request_id=str(uuid.uuid4()),kind='test_notification',channel='web',destination='Paired web subscription')
+   self.assertEqual(self.send(command).json['status'], 'queued')
+   self.assertEqual(self.send(command).json['status'], 'queued')
+   self.assertEqual(self.send(dict(command,request_id=str(uuid.uuid4()))).status_code, 429)
+  with p.db() as c:
+   self.assertEqual([tuple(row) for row in c.execute('SELECT kind,sms,push FROM alert_events')], [('orbit_test_web','web_only','pending')])
+ def test_sms_requires_current_recipient_and_live_sms_mode(self):
+  with patch.object(p.controls, 'capability', return_value=True), patch.object(p.controls, 'destination', return_value='12345678'):
+   command = dict(request_id=str(uuid.uuid4()),kind='test_notification',channel='sms',destination='99999999')
+   self.assertEqual(self.send(command).status_code, 409)
+   command['destination'] = '12345678'
+   self.assertEqual(self.send(command).status_code, 409)
+   with p.db() as c:
+    p.put(c, 'last_phone', time.time())
+    p.put(c, 'notification_mode', 'sms')
+   self.assertEqual(self.send(command).json['status'], 'pending_phone')
+  with p.db() as c:
+   self.assertEqual(tuple(c.execute('SELECT sms,push FROM alert_events').fetchone()), ('pending','not_needed'))
+ def test_pauses_expire_and_can_be_cleared_without_service_commands(self):
+  with patch.object(p.controls, 'capability', return_value=True), patch.object(p.controls, 'PAUSE', Path(self.tmp.name)/'pause.json'):
+   command = dict(request_id=str(uuid.uuid4()),kind='answering_pause',minutes=30)
+   self.assertEqual(self.send(command).json['status'], 'applied')
+   self.assertTrue(p.controls.answering_paused())
+   until = p.controls.read_pause()['until']
+   with patch.object(p.controls.time, 'time', return_value=until + 1):
+    self.assertFalse(p.controls.answering_paused())
+   self.assertEqual(self.send(dict(command,request_id=str(uuid.uuid4()),minutes=0)).json['status'], 'applied')
+   self.assertFalse(p.controls.answering_paused())
+   self.assertFalse(self.calls)
+ def test_reconnect_refuses_unverified_call_state(self):
+  p.idle = lambda: False
+  command = dict(request_id=str(uuid.uuid4()),kind='reconnect_bluetooth')
+  self.assertEqual(self.send(command).status_code,409)
+  self.assertFalse(self.calls)
+ def test_queue_reports_a_claim_race_without_retrying(self):
+  with patch.object(p.controls,'capability',return_value=True), patch.object(p.controls,'call_queue',return_value=(409,{})) as queue:
+   command = dict(request_id=str(uuid.uuid4()),kind='cancel_call',job_id='queue-id')
+   self.assertEqual(self.send(command).json['status'], 'failed')
+   self.assertEqual(self.send(command).json['status'], 'failed')
+   queue.assert_called_once_with('queue-id')
 if __name__=='__main__':unittest.main()
