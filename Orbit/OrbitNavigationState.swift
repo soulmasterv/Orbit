@@ -62,5 +62,5 @@ struct RetainedProtectedContent<Content: View, Cover: View>: View {
 
 /// Stable routes for Workspace destinations; Students selects its existing tab.
 enum WorkspaceRoute: String, Hashable, CaseIterable {
-    case jarvis, downloads, services, aiKeyUsage
+    case jarvis, downloads, services, aiKeyUsage, phoneControls
 }

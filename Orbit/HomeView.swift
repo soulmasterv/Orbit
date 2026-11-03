@@ -81,6 +81,14 @@ struct HomeView: View {
                 OrbitVersionLink().id("version")
                 if api.hasNotice { ConnectionNotice(api: api) }
                 if let d = api.dashboard { serverSummary(d.server).id("server"); systemSummary(d).id("system") } else { DashboardPlaceholder(api: api) }
+                SectionHeading(title: "Phone")
+                NavigationLink(value: WorkspaceRoute.phoneControls) {
+                    CompactWorkspaceRow(title: "Phone controls", subtitle: "Connection, notifications and call automation", divider: false)
+                }
+                .buttonStyle(.plain)
+                .disabled(!api.accessAllowed)
+                .accessibilityIdentifier("home.phoneControls")
+                .id("phoneControls")
                 SectionHeading(title: "Workspace")
                 VStack(spacing: 10) {
                     Button { navigation?.openStudents() } label: {
