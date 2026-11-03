@@ -253,6 +253,14 @@ struct StudentDetailView: View {
                         }.disabled(store.managementUnavailableReason(for: student) != nil)
                     }
                 }.id("reply-access")
+                Section("Bot configuration") {
+                    NavigationLink {
+                        StudentBotConfigView(api: api, phone: phone)
+                    } label: {
+                        Label("Bot Config", systemImage: "slider.horizontal.3")
+                    }
+                    .disabled(store.mutationBusy || !api.accessAllowed)
+                }.id("bot-config")
                 Section("Subjects") {
                     NavigationLink { SubjectEditorView(api: api, phone: phone) } label: {
                         Label("Edit optional subjects", systemImage: "checklist")

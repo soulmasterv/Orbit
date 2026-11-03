@@ -31,6 +31,7 @@ struct StudentDatabasesView: View {
             Text(title).font(.subheadline.weight(.medium)).foregroundStyle(.white)
                 .frame(maxWidth: .infinity).padding(.vertical, 11)
                 .background(selected ? StudentPalette.accent : Color.clear, in: RoundedRectangle(cornerRadius: 8))
+                .contentShape(Rectangle())
         }.buttonStyle(.plain).accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
