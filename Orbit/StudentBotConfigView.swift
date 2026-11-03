@@ -22,13 +22,13 @@ enum StudentBotMode: String, CaseIterable, Codable, Identifiable {
 
 struct StudentBotConfig: Decodable {
     let mode: StudentBotMode
-    let available_modes: [String]
+    let available: [String: Bool]
     let calendar_parser: DisplayValue?
-    let booking_status: DisplayValue?
-    let reminder_preset: DisplayValue?
+    let calendar_booking: DisplayValue?
+    let calendar_reminder_minutes: DisplayValue?
     let local_model: DisplayValue?
     let classera_feed: DisplayValue?
-    let auto_booking: DisplayValue?
+    let classera_auto_booking: DisplayValue?
     let stats: [String: Int?]?
 
     struct DisplayValue: Decodable {
@@ -48,7 +48,7 @@ struct StudentBotConfig: Decodable {
     }
 
     func allows(_ candidate: StudentBotMode) -> Bool {
-        available_modes.contains(candidate.rawValue)
+        available[candidate.rawValue] == true
     }
 }
 
@@ -126,11 +126,11 @@ struct StudentBotConfigView: View {
                                   || !(selection.map(config.allows) ?? false))
                     }
                     Section("Calendar and booking") {
-                        LabeledContent("Calendar parser", value: config.calendar_parser?.text ?? "Unavailable")
-                        LabeledContent("Booking status", value: config.booking_status?.text ?? "Unavailable")
-                        LabeledContent("Reminder preset", value: config.reminder_preset?.text ?? "Unavailable")
+                        LabeledContent("Calendar message parsing", value: config.calendar_parser?.text ?? "Unavailable")
+                        LabeledContent("Booking status", value: config.calendar_booking?.text ?? "Unavailable")
+                        LabeledContent("Reminder preset", value: config.calendar_reminder_minutes.map { $0.text + " min" } ?? "Unavailable")
                         LabeledContent("Classera feed", value: config.classera_feed?.text ?? "Unavailable")
-                        LabeledContent("Auto-booking", value: config.auto_booking?.text ?? "Unavailable")
+                        LabeledContent("Auto-booking", value: config.classera_auto_booking?.text ?? "Unavailable")
                     }
                     Section("Local AI") {
                         LabeledContent("Model", value: config.local_model?.text ?? "Unavailable")
