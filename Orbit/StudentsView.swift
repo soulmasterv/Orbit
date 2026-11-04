@@ -89,6 +89,21 @@ struct StudentsView: View {
 
     private var directoryHeader: some View {
         VStack(alignment: .leading, spacing: 12) {
+            NavigationLink {
+                StudentBotConfigView(api: api, phone: nil)
+            } label: {
+                HStack {
+                    Label("General Settings", systemImage: "slider.horizontal.3")
+                    Spacer()
+                    Image(systemName: "chevron.right").font(.caption)
+                }
+                .padding(.horizontal, 12)
+                .frame(minHeight: 44)
+                .background(StudentPalette.surface, in: RoundedRectangle(cornerRadius: 9))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(!api.accessAllowed)
             StudentSearchField(text: $search)
             HStack {
                 Text("School assistant").font(.caption).foregroundStyle(StudentPalette.secondary)

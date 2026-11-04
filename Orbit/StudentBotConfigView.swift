@@ -53,17 +53,18 @@ struct StudentBotConfig: Decodable {
 }
 
 extension ServerAPI {
-    func studentBotConfig(connection: StudentsConnection, phone: String) async throws -> StudentBotConfig {
+    func studentBotConfig(connection: StudentsConnection, phone: String?) async throws -> StudentBotConfig {
         let data = try await mobileData(connection: connection, path: Self.botConfigPath(phone))
         return try JSONDecoder().decode(StudentBotConfig.self, from: data)
     }
 
-    func saveStudentBotMode(connection: StudentsConnection, phone: String, mode: StudentBotMode) async throws {
+    func saveStudentBotMode(connection: StudentsConnection, phone: String?, mode: StudentBotMode) async throws {
         _ = try await mobileData(connection: connection, path: Self.botConfigPath(phone),
                                  method: "PUT", body: JSONEncoder().encode(["mode": mode.rawValue]))
     }
 
-    private static func botConfigPath(_ phone: String) throws -> String {
+    private static func botConfigPath(_ phone: String?) throws -> String {
+        guard let phone else { return "/api/bot-config" }
         guard MobileRules.validPhone(phone) else { throw APIError.message("Invalid student phone number.") }
         return "/api/students/\(phone)/bot-config"
     }
@@ -71,7 +72,9 @@ extension ServerAPI {
 
 struct StudentBotConfigView: View {
     @ObservedObject var api: ServerAPI
-    let phone: String
+    let phone: String?
+    private var isGeneral: Bool { phone == nil }
+    @State private var reviewing = false
     @State private var config: StudentBotConfig?
     @State private var selection: StudentBotMode?
     @State private var busy = false
@@ -89,7 +92,7 @@ struct StudentBotConfigView: View {
                         Label {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(config.mode.title).font(.headline)
-                                Text("Current mode").font(.caption).foregroundStyle(.secondary)
+                                Text(isGeneral ? "Current default" : "Current mode").font(.caption).foregroundStyle(.secondary)
                             }
                         } icon: {
                             Image(systemName: config.mode.icon).foregroundStyle(StudentPalette.accent)
@@ -118,9 +121,10 @@ struct StudentBotConfigView: View {
                             .accessibilityAddTraits(selection == mode ? .isSelected : [])
                             .disabled(busy || needsRefresh || !config.allows(mode))
                         }
-                        Button("Save") {
+                        Button(isGeneral ? "Review change" : "Save") {
                             guard let selection else { return }
-                            Task { await update(to: selection) }
+                            if isGeneral { reviewing = true }
+                            else { Task { await update(to: selection) } }
                         }
                         .disabled(busy || needsRefresh || selection == config.mode
                                   || !(selection.map(config.allows) ?? false))
@@ -135,6 +139,7 @@ struct StudentBotConfigView: View {
                     Section("Local AI") {
                         LabeledContent("Model", value: config.local_model?.text ?? "Unavailable")
                     }
+                    if !isGeneral {
                     Section("Student stats") {
                         if let stats = config.stats, !stats.isEmpty {
                             ForEach(stats.keys.sorted(), id: \.self) { key in
@@ -145,6 +150,7 @@ struct StudentBotConfigView: View {
                             Text("Stats unavailable").foregroundStyle(.secondary)
                         }
                     }
+                    }
                 }
                 if error != nil && !busy {
                     Button("Refresh from server") { Task { await update() } }
@@ -153,12 +159,20 @@ struct StudentBotConfigView: View {
         }
         .scrollContentBackground(.hidden)
         .modifier(StudentAppearance())
-        .navigationTitle("Bot Config")
+        .navigationTitle(isGeneral ? "General Settings" : "Bot Config")
+        .confirmationDialog("Change the default bot mode?", isPresented: $reviewing, titleVisibility: .visible) {
+            if let selection {
+                Button("Switch to " + selection.title) { Task { await update(to: selection) } }
+            }
+        } message: {
+            Text("This applies to students without an individual mode assignment.")
+        }
         .navigationBarTitleDisplayMode(.inline)
         .task(id: api.accessAllowed) { if api.accessAllowed { await update() } }
         .refreshable { await update() }
         .onChange(of: api.accessAllowed) { _, allowed in
             if !allowed {
+                reviewing = false
                 generation = UUID()
                 config = nil
                 selection = nil
@@ -194,6 +208,15 @@ struct StudentBotConfigView: View {
         } catch {
             guard generation == currentGeneration, api.accessAllowed, !Task.isCancelled else { return }
             selection = config?.mode
+            if let failure = error as? HTTPFailure, failure.status == 403 {
+                self.error = "This action is unavailable for this student. Refresh to check access."
+                return
+            }
+            if let failure = error as? HTTPFailure, failure.status == 404 {
+                self.error = isGeneral ? "General Settings is unavailable on this server."
+                    : "Bot Config requires an active student and a server that supports this screen."
+                return
+            }
             self.error = mode == nil ? "Bot configuration could not be loaded. Refresh to try again."
                 : "The saved mode could not be confirmed. Refresh before trying again."
         }
