@@ -1402,6 +1402,23 @@ extension ServerAPI {
         guard result.request_id == command.request_id, ["applied", "pending_phone", "failed", "unknown", "queued", "accepted"].contains(result.status) else { throw URLError(.cannotParseResponse) }
         return result
     }
+    func diaaFriends() async throws -> OrbitDiaaFriends {
+        try await phonePilotRequest("/api/jarvis-phone/diaa-friends")
+    }
+    func changeDiaaFriend(_ number: String, add: Bool) async throws -> OrbitDiaaFriends {
+        guard canControl && phonePilotIsForeground() && !Task.isCancelled else { throw CancellationError() }
+        let context = latestReportsContext
+        let epoch = studentsAccessGeneration
+        let endpoint = activeBaseURL
+        actionBusy = true
+        defer { actionBusy = false }
+        try await authorizeConfirmed(add ? "Add this caller to Diaa Friends" : "Remove this caller from Diaa Friends")
+        guard accessAllowed && !needsVerification && connection == .connected && phonePilotIsForeground(),
+              context == latestReportsContext && epoch == studentsAccessGeneration &&
+              endpoint == activeBaseURL && !Task.isCancelled else { throw CancellationError() }
+        let body = try JSONEncoder().encode(["action": add ? "add" : "remove", "number": number])
+        return try await phonePilotRequest("/api/jarvis-phone/diaa-friends", method: "POST", body: body)
+    }
     func phonePilotQueue() async throws -> OrbitPhoneQueue {
         try await phonePilotRequest("/api/jarvis-phone/queue")
     }

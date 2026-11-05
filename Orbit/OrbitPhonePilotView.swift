@@ -55,6 +55,121 @@ struct OrbitPhoneQueue: Decodable {
     let jobs: [Job]
 }
 
+struct OrbitDiaaFriends: Decodable {
+    let numbers: [String]
+}
+
+private struct OrbitDiaaFriendsView: View {
+    @ObservedObject var api: ServerAPI
+    @Environment(\.scenePhase) private var phase
+    @State private var numbers: [String] = []
+    @State private var number = ""
+    @State private var busy = false
+    @State private var message: String?
+    @State private var loaded = false
+    @State private var pending: Change?
+    @State private var operation: UUID?
+
+    private struct Change {
+        let number: String
+        let add: Bool
+        let context: UUID
+    }
+
+    private var active: Bool { api.accessAllowed && phase == .active }
+    private var screenContext: String { "\(api.latestReportsContext)|\(active)" }
+
+    var body: some View {
+        Form {
+            Section {
+                Text("Listed callers hear both Diaa clips for up to 20 seconds anytime.")
+                if loaded && numbers.isEmpty { Text("No callers added yet.") }
+                ForEach(active ? numbers : [], id: \.self) { friend in
+                    HStack {
+                        Text(friend)
+                        Spacer()
+                        Button("Remove", role: .destructive) {
+                            pending = Change(number: friend, add: false, context: api.latestReportsContext)
+                        }.disabled(!canEdit)
+                    }
+                }
+            }
+            Section("Add caller") {
+                TextField("Phone number", text: $number).keyboardType(.phonePad)
+                Button("Add") {
+                    pending = Change(number: number.trimmingCharacters(in: .whitespacesAndNewlines), add: true, context: api.latestReportsContext)
+                }.disabled(!canEdit || number.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+            if let message { Text(message).foregroundStyle(.secondary) }
+        }
+        .navigationTitle("Diaa Friends")
+        .task(id: screenContext) {
+            operation = nil
+            busy = false
+            loaded = false
+            numbers = []
+            number = ""
+            pending = nil
+            message = nil
+            if active { await load() }
+        }
+        .refreshable { await load() }
+        .confirmationDialog("Confirm Diaa Friends change", isPresented: Binding(
+            get: { pending != nil }, set: { if !$0 { pending = nil } }
+        ), titleVisibility: .visible, presenting: pending) { change in
+            Button(change.add ? "Add caller" : "Remove caller", role: change.add ? nil : .destructive) {
+                pending = nil
+                Task { await apply(change) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { change in
+            Text(change.number)
+        }
+    }
+
+    private var canEdit: Bool { loaded && !busy && active && api.canControl }
+
+    @MainActor private func load() async {
+        guard active && !busy else { return }
+        let context = api.latestReportsContext
+        let request = UUID()
+        operation = request
+        busy = true
+        defer { if operation == request { busy = false } }
+        do {
+            let result = try await api.diaaFriends()
+            guard operation == request && context == api.latestReportsContext && active && !Task.isCancelled else { return }
+            numbers = result.numbers
+            loaded = true
+            message = nil
+        } catch {
+            guard operation == request && context == api.latestReportsContext && active && !Task.isCancelled else { return }
+            loaded = false
+            message = "Could not load Diaa Friends. Pull down to retry."
+        }
+    }
+
+    @MainActor private func apply(_ change: Change) async {
+        guard canEdit, change.context == api.latestReportsContext else { return }
+        let context = api.latestReportsContext
+        let request = UUID()
+        operation = request
+        busy = true
+        defer { if operation == request { busy = false } }
+        do {
+            let result = try await api.changeDiaaFriend(change.number, add: change.add)
+            guard operation == request && context == api.latestReportsContext && active && !Task.isCancelled else { return }
+            numbers = result.numbers
+            if change.add { number = "" }
+            message = nil
+        } catch {
+            guard operation == request && context == api.latestReportsContext && active && !Task.isCancelled else { return }
+            loaded = false
+            message = "Change could not be confirmed. Refresh the list before retrying."
+        }
+    }
+}
+
 struct OrbitPhonePilotView: View {
     @ObservedObject var api: ServerAPI
     @Environment(\.scenePhase) private var phase
@@ -180,6 +295,10 @@ struct OrbitPhonePilotView: View {
                     Button("Pause until resumed") { prepare(kind: "answering_pause", minutes: -1) }.disabled(!canSend)
                 }
             }
+        }
+        Section("Diaa") {
+            NavigationLink("Diaa Friends") { OrbitDiaaFriendsView(api: api) }
+                .disabled(!api.accessAllowed)
         }
         if value?.queue_supported == true {
             Section("Outgoing call queue") {
