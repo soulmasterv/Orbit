@@ -8,7 +8,8 @@ struct StudentDatabasesView: View {
         self.api = api; self.onWorkspace = onWorkspace
         _schoolStore = StateObject(wrappedValue: StudentsStore(api: api))
     }
-    @State private var classeraSelected = true
+    private enum Directory { case school, classera, diaa }
+    @State private var directory: Directory = .classera
     @Environment(\.dismiss) private var dismiss
     var body: some View {
         VStack(spacing: 0) {
@@ -16,12 +17,16 @@ struct StudentDatabasesView: View {
                 Text("Students").font(.largeTitle.bold()).foregroundStyle(.white)
                 OrbitVersionLink()
                 HStack(spacing: 0) {
-                    databaseTab("School assistant", selected: !classeraSelected) { classeraSelected = false }
-                    databaseTab("Classera", selected: classeraSelected) { classeraSelected = true }
+                    databaseTab("School assistant", selected: directory == .school) { directory = .school }
+                    databaseTab("Classera", selected: directory == .classera) { directory = .classera }
+                    databaseTab("Diaa Friends", selected: directory == .diaa) { directory = .diaa }
                 }.padding(3).background(StudentPalette.surface, in: RoundedRectangle(cornerRadius: 10))
             }.padding(.horizontal, 16).padding(.top, 6).padding(.bottom, 14)
-            if classeraSelected { ClasseraStudentsView(api: api, embedded: true) }
-            else { StudentsView(api: api, store: schoolStore, embedded: true) }
+            switch directory {
+            case .school: StudentsView(api: api, store: schoolStore, embedded: true)
+            case .classera: ClasseraStudentsView(api: api, embedded: true)
+            case .diaa: OrbitDiaaFriendsView(api: api)
+            }
         }
         .modifier(StudentAppearance())
         .toolbar(.visible, for: .tabBar)
@@ -29,7 +34,8 @@ struct StudentDatabasesView: View {
     private func databaseTab(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(title).font(.subheadline.weight(.medium)).foregroundStyle(.white)
-                .frame(maxWidth: .infinity).padding(.vertical, 11)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity, minHeight: 44)
                 .background(selected ? StudentPalette.accent : Color.clear, in: RoundedRectangle(cornerRadius: 8))
                 .contentShape(Rectangle())
         }.buttonStyle(.plain).accessibilityAddTraits(selected ? .isSelected : [])

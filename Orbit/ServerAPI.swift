@@ -1367,7 +1367,8 @@ extension ServerAPI {
         command.httpBody = body
         let (data, response) = try await session.data(for: command)
         guard accessAllowed && context == latestReportsContext && epoch == studentsAccessGeneration && originalBase == activeBaseURL && !Task.isCancelled else { throw CancellationError() }
-        guard let response = response as? HTTPURLResponse, response.statusCode == 200, response.url == command.url, data.count < 32768 else { throw URLError(.badServerResponse) }
+        guard let response = response as? HTTPURLResponse, response.statusCode == 200, response.url == command.url,
+              data.count < (path == "/api/jarvis-phone/diaa-friends" ? 131072 : 32768) else { throw URLError(.badServerResponse) }
         return try JSONDecoder().decode(T.self, from: data)
     }
     func phonePilotStatus() async throws -> OrbitPhonePilotStatus {
@@ -1405,7 +1406,7 @@ extension ServerAPI {
     func diaaFriends() async throws -> OrbitDiaaFriends {
         try await phonePilotRequest("/api/jarvis-phone/diaa-friends")
     }
-    func changeDiaaFriend(_ number: String, add: Bool) async throws -> OrbitDiaaFriends {
+    func changeDiaaFriend(_ number: String, add: Bool, name: String? = nil) async throws -> OrbitDiaaFriends {
         guard canControl && phonePilotIsForeground() && !Task.isCancelled else { throw CancellationError() }
         let context = latestReportsContext
         let epoch = studentsAccessGeneration
@@ -1416,7 +1417,9 @@ extension ServerAPI {
         guard accessAllowed && !needsVerification && connection == .connected && phonePilotIsForeground(),
               context == latestReportsContext && epoch == studentsAccessGeneration &&
               endpoint == activeBaseURL && !Task.isCancelled else { throw CancellationError() }
-        let body = try JSONEncoder().encode(["action": add ? "add" : "remove", "number": number])
+        var payload = ["action": add ? "add" : "remove", "number": number]
+        if let name, add { payload["name"] = name }
+        let body = try JSONEncoder().encode(payload)
         return try await phonePilotRequest("/api/jarvis-phone/diaa-friends", method: "POST", body: body)
     }
     func phonePilotQueue() async throws -> OrbitPhoneQueue {
