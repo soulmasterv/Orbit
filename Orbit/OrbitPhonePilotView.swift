@@ -104,22 +104,22 @@ struct OrbitDiaaFriendsView: View {
                 if loaded && numbers.isEmpty { Text("No callers added yet.") }
                 ForEach(active ? numbers : [], id: \.self) { friend in
                     HStack {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(profiles?[friend]?.name ?? "Unnamed caller").font(.headline)
-                            Text(friend).foregroundStyle(.secondary).textSelection(.enabled)
-                            if let count = profiles?[friend]?.calls_seen {
-                                Text("\(count) calls seen").font(.caption)
-                                if let lastSeen = profiles?[friend]?.last_seen_at {
-                                    Text("Last seen " + Self.cairoCallTime(lastSeen))
-                                        .font(.caption).foregroundStyle(.secondary)
-                                } else {
-                                    Text("No calls recorded").font(.caption).foregroundStyle(.secondary)
+                        NavigationLink {
+                            OrbitDiaaCallHistoryView(api: api, number: friend, name: profiles?[friend]?.name)
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(profiles?[friend]?.name ?? "Unnamed caller").font(.headline)
+                                    Text(friend).foregroundStyle(.secondary)
                                 }
-                            } else {
-                                Text("Call stats unavailable").font(.caption).foregroundStyle(.secondary)
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.caption).foregroundStyle(.secondary)
+                                    .accessibilityHidden(true)
                             }
+                            .contentShape(Rectangle())
                         }
-                        Spacer()
+                        .buttonStyle(.plain)
                         Menu {
                             if profiles != nil {
                                 Button("Edit name") {
@@ -137,11 +137,6 @@ struct OrbitDiaaFriendsView: View {
                         }
                         .accessibilityLabel("Caller actions")
                         .disabled(!canEdit)
-                    }
-                    if profiles != nil {
-                        NavigationLink("Call history") {
-                            OrbitDiaaCallHistoryView(api: api, number: friend)
-                        }
                     }
                 }
             }

@@ -13,6 +13,7 @@ struct OrbitDiaaCallHistory: Decodable {
 struct OrbitDiaaCallHistoryView: View {
     @ObservedObject var api: ServerAPI
     let number: String
+    let name: String?
     @Environment(\.scenePhase) private var phase
     @State private var timeframe = Timeframe.week
     @State private var from = Date()
@@ -81,7 +82,10 @@ struct OrbitDiaaCallHistoryView: View {
                         }
                     }
                 } header: {
-                    Text(number)
+                    VStack(alignment: .leading, spacing: 4) {
+                        if let name { Text(name) }
+                        Text(number)
+                    }
                 } footer: {
                     Text("Times are in Cairo. Call history starts when detailed tracking was enabled.")
                 }

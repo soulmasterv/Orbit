@@ -70,7 +70,9 @@ final class JarvisSession: NSObject, ObservableObject, WKNavigationDelegate, WKU
 
     func activate() {
         gate.activate()
-        // Keep background-suspended playback blocked until a fresh explicit Start tap.
+        if let web = webView, JarvisPolicy.isVoiceDocument(web.url) {
+            web.setAllMediaPlaybackSuspended(false, completionHandler: nil)
+        }
     }
 
     func stop(_ message: String? = nil, background: Bool = false) {
@@ -78,7 +80,7 @@ final class JarvisSession: NSObject, ObservableObject, WKNavigationDelegate, WKU
         microphoneActive = false
         if let message { notice = message }
         if let web = webView {
-            if JarvisPolicy.isOrigin(web.url) {
+            if JarvisPolicy.isVoiceDocument(web.url) {
                 web.evaluateJavaScript("window.orbitJarvis?.version === 1 && window.orbitJarvis.stop()", completionHandler: nil)
             }
             web.setMicrophoneCaptureState(.none, completionHandler: nil)
@@ -127,8 +129,8 @@ final class JarvisSession: NSObject, ObservableObject, WKNavigationDelegate, WKU
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         if let appConnection, !appConnection.connected { return }
-        guard message.frameInfo.isMainFrame, JarvisPolicy.isOrigin(message.frameInfo.request.url),
-              JarvisPolicy.isOrigin(webView?.url), let body = message.body as? [String: Any] else { return }
+        guard message.frameInfo.isMainFrame, JarvisPolicy.isVoiceDocument(message.frameInfo.request.url),
+              JarvisPolicy.isVoiceDocument(webView?.url), let body = message.body as? [String: Any] else { return }
         if body["kind"] as? String == "startTap" {
             gate.arm()
             if gate.armed {
@@ -139,7 +141,7 @@ final class JarvisSession: NSObject, ObservableObject, WKNavigationDelegate, WKU
         }
         guard body["kind"] as? String == "state", let version = body["version"] as? Int else { return }
         let authenticated = body["authenticated"] as? Bool ?? false
-        let lostSession = signedIn && !authenticated
+        let lostSession = version == 1 && signedIn && !authenticated
         gate.update(version: version, authenticated: authenticated)
         ready = gate.ready; signedIn = authenticated
         memoryAvailable = ready && body["memoryAvailable"] as? Bool == true && (appConnection?.supportsMemory ?? true)
@@ -159,14 +161,14 @@ final class JarvisSession: NSObject, ObservableObject, WKNavigationDelegate, WKU
     func webView(_ webView: WKWebView, requestMediaCapturePermissionFor origin: WKSecurityOrigin,
                  initiatedByFrame frame: WKFrameInfo, type: WKMediaCaptureType,
                  decisionHandler: @escaping (WKPermissionDecision) -> Void) {
-        guard type == .microphone, frame.isMainFrame, JarvisPolicy.isOrigin(webView.url),
-              JarvisPolicy.isOrigin(frame.request.url),
+        guard type == .microphone, frame.isMainFrame, JarvisPolicy.isVoiceDocument(webView.url),
+              JarvisPolicy.isVoiceDocument(frame.request.url),
               JarvisPolicy.isCaptureOrigin(protocol: origin.protocol, host: origin.host, port: origin.port),
               let attempt = gate.consume() else { decisionHandler(.deny); return }
         AVAudioApplication.requestRecordPermission { [weak self, weak webView] granted in
             Task { @MainActor in
                 guard let self, let webView, self.webView === webView, granted, self.gate.permits(attempt),
-                      JarvisPolicy.isOrigin(webView.url) else {
+                      JarvisPolicy.isVoiceDocument(webView.url) else {
                     if !granted { self?.notice = "Microphone denied. Enable Orbit’s microphone access in iPhone Settings." }
                     decisionHandler(.deny); return
                 }
@@ -185,7 +187,12 @@ final class JarvisSession: NSObject, ObservableObject, WKNavigationDelegate, WKU
 
     func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         if JarvisPolicy.isOrigin(action.request.url) {
-            if action.targetFrame?.isMainFrame != false { stop(); gate.resetDocument() }
+            if action.targetFrame?.isMainFrame != false {
+                stop()
+                gate.resetDocument()
+                ready = false; signedIn = false; memoryAvailable = false
+                notice = nil
+            }
             decisionHandler(.allow); return
         }
         decisionHandler(.cancel)
@@ -197,7 +204,12 @@ final class JarvisSession: NSObject, ObservableObject, WKNavigationDelegate, WKU
         // No Cloudflare/Google destinations are allowed implicitly. Add only a verified login flow.
     }
 
-    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { loading = false }
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        loading = false
+        if gate.foreground && JarvisPolicy.isVoiceDocument(webView.url) {
+            webView.setAllMediaPlaybackSuspended(false, completionHandler: nil)
+        }
+    }
     func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse,
                  decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
         guard navigationResponse.isForMainFrame, let appConnection else { decisionHandler(.allow); return }
@@ -233,7 +245,7 @@ final class JarvisSession: NSObject, ObservableObject, WKNavigationDelegate, WKU
 
     static let bootstrap = #"""
     (() => {
-      if (location.origin !== 'https://jarvis.labbing.space') return;
+      if (location.origin !== 'https://jarvis.labbing.space' || location.pathname !== '/') return;
       const bridge = window.webkit.messageHandlers.jarvisState;
       function report() {
         const api = window.orbitJarvis;

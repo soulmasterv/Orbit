@@ -7,6 +7,10 @@ enum JarvisPolicy {
         return parts.scheme?.lowercased() == "https" && parts.host?.lowercased() == "jarvis.labbing.space" &&
             (parts.port == nil || parts.port == 443) && parts.user == nil && parts.password == nil
     }
+    static func isVoiceDocument(_ url: URL?) -> Bool {
+        guard isOrigin(url), let url else { return false }
+        return url.path.isEmpty || url.path == "/"
+    }
     static func isCaptureOrigin(protocol scheme: String, host: String, port: Int) -> Bool {
         scheme == "https" && host.lowercased() == "jarvis.labbing.space" && (port == 0 || port == 443)
     }

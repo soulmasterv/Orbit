@@ -8,7 +8,7 @@ on:
         type: boolean
         default: false
   push:
-    branches: [main, build/allowed-callers]
+    branches: [main, build/jarvis-caller-fix]
 
 permissions:
   contents: read

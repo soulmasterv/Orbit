@@ -14,6 +14,12 @@ final class JarvisPolicyTests: XCTestCase {
         }
         XCTAssertFalse(JarvisPolicy.isOrigin(nil))
     }
+    func testOnlyVoiceHomeReceivesVoiceBridgeAndCapture() {
+        XCTAssertTrue(JarvisPolicy.isVoiceDocument(URL(string: "https://jarvis.labbing.space/?next=%2Fcontrols")))
+        XCTAssertFalse(JarvisPolicy.isVoiceDocument(URL(string: "https://jarvis.labbing.space/controls")))
+        XCTAssertFalse(JarvisPolicy.isVoiceDocument(URL(string: "https://jarvis.labbing.space/api/controls")))
+        XCTAssertFalse(JarvisPolicy.isVoiceDocument(URL(string: "https://quiet-sky-4b47.cloudflareaccess.com/")))
+    }
     func testCaptureOriginRejectsOtherPortsAndProtocols() {
         XCTAssertTrue(JarvisPolicy.isCaptureOrigin(protocol: "https", host: "jarvis.labbing.space", port: 443))
         XCTAssertTrue(JarvisPolicy.isCaptureOrigin(protocol: "https", host: "jarvis.labbing.space", port: 0))
