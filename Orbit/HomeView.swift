@@ -81,19 +81,18 @@ struct HomeView: View {
                 OrbitVersionLink().id("version")
                 if api.hasNotice { ConnectionNotice(api: api) }
                 if let d = api.dashboard { serverSummary(d.server).id("server"); systemSummary(d).id("system") } else { DashboardPlaceholder(api: api) }
-                SectionHeading(title: "Phone")
-                NavigationLink(value: WorkspaceRoute.phoneControls) {
-                    CompactWorkspaceRow(title: "Phone controls", subtitle: "Connection, notifications and call automation", divider: false)
-                }
-                .buttonStyle(.plain)
-                .disabled(!api.accessAllowed)
-                .accessibilityIdentifier("home.phoneControls")
-                .id("phoneControls")
                 SectionHeading(title: "Workspace")
                 VStack(spacing: 10) {
                     Button { navigation?.openStudents() } label: {
                         CompactWorkspaceRow(title: "Students", subtitle: "Student directories and messaging windows")
                     }.disabled(navigation == nil || !api.accessAllowed).accessibilityIdentifier("workspace.students")
+                    NavigationLink(value: WorkspaceRoute.phoneControls) {
+                        CompactWorkspaceRow(title: "Phone controls", subtitle: "Connection, notifications and call automation", divider: true)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!api.accessAllowed)
+                    .accessibilityIdentifier("home.phoneControls")
+                    .id("phoneControls")
                     NavigationLink(value: WorkspaceRoute.jarvis) {
                         CompactWorkspaceRow(title: "JARVIS", subtitle: "Voice chat and reviewed memory")
                     }
@@ -200,6 +199,7 @@ extension DockerContainer {
     var displayStatus: String { isUnhealthy ? "Unhealthy" : (isRunning ? "Running" : (state?.capitalized ?? "Unknown")) }
 }
 extension PadelComponent { var isWhatsApp: Bool { id.lowercased() == "whatsapp" || name.lowercased().contains("whatsapp") } }
+
 
 
 

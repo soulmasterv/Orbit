@@ -1403,6 +1403,18 @@ extension ServerAPI {
         guard result.request_id == command.request_id, ["applied", "pending_phone", "failed", "unknown", "queued", "accepted"].contains(result.status) else { throw URLError(.cannotParseResponse) }
         return result
     }
+    func diaaCallHistory(number: String, start: Date, end: Date, offset: Int) async throws -> OrbitDiaaCallHistory {
+        var query = URLComponents()
+        query.queryItems = [
+            URLQueryItem(name: "number", value: number),
+            URLQueryItem(name: "start", value: String(Int(start.timeIntervalSince1970))),
+            URLQueryItem(name: "end", value: String(Int(end.timeIntervalSince1970))),
+            URLQueryItem(name: "offset", value: String(offset))
+        ]
+        guard let encoded = query.percentEncodedQuery else { throw URLError(.badURL) }
+        return try await phonePilotRequest("/api/jarvis-phone/diaa-history?" + encoded.replacingOccurrences(of: "+", with: "%2B"))
+    }
+
     func diaaFriends() async throws -> OrbitDiaaFriends {
         try await phonePilotRequest("/api/jarvis-phone/diaa-friends")
     }

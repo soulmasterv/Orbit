@@ -8,24 +8,36 @@ struct StudentDatabasesView: View {
         self.api = api; self.onWorkspace = onWorkspace
         _schoolStore = StateObject(wrappedValue: StudentsStore(api: api))
     }
-    private enum Directory { case school, classera, diaa }
+    private enum Directory { case school, classera }
     @State private var directory: Directory = .classera
     @Environment(\.dismiss) private var dismiss
     var body: some View {
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 15) {
-                Text("Students").font(.largeTitle.bold()).foregroundStyle(.white)
+                HStack {
+                    Text("Students").font(.largeTitle.bold()).foregroundStyle(.white)
+                    Spacer()
+                    NavigationLink {
+                        OrbitDiaaFriendsView(api: api)
+                    } label: {
+                        Text("Allowed Callers")
+                            .font(.subheadline)
+                            .foregroundStyle(StudentPalette.accent)
+                            .frame(minHeight: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!api.accessAllowed)
+                }
                 OrbitVersionLink()
                 HStack(spacing: 0) {
                     databaseTab("School assistant", selected: directory == .school) { directory = .school }
                     databaseTab("Classera", selected: directory == .classera) { directory = .classera }
-                    databaseTab("Diaa Friends", selected: directory == .diaa) { directory = .diaa }
                 }.padding(3).background(StudentPalette.surface, in: RoundedRectangle(cornerRadius: 10))
             }.padding(.horizontal, 16).padding(.top, 6).padding(.bottom, 14)
             switch directory {
             case .school: StudentsView(api: api, store: schoolStore, embedded: true)
             case .classera: ClasseraStudentsView(api: api, embedded: true)
-            case .diaa: OrbitDiaaFriendsView(api: api)
             }
         }
         .modifier(StudentAppearance())

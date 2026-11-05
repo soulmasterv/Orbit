@@ -77,7 +77,15 @@ struct OrbitDiaaFriendsView: View {
     @State private var message: String?
     @State private var loaded = false
     @State private var pending: Change?
+    @State private var editing: NameEdit?
     @State private var operation: UUID?
+
+    private struct NameEdit: Identifiable {
+        var id: String { number }
+        let number: String
+        let context: UUID
+        var name: String
+    }
 
     private struct Change {
         let number: String
@@ -112,15 +120,28 @@ struct OrbitDiaaFriendsView: View {
                             }
                         }
                         Spacer()
-                        if profiles != nil {
-                            Button("Edit name") {
-                                number = friend
-                                name = profiles?[friend]?.name ?? ""
-                            }.buttonStyle(.borderless).disabled(!canEdit)
+                        Menu {
+                            if profiles != nil {
+                                Button("Edit name") {
+                                    editing = NameEdit(number: friend, context: api.latestReportsContext,
+                                                       name: profiles?[friend]?.name ?? "")
+                                }
+                            }
+                            Button("Remove", role: .destructive) {
+                                pending = Change(number: friend, add: false, context: api.latestReportsContext)
+                            }
+                        } label: {
+                            Image(systemName: "ellipsis.circle")
+                                .frame(minWidth: 44, minHeight: 44)
+                                .contentShape(Rectangle())
                         }
-                        Button("Remove", role: .destructive) {
-                            pending = Change(number: friend, add: false, context: api.latestReportsContext)
-                        }.buttonStyle(.borderless).disabled(!canEdit)
+                        .accessibilityLabel("Caller actions")
+                        .disabled(!canEdit)
+                    }
+                    if profiles != nil {
+                        NavigationLink("Call history") {
+                            OrbitDiaaCallHistoryView(api: api, number: friend)
+                        }
                     }
                 }
             }
@@ -133,7 +154,36 @@ struct OrbitDiaaFriendsView: View {
             }
             if let message { Text(message).foregroundStyle(.secondary) }
         }
-        .navigationTitle("Diaa Friends")
+        .navigationTitle("Allowed Callers")
+        .navigationBarTitleDisplayMode(.inline)
+        .sheet(item: $editing) { edit in
+            NavigationStack {
+                Form {
+                    TextField("Name", text: Binding(
+                        get: { editing?.name ?? edit.name },
+                        set: { editing?.name = $0 }
+                    )).textContentType(.name)
+                }
+                .navigationTitle("Edit name")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Cancel") { editing = nil }
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Save") {
+                            guard let current = editing, current.context == api.latestReportsContext else { return }
+                            editing = nil
+                            Task {
+                                await apply(Change(number: current.number, add: true,
+                                                   name: current.name.trimmingCharacters(in: .whitespacesAndNewlines),
+                                                   context: current.context), clearDraft: false)
+                            }
+                        }.disabled(!canEdit || (editing?.name.count ?? 0) > 80)
+                    }
+                }
+            }
+        }
         .task(id: screenContext) {
             operation = nil
             busy = false
@@ -143,11 +193,12 @@ struct OrbitDiaaFriendsView: View {
             number = ""
             name = ""
             pending = nil
+            editing = nil
             message = nil
             if active { await load() }
         }
         .refreshable { await load() }
-        .confirmationDialog("Confirm Diaa Friends change", isPresented: Binding(
+        .confirmationDialog("Confirm Allowed Callers change", isPresented: Binding(
             get: { pending != nil }, set: { if !$0 { pending = nil } }
         ), titleVisibility: .visible, presenting: pending) { change in
             Button(change.add ? (numbers.contains(change.number) ? "Save name" : "Add caller") : "Remove caller", role: change.add ? nil : .destructive) {
@@ -160,7 +211,7 @@ struct OrbitDiaaFriendsView: View {
         }
     }
 
-    private static func cairoCallTime(_ timestamp: Double) -> String {
+    static func cairoCallTime(_ timestamp: Double) -> String {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = TimeZone(identifier: "Africa/Cairo")
@@ -187,11 +238,11 @@ struct OrbitDiaaFriendsView: View {
         } catch {
             guard operation == request && context == api.latestReportsContext && active && !Task.isCancelled else { return }
             loaded = false
-            message = "Could not load Diaa Friends. Pull down to retry."
+            message = "Could not load Allowed Callers. Pull down to retry."
         }
     }
 
-    @MainActor private func apply(_ change: Change) async {
+    @MainActor private func apply(_ change: Change, clearDraft: Bool = true) async {
         guard canEdit, change.context == api.latestReportsContext else { return }
         let context = api.latestReportsContext
         let request = UUID()
@@ -203,7 +254,7 @@ struct OrbitDiaaFriendsView: View {
             guard operation == request && context == api.latestReportsContext && active && !Task.isCancelled else { return }
             numbers = result.numbers
             profiles = result.profiles
-            if change.add { number = ""; name = "" }
+            if change.add && clearDraft { number = ""; name = "" }
             message = nil
         } catch {
             guard operation == request && context == api.latestReportsContext && active && !Task.isCancelled else { return }
