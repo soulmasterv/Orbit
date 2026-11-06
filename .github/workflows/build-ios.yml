@@ -8,7 +8,7 @@ on:
         type: boolean
         default: false
   push:
-    branches: [main, build/diaa-call-faceid]
+    branches: [main, build/diaa-library-management]
 
 permissions:
   contents: read

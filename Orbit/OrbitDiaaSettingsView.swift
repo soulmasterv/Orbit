@@ -39,6 +39,13 @@ struct OrbitDiaaPauseState: Decodable {
     let paused: Bool
 }
 
+struct OrbitDiaaUploadSummary {
+    var settings: OrbitDiaaSettings?
+    var uploaded = 0
+    var rejected = 0
+    var unconfirmed = false
+}
+
 struct OrbitDiaaSettingsView: View {
     @ObservedObject var api: ServerAPI
     @Environment(\.scenePhase) private var phase
@@ -54,9 +61,13 @@ struct OrbitDiaaSettingsView: View {
     @State private var previewID: String?
     @State private var destination = ""
     @State private var callStatus: String?
+    @State private var clipToEdit: OrbitDiaaSettings.Clip?
+    @State private var renaming = false
+    @State private var newClipTitle = ""
+    @State private var uploadStatus: String?
 
     private enum Action: String, Identifiable {
-        case save, pause, resume, call
+        case save, pause, resume, call, deleteClip
         var id: Self { self }
         var title: String {
             switch self {
@@ -64,6 +75,7 @@ struct OrbitDiaaSettingsView: View {
             case .pause: "Disable Diaa"
             case .resume: "Enable Diaa"
             case .call: "Call with Face ID"
+            case .deleteClip: "Delete audio"
             }
         }
     }
@@ -93,23 +105,26 @@ struct OrbitDiaaSettingsView: View {
                     if let callStatus { Text(callStatus).font(.footnote) }
                 }
                 Section("Playback") {
-                    Stepper("Maximum duration · \(seconds) seconds", value: $seconds, in: 5...45)
+                    Stepper("Start clips for \(seconds) seconds", value: $seconds, in: 5...45)
                         .disabled(!canEdit)
                     Toggle("Shuffle", isOn: $shuffle).disabled(!canEdit)
                     if shuffle {
-                        Text("Enabled clips play in random order when they fit. Each plays at most once per call.")
+                        Text("Enabled clips play in random order. Each plays at most once per call.")
                             .font(.footnote).foregroundStyle(.secondary)
                     }
                     HStack {
-                        Label("Noqta always plays last", systemImage: "lock")
+                        Label("Noqta after each clip", systemImage: "lock")
                         Spacer()
                         previewButton(id: "noqta", title: "Noqta")
                     }
+                    Text("The last clip and Noqta can finish after the cutoff.")
+                        .font(.footnote).foregroundStyle(.secondary)
                 }
                 Section("Audio clips") {
-                    Button("Upload audio", systemImage: "square.and.arrow.up") { importingAudio = true }
+                    Button("Upload audio files", systemImage: "square.and.arrow.up") { importingAudio = true }
                         .disabled(!canEdit || changed)
-                    if changed { Text("Save playlist changes before uploading.").font(.footnote) }
+                    if let uploadStatus { Text(uploadStatus).font(.footnote) }
+                    if changed { Text("Save playlist changes before managing audio files.").font(.footnote) }
                     ForEach(settings.available_clips) { clip in
                         HStack {
                             Toggle(isOn: Binding(
@@ -131,6 +146,24 @@ struct OrbitDiaaSettingsView: View {
                             }
                             }.disabled(!canEdit)
                             previewButton(id: clip.id, title: clip.title ?? clip.id)
+                            Menu {
+                                Button("Rename", systemImage: "pencil") {
+                                    clipToEdit = clip
+                                    newClipTitle = clip.title ?? clip.id
+                                    renaming = true
+                                }
+                                Button(role: .destructive) {
+                                    clipToEdit = clip
+                                    action = .deleteClip
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
+                            } label: {
+                                Image(systemName: "ellipsis.circle").frame(minWidth: 44, minHeight: 44)
+                            }
+                            .buttonStyle(.borderless)
+                            .accessibilityLabel("Manage \(clip.title ?? clip.id)")
+                            .disabled(!canEdit || changed)
                         }
                     }
                 }
@@ -147,10 +180,19 @@ struct OrbitDiaaSettingsView: View {
         }
         .navigationTitle("Diaa Settings")
         .navigationBarTitleDisplayMode(.inline)
-        .fileImporter(isPresented: $importingAudio, allowedContentTypes: [.audio]) { result in
-            if case .success(let url) = result { Task { await upload(url) } }
+        .fileImporter(isPresented: $importingAudio, allowedContentTypes: [.audio], allowsMultipleSelection: true) { result in
+            if case .success(let urls) = result, !urls.isEmpty { Task { await upload(urls) } }
         }
         .onDisappear { stopPreview() }
+        .alert("Rename audio", isPresented: $renaming) {
+            TextField("Name", text: $newClipTitle)
+            Button("Save") {
+                guard let clip = clipToEdit else { return }
+                let title = newClipTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+                Task { await editClip(clip, title: title) }
+            }.disabled(newClipTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || newClipTitle.count > 60)
+            Button("Cancel", role: .cancel) { clipToEdit = nil }
+        }
         .task(id: "\(api.latestReportsContext)|\(active)") {
             if !active {
                 action = nil
@@ -163,7 +205,7 @@ struct OrbitDiaaSettingsView: View {
         .confirmationDialog(action?.title ?? "Confirm change", isPresented: Binding(
             get: { action != nil }, set: { if !$0 { action = nil } }
         ), titleVisibility: .visible, presenting: action) { next in
-            Button(next.title, role: next == .pause ? .destructive : nil) {
+            Button(next.title, role: next == .pause || next == .deleteClip ? .destructive : nil) {
                 action = nil
                 Task { await apply(next) }
             }
@@ -171,6 +213,8 @@ struct OrbitDiaaSettingsView: View {
         } message: { next in
             if next == .call {
                 Text("Call \(callNumber ?? "") using the saved Diaa playlist?")
+            } else if next == .deleteClip {
+                Text("Delete \(clipToEdit?.title ?? clipToEdit?.id ?? "this clip") from Diaa and remove it from the playlist?")
             } else {
                 Text(next == .pause ? "New Diaa calls will be disabled for everyone." :
                      next == .resume ? "New Diaa calls can use the saved playlist." :
@@ -223,28 +267,28 @@ struct OrbitDiaaSettingsView: View {
         }
     }
 
-    private func upload(_ url: URL) async {
+    private func upload(_ urls: [URL]) async {
         guard canEdit, !changed else { return }
         stopPreview()
         let context = api.latestReportsContext
         busy = true
+        uploadStatus = nil
         defer { busy = false }
         do {
-            let scoped = url.startAccessingSecurityScopedResource()
-            let data: Data
-            do {
-                defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-                let file = try FileHandle(forReadingFrom: url)
-                defer { try? file.close() }
-                data = try file.read(upToCount: 8 * 1024 * 1024 + 1) ?? Data()
-            }
-            let next = try await api.uploadDiaaAudio(data, filename: url.lastPathComponent)
+            let summary = try await api.uploadDiaaAudio(urls)
             guard active, context == api.latestReportsContext else { return }
-            use(next)
-            error = nil
+            if let next = summary.settings { use(next) }
+            if summary.unconfirmed || summary.uploaded + summary.rejected < urls.count {
+                error = "Uploaded \(summary.uploaded) of \(urls.count). The batch stopped. Refresh before retrying."
+            } else if summary.rejected > 0 {
+                error = "Uploaded \(summary.uploaded) of \(urls.count). Some files were unreadable, unsupported, or exceeded a library limit."
+            } else {
+                error = nil
+                uploadStatus = "Uploaded \(summary.uploaded) of \(urls.count)."
+            }
         } catch {
             guard active, context == api.latestReportsContext else { return }
-            self.error = "Upload unconfirmed. Refresh to check. Use an MP3, M4A or WAV up to 45 seconds and 8 MB."
+            self.error = (error as? APIError)?.localizedDescription ?? "Upload unconfirmed. Refresh before retrying."
         }
     }
 
@@ -296,6 +340,10 @@ struct OrbitDiaaSettingsView: View {
 
     private func apply(_ next: Action) async {
         if next == .call { await call(); return }
+        if next == .deleteClip {
+            if let clip = clipToEdit { await editClip(clip) }
+            return
+        }
         guard canEdit, let settings else { return }
         let context = api.latestReportsContext
         let update = OrbitDiaaPlaylistUpdate(revision: settings.revision, duration_seconds: seconds, clips: playlist, shuffle: shuffle)
@@ -315,10 +363,27 @@ struct OrbitDiaaSettingsView: View {
         } catch {
             guard active, context == api.latestReportsContext, !Task.isCancelled else { return }
             switch (error as? HTTPFailure)?.status {
-            case 422: self.error = "In order mode, the enabled clips and Noqta must fit. Increase the duration or turn on Shuffle."
+            case 422: self.error = "Check the selected clips and duration, then try again."
             case 409: self.error = "Settings changed on the server. Refresh before saving again."
             default: self.error = "The change could not be confirmed. Refresh before trying again."
             }
+        }
+    }
+
+    private func editClip(_ clip: OrbitDiaaSettings.Clip, title: String? = nil) async {
+        guard canEdit, !changed else { return }
+        let context = api.latestReportsContext
+        stopPreview()
+        busy = true
+        defer { busy = false; clipToEdit = nil }
+        do {
+            let next = try await api.editDiaaAudio(clip.id, title: title)
+            guard active, context == api.latestReportsContext, !Task.isCancelled else { return }
+            use(next)
+            error = nil
+        } catch {
+            guard active, context == api.latestReportsContext, !Task.isCancelled else { return }
+            self.error = "Audio change unconfirmed. Refresh to check."
         }
     }
 }

@@ -1475,14 +1475,55 @@ extension ServerAPI {
         return data
     }
 
-    func uploadDiaaAudio(_ data: Data, filename: String) async throws -> OrbitDiaaSettings {
-        guard !data.isEmpty && data.count <= 8 * 1024 * 1024 else { throw URLError(.dataLengthExceedsMaximum) }
-        var query = URLComponents()
-        query.queryItems = [URLQueryItem(name: "filename", value: filename)]
-        guard let encoded = query.percentEncodedQuery else { throw URLError(.badURL) }
-        return try await writeDiaaSettings("/api/jarvis-phone/diaa-audio?" + encoded.replacingOccurrences(of: "+", with: "%2B"),
-                                           reason: "Upload Diaa audio", body: data,
-                                           method: "POST", contentType: "application/octet-stream")
+    func uploadDiaaAudio(_ files: [URL]) async throws -> OrbitDiaaUploadSummary {
+        guard (1...20).contains(files.count) else { throw APIError.message("Select up to 20 audio files at a time.") }
+        return try await withDiaaWriteAuthorization("Upload \(files.count) Diaa audio file(s)") { canSubmit in
+            var summary = OrbitDiaaUploadSummary()
+            for url in files {
+                guard canSubmit() else { break }
+                let data: Data
+                do {
+                    let scoped = url.startAccessingSecurityScopedResource()
+                    defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+                    let file = try FileHandle(forReadingFrom: url)
+                    defer { try? file.close() }
+                    data = try file.read(upToCount: 8 * 1024 * 1024 + 1) ?? Data()
+                } catch {
+                    summary.rejected += 1
+                    continue
+                }
+                var query = URLComponents()
+                query.queryItems = [URLQueryItem(name: "filename", value: url.lastPathComponent)]
+                guard !data.isEmpty, data.count <= 8 * 1024 * 1024, let encoded = query.percentEncodedQuery else {
+                    summary.rejected += 1
+                    continue
+                }
+                guard canSubmit() else { break }
+                do {
+                    let next: OrbitDiaaSettings = try await phonePilotRequest(
+                        "/api/jarvis-phone/diaa-audio?" + encoded.replacingOccurrences(of: "+", with: "%2B"),
+                        method: "POST", body: data, contentType: "application/octet-stream")
+                    summary.settings = next
+                    summary.uploaded += 1
+                } catch let error as HTTPFailure where [413, 422].contains(error.status) {
+                    summary.rejected += 1
+                } catch {
+                    summary.unconfirmed = true
+                    break
+                }
+            }
+            return summary
+        }
+    }
+
+    func editDiaaAudio(_ clip: String, title: String? = nil) async throws -> OrbitDiaaSettings {
+        guard clip != "noqta", clip.range(of: "^[a-z0-9-]{1,50}$", options: .regularExpression) != nil else {
+            throw URLError(.badURL)
+        }
+        let body = try title.map { try JSONEncoder().encode(["title": $0]) }
+        return try await writeDiaaSettings("/api/jarvis-phone/diaa-audio/" + clip,
+                                           reason: title == nil ? "Delete Diaa audio" : "Rename Diaa audio",
+                                           body: body, method: title == nil ? "DELETE" : "PUT")
     }
 
     func callDiaaNumber(_ input: String) async throws {
@@ -1507,9 +1548,16 @@ extension ServerAPI {
         guard result.paused == !enabled else { throw URLError(.badServerResponse) }
     }
 
-    private func writeDiaaSettings<T: Decodable>(_ path: String, reason: String, body: Data,
+    private func writeDiaaSettings<T: Decodable>(_ path: String, reason: String, body: Data?,
                                                  method: String = "PUT", contentType: String = "application/json",
                                                  faceIDRequired: Bool = false) async throws -> T {
+        try await withDiaaWriteAuthorization(reason, faceIDRequired: faceIDRequired) { _ in
+            try await phonePilotRequest(path, method: method, body: body, contentType: contentType)
+        }
+    }
+
+    private func withDiaaWriteAuthorization<T>(_ reason: String, faceIDRequired: Bool = false,
+                                                operation: (() -> Bool) async throws -> T) async throws -> T {
         guard canControl && (faceIDRequired || phonePilotIsForeground()) && !Task.isCancelled else { throw CancellationError() }
         let context = latestReportsContext
         let epoch = studentsAccessGeneration
@@ -1536,7 +1584,7 @@ extension ServerAPI {
             try await authorizeConfirmed(reason)
         }
         guard maySubmit() && phonePilotIsForeground() else { throw CancellationError() }
-        return try await phonePilotRequest(path, method: method, body: body, contentType: contentType)
+        return try await operation { maySubmit() && phonePilotIsForeground() }
     }
 
     func diaaFriends() async throws -> OrbitDiaaFriends {
