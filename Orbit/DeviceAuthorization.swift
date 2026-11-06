@@ -32,6 +32,24 @@ enum DeviceAuthorization {
         let success = try await context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: reason)
         guard success else { throw APIError.message("Device authentication failed. No command was sent.") }
     }
+    static func authorizeFaceID(reason: String) async throws {
+        guard pendingConfirmation == nil && activeContext == nil else {
+            throw APIError.message("Finish the current authentication prompt first.")
+        }
+        let context = LAContext()
+        context.localizedFallbackTitle = ""
+        var error: NSError?
+        guard context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error),
+              context.biometryType == .faceID else {
+            throw APIError.message("Set up and unlock Face ID before calling from Orbit.")
+        }
+        activeContext = context
+        defer { if activeContext === context { activeContext = nil } }
+        guard try await context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: reason) else {
+            throw APIError.message("Face ID did not authorize this call.")
+        }
+    }
+
     private static func confirm(reason: String) async throws {
         guard activeContext == nil && pendingConfirmation == nil else {
             throw APIError.message("Finish the current confirmation first.")
@@ -78,3 +96,4 @@ enum DeviceAuthorization {
         return [.userCancel, .appCancel, .systemCancel].contains(la.code)
     }
 }
+

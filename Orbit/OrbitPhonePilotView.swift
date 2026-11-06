@@ -100,7 +100,12 @@ struct OrbitDiaaFriendsView: View {
     var body: some View {
         Form {
             Section {
-                Text("When Diaa is on, listed callers can hear both clips for up to 20 seconds.")
+                NavigationLink {
+                    OrbitDiaaSettingsView(api: api)
+                } label: {
+                    Label("Diaa Settings", systemImage: "slider.horizontal.3")
+                }
+                Text("Listed callers use the shared Diaa playback settings.")
                 if loaded && numbers.isEmpty { Text("No callers added yet.") }
                 ForEach(active ? numbers : [], id: \.self) { friend in
                     HStack {

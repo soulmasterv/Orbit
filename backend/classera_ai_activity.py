@@ -24,16 +24,38 @@ def migrate(connection, now=None):
                        (int(time.time()) if now is None else now,))
 
 
+def is_ai_button(message):
+    kind = message.get('type')
+    if kind not in ('button', 'interactive'):
+        return False
+    if kind == 'button':
+        button = message.get('button')
+    else:
+        interactive = message.get('interactive')
+        button = interactive.get('button_reply') if isinstance(interactive, dict) else None
+    kapso = message.get('kapso')
+    details = kapso.get('message_type_data') if isinstance(kapso, dict) else None
+    if not isinstance(button, (dict, str)) and isinstance(details, dict):
+        button = details.get('button_reply')
+        if button is None and kind == 'button':
+            button = details.get('button', details)
+    values = (button,) if isinstance(button, str) else (
+        (button.get(field) for field in ('id', 'payload', 'text', 'title'))
+        if isinstance(button, dict) else ()
+    )
+    return any(isinstance(value, str) and value.strip().casefold() == 'get ai analysis'
+               for value in values)
+
+
 def observe_button(message, *, path=DB, now=None):
     """Best-effort audit; never interrupts existing webhook actions.
 
     Entry-point call sites must be real inbound button branches, not the shared
     handle_ai_button handler also used for synthetic typed-text AI requests.
     """
-    if not isinstance(message, dict) or message.get('type') != 'button': return False
-    button, context = message.get('button'), message.get('context')
-    if not isinstance(button, dict) or not isinstance(context, dict): return False
-    if (button.get('payload') or button.get('text')) != 'Get AI Analysis': return False
+    if not isinstance(message, dict) or not is_ai_button(message): return False
+    context = message.get('context')
+    if not isinstance(context, dict): return False
     phone, event, parent = message.get('from'), message.get('id'), context.get('id')
     if not isinstance(phone, str) or not re.fullmatch(r'[1-9][0-9]{7,14}', phone): return False
     if any(not isinstance(v, str) or not v or len(v) > 512 or any(ord(c) < 32 for c in v) for v in [event, parent]): return False
@@ -67,3 +89,4 @@ def evidence(connection, attempt):
             return {'status': 'not_recorded', 'requested_at': None}
     except sqlite3.Error: pass
     return unknown
+

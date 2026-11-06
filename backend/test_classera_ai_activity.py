@@ -50,6 +50,24 @@ class AIButtonActivityTests(unittest.TestCase):
             self.assertFalse(self.observe({**self.message,**updates}))
         self.assertEqual(self.connection.execute('SELECT COUNT(*) FROM orbit_ai_button_events').fetchone()[0],0)
 
+    def test_interactive_button_uses_exact_report_context(self):
+        message = {**self.message, 'type': 'interactive', 'interactive': {
+            'type': 'button_reply', 'button_reply': {'id': 'opaque-id', 'title': ' Get AI Analysis '}}}
+        self.assertTrue(self.observe(message))
+        self.assertEqual(evidence(self.connection, self.attempt)['status'], 'requested')
+        self.assertFalse(self.observe({**message, 'id': 'without-context', 'context': {}}))
+
+    def test_kapso_button_and_case_insensitive_payload(self):
+        message = {**self.message, 'button': None,
+                   'kapso': {'message_type_data': {'button': {'payload': 'get ai analysis'}}}}
+        self.assertTrue(self.observe(message))
+
+    def test_interactive_list_and_text_do_not_record_clicks(self):
+        message = {**self.message, 'type': 'interactive', 'interactive': {
+            'list_reply': {'title': 'Get AI Analysis'}}}
+        self.assertFalse(self.observe(message))
+        self.assertFalse(self.observe({**self.message, 'type': 'text'}))
+
     def test_invalid_identity_and_time_fail_closed_without_raw_logging(self):
         for updates in [{'from':'+201000000001'},{'id':''},{'id':'x'*513},{'timestamp':True},
                         {'timestamp':'n/a'},{'timestamp':'0'},{'timestamp':'1601'},{'timestamp':-1}]:
@@ -90,3 +108,4 @@ def receive_webhook():
         self.assertEqual(ast.dump(tree.body[0]),ast.dump(ast.parse(original).body[0]))
         with self.assertRaises(ValueError):patch_webhook(patched)
         with self.assertRaises(ValueError):patch_webhook(original.replace('handle_ai_button(message, phone_number_id)','other(message, phone_number_id)'))
+

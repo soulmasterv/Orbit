@@ -1394,19 +1394,21 @@ extension ServerAPI {
             && phonePilotEpoch == studentsAccessGeneration && phonePilotBase == activeBaseURL
     }
     func invalidatePhonePilotStatus() { phonePilotGeneration += 1; phonePilotRefreshed = nil }
-    private func phonePilotRequest<T: Decodable>(_ path: String, method: String = "GET", body: Data? = nil) async throws -> T {
+    private func phonePilotRequest<T: Decodable>(_ path: String, method: String = "GET", body: Data? = nil,
+                                                  contentType: String = "application/json") async throws -> T {
         guard accessAllowed && !previewMode && !Task.isCancelled else { throw CancellationError() }
         let context = latestReportsContext
         let epoch = studentsAccessGeneration
         let originalBase = activeBaseURL
         var command = try request(path: path, method: method, endpoint: originalBase)
         command.timeoutInterval = 25
-        command.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        command.setValue(contentType, forHTTPHeaderField: "Content-Type")
         command.httpBody = body
         let (data, response) = try await session.data(for: command)
         guard accessAllowed && context == latestReportsContext && epoch == studentsAccessGeneration && originalBase == activeBaseURL && !Task.isCancelled else { throw CancellationError() }
-        guard let response = response as? HTTPURLResponse, response.statusCode == 200, response.url == command.url,
+        guard let response = response as? HTTPURLResponse, response.url == command.url,
               data.count < (path == "/api/jarvis-phone/diaa-friends" ? 131072 : 32768) else { throw URLError(.badServerResponse) }
+        guard response.statusCode == 200 else { throw HTTPFailure(status: response.statusCode) }
         return try JSONDecoder().decode(T.self, from: data)
     }
     func phonePilotStatus() async throws -> OrbitPhonePilotStatus {
@@ -1451,6 +1453,78 @@ extension ServerAPI {
         ]
         guard let encoded = query.percentEncodedQuery else { throw URLError(.badURL) }
         return try await phonePilotRequest("/api/jarvis-phone/diaa-history?" + encoded.replacingOccurrences(of: "+", with: "%2B"))
+    }
+
+    func diaaSettings() async throws -> OrbitDiaaSettings {
+        try await phonePilotRequest("/api/jarvis-phone/diaa-settings")
+    }
+
+    func diaaAudio(_ clip: String) async throws -> Data {
+        guard accessAllowed && !previewMode && !Task.isCancelled,
+              clip.range(of: "^[a-z0-9-]{1,50}$", options: .regularExpression) != nil else { throw CancellationError() }
+        let context = latestReportsContext
+        let epoch = studentsAccessGeneration
+        let endpoint = activeBaseURL
+        let command = try request(path: "/api/jarvis-phone/diaa-audio/" + clip, method: "GET", endpoint: endpoint)
+        let (data, response) = try await session.data(for: command)
+        guard accessAllowed && context == latestReportsContext && epoch == studentsAccessGeneration,
+              endpoint == activeBaseURL && !Task.isCancelled,
+              let http = response as? HTTPURLResponse, http.statusCode == 200,
+              http.url == command.url, http.mimeType == "audio/wav",
+              data.count <= 2_160_044 else { throw URLError(.badServerResponse) }
+        return data
+    }
+
+    func uploadDiaaAudio(_ data: Data, filename: String) async throws -> OrbitDiaaSettings {
+        guard !data.isEmpty && data.count <= 8 * 1024 * 1024 else { throw URLError(.dataLengthExceedsMaximum) }
+        var query = URLComponents()
+        query.queryItems = [URLQueryItem(name: "filename", value: filename)]
+        guard let encoded = query.percentEncodedQuery else { throw URLError(.badURL) }
+        return try await writeDiaaSettings("/api/jarvis-phone/diaa-audio?" + encoded.replacingOccurrences(of: "+", with: "%2B"),
+                                           reason: "Upload Diaa audio", body: data,
+                                           method: "POST", contentType: "application/octet-stream")
+    }
+
+    func callDiaaNumber(_ destination: String) async throws {
+        guard destination.range(of: "^\\+[1-9][0-9]{7,14}$", options: .regularExpression) != nil else { throw URLError(.badURL) }
+        let id = UUID().uuidString.lowercased()
+        let body = try JSONEncoder().encode(["request_id": id, "destination": destination])
+        let result: OrbitPhonePilotResult = try await writeDiaaSettings(
+            "/api/jarvis-phone/diaa-call", reason: "Call \(destination) from Orbit", body: body,
+            method: "POST", faceIDRequired: true)
+        guard result.request_id == id, result.status == "queued" else { throw URLError(.cannotParseResponse) }
+    }
+
+    func saveDiaaSettings(_ update: OrbitDiaaPlaylistUpdate) async throws -> OrbitDiaaSettings {
+        try await writeDiaaSettings("/api/jarvis-phone/diaa-settings", reason: "Save Diaa playlist",
+                                    body: JSONEncoder().encode(update))
+    }
+
+    func setDiaaEnabled(_ enabled: Bool) async throws {
+        let result: OrbitDiaaPauseState = try await writeDiaaSettings(
+            "/api/jarvis-phone/diaa-state", reason: enabled ? "Enable Diaa" : "Disable Diaa for everyone",
+            body: JSONEncoder().encode(["paused": !enabled]))
+        guard result.paused == !enabled else { throw URLError(.badServerResponse) }
+    }
+
+    private func writeDiaaSettings<T: Decodable>(_ path: String, reason: String, body: Data,
+                                                 method: String = "PUT", contentType: String = "application/json",
+                                                 faceIDRequired: Bool = false) async throws -> T {
+        guard canControl && phonePilotIsForeground() && !Task.isCancelled else { throw CancellationError() }
+        let context = latestReportsContext
+        let epoch = studentsAccessGeneration
+        let endpoint = activeBaseURL
+        actionBusy = true
+        defer { actionBusy = false }
+        if faceIDRequired {
+            try await DeviceAuthorization.authorizeFaceID(reason: reason)
+        } else {
+            try await authorizeConfirmed(reason)
+        }
+        guard accessAllowed && !needsVerification && connection == .connected && phonePilotIsForeground(),
+              context == latestReportsContext && epoch == studentsAccessGeneration &&
+              endpoint == activeBaseURL && !Task.isCancelled else { throw CancellationError() }
+        return try await phonePilotRequest(path, method: method, body: body, contentType: contentType)
     }
 
     func diaaFriends() async throws -> OrbitDiaaFriends {
