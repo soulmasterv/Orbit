@@ -23,6 +23,11 @@ struct ServiceDetailView: View {
                     }
                 }
                 if let error = api.servicesError { Label(error, systemImage: "info.circle").font(.caption).foregroundStyle(.secondary) }
+                if page == .classera {
+                    ClasseraExamBreakSection(api: api) { service in
+                        pending = ServiceCommand(kind: .forceFireClasseraReport, id: service.id, name: service.displayName)
+                    }
+                }
                 if api.serviceSnapshot == nil {
                     FeatureUnavailable(title: api.servicesLoading ? "Loading service health" : "Service data unavailable", message: "The authenticated backend must report this integration. Refresh to check again.")
                 } else { serviceContent }
@@ -293,40 +298,6 @@ struct ServiceDetailView: View {
                             }
                         }
 
-                        if let why = reason(
-                            service.canForceFire
-                        ) {
-
-                            Text(
-                                "Force send unavailable: \(why)"
-                            )
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-
-                        } else {
-
-                            Button(role: .destructive) {
-
-                                pending = ServiceCommand(
-                                    kind: .forceFireClasseraReport,
-                                    id: service.id,
-                                    name: service.displayName
-                                )
-
-                            } label: {
-
-                                Label(
-                                    "Force Send",
-                                    systemImage: "exclamationmark.arrow.triangle.2.circlepath"
-                                )
-                                .font(
-                                    .subheadline.weight(
-                                        .medium
-                                    )
-                                )
-                                .frame(minHeight: 44)
-                            }
-                        }
                         ClasseraRecipientsPreview(api: api, identifier: service.id)
                         NavigationLink { ClasseraStudentsView(api: api) } label: {
                             Label("Manage subscribers", systemImage: "person.2").frame(minHeight: 44)

@@ -8,7 +8,7 @@ on:
         type: boolean
         default: false
   push:
-    branches: [main, build/jarvis-caller-fix]
+    branches: [main, build/classera-exam-break]
 
 permissions:
   contents: read

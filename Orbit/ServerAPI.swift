@@ -1135,6 +1135,44 @@ extension ServerAPI {
 
 
 extension ServerAPI {
+    func classeraExamBreak() async throws -> ClasseraExamBreakState {
+        try await classeraExamBreakRequest()
+    }
+
+    func setClasseraExamBreak(_ change: ClasseraExamBreakChange) async throws -> ClasseraExamBreakState {
+        guard canControl && !previewMode && !Task.isCancelled else { throw CancellationError() }
+        let context = latestReportsContext
+        let epoch = studentsAccessGeneration
+        let endpoint = activeBaseURL
+        actionBusy = true
+        actionProgress = change.title
+        defer { actionBusy = false; actionProgress = "" }
+        try await authorizeConfirmed(change.title)
+        guard accessAllowed && !needsVerification && connection == .connected,
+              context == latestReportsContext && epoch == studentsAccessGeneration,
+              endpoint == activeBaseURL && !Task.isCancelled else { throw CancellationError() }
+        return try await classeraExamBreakRequest(change)
+    }
+
+    private func classeraExamBreakRequest(_ change: ClasseraExamBreakChange? = nil) async throws -> ClasseraExamBreakState {
+        guard accessAllowed && !previewMode && !Task.isCancelled else { throw CancellationError() }
+        let context = latestReportsContext
+        let epoch = studentsAccessGeneration
+        let path = "/api/services/classera/exam-break" + (change?.pathSuffix ?? "")
+        let command = try request(path: path, method: change == nil ? "GET" : "POST")
+        let (data, response) = try await session.data(for: command)
+        guard accessAllowed && context == latestReportsContext && epoch == studentsAccessGeneration && !Task.isCancelled else {
+            throw CancellationError()
+        }
+        guard response.url == command.url else { throw URLError(.badServerResponse) }
+        try validate(response)
+        let state = try JSONDecoder().decode(ClasseraExamBreakState.self, from: data)
+        guard state.classes["12F"] != nil, state.classes["12E"] != nil else {
+            throw URLError(.cannotParseResponse)
+        }
+        return state
+    }
+
     func classeraActionsHistory() async throws -> ClasseraActionsHistory {
         try await classeraMonitoringRequest("/api/classera/report-settings/history")
     }
