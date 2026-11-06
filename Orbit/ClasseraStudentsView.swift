@@ -4,12 +4,12 @@ struct StudentDatabasesView: View {
     @ObservedObject var api: ServerAPI
     @StateObject private var schoolStore: StudentsStore
     var onWorkspace: (() -> Void)? = nil
-    init(api: ServerAPI, onWorkspace: (() -> Void)? = nil) {
+    init(api: ServerAPI, directory: Binding<OrbitNavigationState.StudentDirectory>, onWorkspace: (() -> Void)? = nil) {
         self.api = api; self.onWorkspace = onWorkspace
+        _directory = directory
         _schoolStore = StateObject(wrappedValue: StudentsStore(api: api))
     }
-    private enum Directory { case school, classera }
-    @State private var directory: Directory = .classera
+    @Binding private var directory: OrbitNavigationState.StudentDirectory
     @Environment(\.dismiss) private var dismiss
     var body: some View {
         VStack(spacing: 0) {

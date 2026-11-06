@@ -8,6 +8,7 @@ enum ServicePage: String, CaseIterable, Identifiable, Codable {
 }
 struct ServiceDetailView: View {
     @ObservedObject var api: ServerAPI
+    @Environment(\.orbitNavigation) private var navigation
     let page: ServicePage
     @State private var pending: ServiceCommand?
     @State private var recipientSheet: ClasseraRecipientSheetTarget?
@@ -299,8 +300,10 @@ struct ServiceDetailView: View {
                         }
 
                         ClasseraRecipientsPreview(api: api, identifier: service.id)
-                        NavigationLink { ClasseraStudentsView(api: api) } label: {
-                            Label("Manage subscribers", systemImage: "person.2").frame(minHeight: 44)
+                        if let navigation {
+                            Button { navigation.openClasseraSubscribers() } label: {
+                                Label("Manage subscribers", systemImage: "person.2").frame(minHeight: 44)
+                            }
                         }
                         Button(role: .destructive) {
                             recipientSheet = ClasseraRecipientSheetTarget(service: service, forceOne: true)

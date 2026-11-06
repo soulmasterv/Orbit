@@ -315,9 +315,9 @@ final class ClasseraStudentsTests: XCTestCase {
         let server = api()
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
         let views: [(String, AnyView)] = [
-            ("student-databases", AnyView(NavigationStack { StudentDatabasesView(api: server) })),
+            ("student-databases", AnyView(NavigationStack { StudentDatabasesView(api: server, directory: .constant(.classera)) })),
             ("classera-subscribers", AnyView(NavigationStack { ClasseraStudentsView(api: server) })),
-            ("student-databases-large-text", AnyView(NavigationStack { StudentDatabasesView(api: server) }.environment(\.dynamicTypeSize, .accessibility1))),
+            ("student-databases-large-text", AnyView(NavigationStack { StudentDatabasesView(api: server, directory: .constant(.classera)) }.environment(\.dynamicTypeSize, .accessibility1))),
             ("classera-student-controls", AnyView(NavigationStack { ClasseraStudentEditor(api: server, phone: "201000000001") }))]
         for (name, view) in views {
             let window = UIWindow(windowScene: scene); window.frame = scene.coordinateSpace.bounds

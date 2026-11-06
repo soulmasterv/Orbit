@@ -3,6 +3,9 @@ import SwiftUI
 /// Presentation state only, held in memory. Never persisted to UserDefaults or logs.
 @MainActor
 final class OrbitNavigationState: ObservableObject {
+    enum StudentDirectory { case school, classera }
+
+    @Published var studentDirectory: StudentDirectory = .classera
     @Published var selectedTab: Int
     @Published var homePath: NavigationPath
     @Published var processesPath = NavigationPath()
@@ -14,6 +17,11 @@ final class OrbitNavigationState: ObservableObject {
         self.selectedTab = selectedTab; homePath = NavigationPath(home)
     }
     func openStudents() { selectedTab = 3 }
+    func openClasseraSubscribers() {
+        studentDirectory = .classera
+        if !studentsPath.isEmpty { studentsPath = NavigationPath() }
+        openStudents()
+    }
     func anchor(for screen: String) -> String? { anchors[screen] }
     func remember(_ anchor: String?, for screen: String) {
         // Privacy cleanup can temporarily remove scroll targets. Do not replace a

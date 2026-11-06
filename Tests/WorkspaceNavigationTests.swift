@@ -17,6 +17,20 @@ final class WorkspaceNavigationTests: XCTestCase {
         navigation.openStudents()
         XCTAssertEqual(navigation.studentsPath.count, 1)
     }
+    func testManageSubscribersSelectsClasseraAtStudentsRootWithoutChangingHome() {
+        let navigation = OrbitNavigationState(home: [.service(.classera)])
+        navigation.studentDirectory = .school
+        navigation.studentsPath.append(SchoolStudentRoute(phone: "201000000001"))
+
+        navigation.openClasseraSubscribers()
+        navigation.openClasseraSubscribers()
+
+        XCTAssertEqual(navigation.selectedTab, 3)
+        XCTAssertEqual(navigation.studentDirectory, .classera)
+        XCTAssertTrue(navigation.studentsPath.isEmpty)
+        XCTAssertEqual(navigation.homePath.count, 1)
+    }
+
     func testWorkspaceDestinationsCanRetainIndependentTypedRoutes() {
         let navigation = OrbitNavigationState()
         for route in WorkspaceRoute.allCases { navigation.homePath.append(route) }
