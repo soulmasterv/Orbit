@@ -45,9 +45,31 @@ enum DeviceAuthorization {
         }
         activeContext = context
         defer { if activeContext === context { activeContext = nil } }
-        guard try await context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: reason) else {
-            throw APIError.message("Face ID did not authorize this call.")
+        do {
+            guard try await context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: reason) else {
+                throw APIError.message("Face ID did not recognize you. Try again.")
+            }
+        } catch let error as LAError {
+            switch error.code {
+            case .userCancel, .appCancel, .systemCancel:
+                throw APIError.message("Face ID was interrupted. Keep Orbit open and try again.")
+            case .biometryLockout:
+                throw APIError.message("Face ID is locked. Unlock your iPhone with its passcode, then retry Face ID in Orbit.")
+            default:
+                throw APIError.message("Face ID could not verify you. Try again.")
+            }
         }
+    }
+
+    static func waitForCallForeground(isForeground: () -> Bool, mayContinue: () -> Bool) async throws {
+        let clock = ContinuousClock()
+        let deadline = clock.now + .seconds(2)
+        while mayContinue() && !Task.isCancelled {
+            if isForeground() { return }
+            if clock.now >= deadline { break }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        throw APIError.message("Orbit wasn’t ready to send the call. Keep Orbit open and try again.")
     }
 
     private static func confirm(reason: String) async throws {

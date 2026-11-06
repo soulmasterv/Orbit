@@ -1485,8 +1485,8 @@ extension ServerAPI {
                                            method: "POST", contentType: "application/octet-stream")
     }
 
-    func callDiaaNumber(_ destination: String) async throws {
-        guard destination.range(of: "^\\+[1-9][0-9]{7,14}$", options: .regularExpression) != nil else { throw URLError(.badURL) }
+    func callDiaaNumber(_ input: String) async throws {
+        guard let destination = DiaaCallNumber.normalized(input) else { throw URLError(.badURL) }
         let id = UUID().uuidString.lowercased()
         let body = try JSONEncoder().encode(["request_id": id, "destination": destination])
         let result: OrbitPhonePilotResult = try await writeDiaaSettings(
@@ -1510,20 +1510,32 @@ extension ServerAPI {
     private func writeDiaaSettings<T: Decodable>(_ path: String, reason: String, body: Data,
                                                  method: String = "PUT", contentType: String = "application/json",
                                                  faceIDRequired: Bool = false) async throws -> T {
-        guard canControl && phonePilotIsForeground() && !Task.isCancelled else { throw CancellationError() }
+        guard canControl && (faceIDRequired || phonePilotIsForeground()) && !Task.isCancelled else { throw CancellationError() }
         let context = latestReportsContext
         let epoch = studentsAccessGeneration
         let endpoint = activeBaseURL
         actionBusy = true
         defer { actionBusy = false }
+        func maySubmit() -> Bool {
+            accessAllowed && !needsVerification && connection == .connected &&
+                context == latestReportsContext && epoch == studentsAccessGeneration &&
+                endpoint == activeBaseURL && !Task.isCancelled
+        }
         if faceIDRequired {
+            func mayContinueCall() -> Bool {
+                maySubmit() && UIApplication.shared.applicationState != .background
+            }
+            // The confirmation sheet and the system Face ID sheet each affect foreground state.
+            try await Task.sleep(for: .milliseconds(300))
+            try await DeviceAuthorization.waitForCallForeground(
+                isForeground: phonePilotIsForeground, mayContinue: mayContinueCall)
             try await DeviceAuthorization.authorizeFaceID(reason: reason)
+            try await DeviceAuthorization.waitForCallForeground(
+                isForeground: phonePilotIsForeground, mayContinue: mayContinueCall)
         } else {
             try await authorizeConfirmed(reason)
         }
-        guard accessAllowed && !needsVerification && connection == .connected && phonePilotIsForeground(),
-              context == latestReportsContext && epoch == studentsAccessGeneration &&
-              endpoint == activeBaseURL && !Task.isCancelled else { throw CancellationError() }
+        guard maySubmit() && phonePilotIsForeground() else { throw CancellationError() }
         return try await phonePilotRequest(path, method: method, body: body, contentType: contentType)
     }
 

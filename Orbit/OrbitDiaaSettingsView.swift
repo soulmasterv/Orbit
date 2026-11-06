@@ -1,7 +1,16 @@
 import SwiftUI
 import AVFoundation
-import LocalAuthentication
 import UniformTypeIdentifiers
+
+enum DiaaCallNumber {
+    static func normalized(_ input: String) -> String? {
+        let number = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        if number.hasPrefix("+"), ClasseraPhone.valid(String(number.dropFirst())) { return number }
+        guard number.count == 11, number.hasPrefix("01"),
+              let digits = ClasseraPhone.normalized(number) else { return nil }
+        return "+" + digits
+    }
+}
 
 struct OrbitDiaaSettings: Decodable {
     struct Clip: Decodable, Identifiable {
@@ -61,10 +70,7 @@ struct OrbitDiaaSettingsView: View {
 
     private var active: Bool { api.accessAllowed && phase == .active }
     private var canEdit: Bool { active && !busy && api.canControl }
-    private var callNumber: String? {
-        let number = destination.trimmingCharacters(in: .whitespacesAndNewlines)
-        return number.range(of: "^\\+[1-9][0-9]{7,14}$", options: .regularExpression) == nil ? nil : number
-    }
+    private var callNumber: String? { DiaaCallNumber.normalized(destination) }
     private var changed: Bool {
         guard let settings else { return false }
         return settings.duration_seconds != seconds || settings.clips != playlist || (settings.shuffle ?? false) != shuffle
@@ -80,7 +86,7 @@ struct OrbitDiaaSettingsView: View {
                     }.disabled(!canEdit)
                 }
                 Section("Call a person") {
-                    TextField("Number with country code, e.g. +20…", text: $destination)
+                    TextField("Mobile number, e.g. 01012345678", text: $destination)
                         .keyboardType(.phonePad)
                     Button("Call with Face ID") { action = .call }
                         .disabled(!canEdit || !settings.enabled || callNumber == nil)
@@ -267,7 +273,7 @@ struct OrbitDiaaSettingsView: View {
     }
 
     private func call() async {
-        guard canEdit, settings?.enabled == true, let number = callNumber else { return }
+        guard api.canControl, !busy, settings?.enabled == true, let number = callNumber else { return }
         let context = api.latestReportsContext
         busy = true
         defer { busy = false }
@@ -282,8 +288,8 @@ struct OrbitDiaaSettingsView: View {
             guard active, context == api.latestReportsContext else { return }
             if let error = error as? APIError {
                 callStatus = error.localizedDescription
-            } else if error is LAError || DeviceAuthorization.isCancellation(error) {
-                callStatus = "Face ID did not authorize this call."
+            } else if DeviceAuthorization.isCancellation(error) {
+                callStatus = "Call cancelled before submission."
             } else {
                 callStatus = "Call unconfirmed. Check the outgoing queue before trying again."
             }
