@@ -288,8 +288,6 @@ struct OrbitDiaaSettingsView: View {
             guard active, context == api.latestReportsContext else { return }
             if let error = error as? APIError {
                 callStatus = error.localizedDescription
-            } else if DeviceAuthorization.isCancellation(error) {
-                callStatus = "Call cancelled before submission."
             } else {
                 callStatus = "Call unconfirmed. Check the outgoing queue before trying again."
             }
