@@ -12,6 +12,13 @@ final class DiaaCallTests: XCTestCase {
         XCTAssertNil(DiaaCallNumber.normalized("02012345678"))
     }
 
+    func testContactNumberFormattingPreservesTheDestination() {
+        XCTAssertEqual(DiaaCallNumber.normalized("010 1234 5678"), "+201012345678")
+        XCTAssertEqual(DiaaCallNumber.normalized("+20 (101) 234-5678"), "+201012345678")
+        XCTAssertNil(DiaaCallNumber.normalized("+20 101 234 5678 ext. 9"))
+        XCTAssertNil(DiaaCallNumber.normalized("010 1234 5678,9"))
+    }
+
     func testForegroundHandoffWaitsForTheAppToBecomeActive() async throws {
         var checks = 0
         try await DeviceAuthorization.waitForCallForeground(isForeground: {
