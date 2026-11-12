@@ -1,13 +1,10 @@
 import SwiftUI
 import AVFoundation
-import ContactsUI
 import UniformTypeIdentifiers
 
 enum DiaaCallNumber {
     static func normalized(_ input: String) -> String? {
-        let separators = CharacterSet.whitespaces.union(CharacterSet(charactersIn: "()-"))
-        let number = input.trimmingCharacters(in: .whitespacesAndNewlines)
-            .components(separatedBy: separators).joined()
+        let number = OrbitPhoneNumberField.removingFormatting(input)
         guard number.unicodeScalars.allSatisfy({ $0.value == 43 || (48...57).contains($0.value) }) else {
             return nil
         }
@@ -15,44 +12,6 @@ enum DiaaCallNumber {
         guard number.count == 11, number.hasPrefix("01"),
               let digits = ClasseraPhone.normalized(number) else { return nil }
         return "+" + digits
-    }
-}
-
-private struct DiaaContactPicker: UIViewControllerRepresentable {
-    let onSelect: (String) -> Void
-    let onCancel: () -> Void
-
-    func makeUIViewController(context: Context) -> CNContactPickerViewController {
-        let picker = CNContactPickerViewController()
-        picker.delegate = context.coordinator
-        picker.displayedPropertyKeys = [CNContactPhoneNumbersKey]
-        picker.predicateForEnablingContact = NSPredicate(format: "phoneNumbers.@count > 0")
-        picker.predicateForSelectionOfProperty = NSPredicate(format: "key == %@", CNContactPhoneNumbersKey)
-        return picker
-    }
-
-    func updateUIViewController(_ picker: CNContactPickerViewController, context: Context) {
-        context.coordinator.selection = self
-    }
-
-    func makeCoordinator() -> Coordinator { Coordinator(selection: self) }
-
-    final class Coordinator: NSObject, CNContactPickerDelegate {
-        var selection: DiaaContactPicker
-
-        init(selection: DiaaContactPicker) { self.selection = selection }
-
-        func contactPicker(_ picker: CNContactPickerViewController, didSelect property: CNContactProperty) {
-            guard let number = property.value as? CNPhoneNumber else {
-                selection.onCancel()
-                return
-            }
-            selection.onSelect(number.stringValue)
-        }
-
-        func contactPickerDidCancel(_ picker: CNContactPickerViewController) {
-            selection.onCancel()
-        }
     }
 }
 
@@ -104,7 +63,6 @@ struct OrbitDiaaSettingsView: View {
     @State private var player: AVAudioPlayer?
     @State private var previewID: String?
     @State private var destination = ""
-    @State private var pickingContact = false
     @State private var callStatus: String?
     @State private var clipToEdit: OrbitDiaaSettings.Clip?
     @State private var renaming = false
@@ -143,24 +101,17 @@ struct OrbitDiaaSettingsView: View {
                     }.disabled(!canEdit)
                 }
                 Section("Call a person") {
-                    Button("Choose from Contacts", systemImage: "person.crop.circle") {
-                        pickingContact = true
-                    }
-                    .disabled(!canEdit || !settings.enabled)
-                    .sheet(isPresented: $pickingContact) {
-                        DiaaContactPicker { number in
-                            pickingContact = false
-                            guard api.accessAllowed, api.canControl else { return }
-                            destination = number
+                    OrbitPhoneNumberField(
+                        prompt: "Mobile number, e.g. 01012345678",
+                        text: $destination,
+                        canPick: api.accessAllowed && api.canControl && !busy && settings.enabled,
+                        formatSelection: { DiaaCallNumber.normalized($0) ?? $0 },
+                        didPick: { number in
                             callStatus = DiaaCallNumber.normalized(number) == nil
                                 ? "Choose a mobile number or enter it with the country code."
                                 : nil
-                        } onCancel: {
-                            pickingContact = false
                         }
-                    }
-                    TextField("Mobile number, e.g. 01012345678", text: $destination)
-                        .keyboardType(.phonePad)
+                    )
                     Button("Call with Face ID") { action = .call }
                         .disabled(!canEdit || !settings.enabled || callNumber == nil)
                     if let callStatus { Text(callStatus).font(.footnote) }

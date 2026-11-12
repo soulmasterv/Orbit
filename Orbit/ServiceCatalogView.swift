@@ -474,8 +474,9 @@ private struct ClasseraRecipientSheet: View {
                         Section("Configured numbers") {
                             ForEach($drafts) { $draft in
                                 HStack {
-                                    TextField("Phone number", text: $draft.number).keyboardType(.numberPad)
-                                        .accessibilityLabel("Recipient phone number")
+                                    OrbitPhoneNumberField(prompt: "Phone number", text: $draft.number,
+                                                          accessibilityName: "Recipient phone number",
+                                                          canPick: api.accessAllowed && api.canControl && !saving)
                                     Button(role: .destructive) { drafts.removeAll { $0.id == draft.id } } label: {
                                         Image(systemName: "minus.circle")
                                     }.accessibilityLabel("Remove recipient").buttonStyle(.borderless)

@@ -147,7 +147,7 @@ struct OrbitDiaaFriendsView: View {
             }
             Section("Add caller") {
                 if profiles != nil { TextField("Name", text: $name).textContentType(.name) }
-                TextField("Phone number", text: $number).keyboardType(.phonePad)
+                OrbitPhoneNumberField(prompt: "Phone number", text: $number, canPick: loaded && !busy && api.accessAllowed && api.canControl)
                 Button(numbers.contains(number) ? "Save name" : "Add") {
                     pending = Change(number: number.trimmingCharacters(in: .whitespacesAndNewlines), add: true, name: profiles == nil ? nil : name.trimmingCharacters(in: .whitespacesAndNewlines), context: api.latestReportsContext)
                 }.disabled(!canEdit || name.count > 80 || number.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)

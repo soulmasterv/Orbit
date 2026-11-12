@@ -171,7 +171,7 @@ struct ClasseraStudentsView: View {
             NavigationStack {
                 Form {
                     Section("Student") {
-                        TextField("Phone — 01xxxxxxxxx", text: $phone).keyboardType(.phonePad)
+                        OrbitPhoneNumberField(prompt: "Phone — 01xxxxxxxxx", text: $phone, canPick: api.accessAllowed && !creating)
                         TextField("Name", text: $newName).textContentType(.name)
                     }
                     Text("Egyptian 01 numbers are converted to international format. No class is enabled and no message is sent.")
