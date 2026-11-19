@@ -131,8 +131,12 @@ final class JarvisSession: NSObject, ObservableObject, WKNavigationDelegate, WKU
             "entryID": id as Any? ?? NSNull(),
             "text": text as Any? ?? NSNull()
         ]
-        let result = try await web.callAsyncJavaScript(Self.memoryScript, arguments: arguments,
-                                                       in: nil, contentWorld: .page)
+        let result: Any? = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Any?, Error>) in
+            OrbitJarvisScriptRunner.execute(Self.memoryScript, webView: web, arguments: arguments) { value, error in
+                if let error { continuation.resume(throwing: error) }
+                else { continuation.resume(returning: value) }
+            }
+        }
         guard signedIn, appConnection?.connected == true, webView === web,
               JarvisPolicy.isOrigin(web.url), UIApplication.shared.applicationState == .active,
               let json = result as? String else {
