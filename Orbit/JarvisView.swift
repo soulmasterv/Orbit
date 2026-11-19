@@ -121,6 +121,57 @@ final class JarvisSession: NSObject, ObservableObject, WKNavigationDelegate, WKU
         webView?.isHidden = true
     }
 
+    func memoryRequest(action: String? = nil, id: String? = nil, text: String? = nil) async throws -> JarvisMemory {
+        guard signedIn, appConnection?.connected == true, UIApplication.shared.applicationState == .active,
+              let web = webView, JarvisPolicy.isOrigin(web.url) else {
+            throw APIError.message("Reconnect to JARVIS to manage memory.")
+        }
+        let arguments: [String: Any] = [
+            "action": action as Any? ?? NSNull(),
+            "entryID": id as Any? ?? NSNull(),
+            "text": text as Any? ?? NSNull()
+        ]
+        let result = try await web.callAsyncJavaScript(Self.memoryScript, arguments: arguments,
+                                                       in: nil, contentWorld: .page)
+        guard signedIn, appConnection?.connected == true, webView === web,
+              JarvisPolicy.isOrigin(web.url), UIApplication.shared.applicationState == .active,
+              let json = result as? String else {
+            throw APIError.message("JARVIS session is unavailable. Reconnect and retry.")
+        }
+        let response = try JSONDecoder().decode(JarvisMemoryResponse.self, from: Data(json.utf8))
+        guard let memory = response.memory else {
+            throw APIError.message("Memory is unavailable on this JARVIS server.")
+        }
+        return memory
+    }
+
+    static let memoryScript = """
+    if (location.origin !== 'https://jarvis.labbing.space') throw Error('Reconnect to JARVIS.');
+    async function request(path, options = {}) {
+      const response = await fetch(path, {
+        ...options, credentials: 'same-origin', redirect: 'error', cache: 'no-store',
+        signal: AbortSignal.timeout(15000)
+      });
+      if (!response.ok) {
+        if (response.status === 401 || response.status === 403) throw Error('JARVIS session expired. Reconnect.');
+        throw Error('Memory request failed. Refresh and retry.');
+      }
+      return response.json();
+    }
+    if (action !== null) {
+      const session = await request('/session');
+      if (typeof session.csrf !== 'string' || !session.csrf) throw Error('Reconnect to JARVIS.');
+      await request('/api/controls', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-CSRF-Token': session.csrf},
+        body: JSON.stringify({operation: 'memory', action, id: entryID, text})
+      });
+    }
+    const state = await request('/api/controls');
+    return JSON.stringify({memory: state.memory ?? null});
+    """
+
+
     func showMemory() {
         guard ready, signedIn, memoryAvailable, let web = webView, JarvisPolicy.isOrigin(web.url) else { return }
         stop()
@@ -294,6 +345,7 @@ struct JarvisView: View {
     @EnvironmentObject private var mobile: MobileStore
     @StateObject private var session = JarvisSession()
     @State private var connection: JarvisAppConnection?
+    @State private var showingMemory = false
     @Environment(\.scenePhase) private var phase
     @Environment(\.dismiss) private var dismiss
     var body: some View {
@@ -311,8 +363,8 @@ struct JarvisView: View {
                 if let connection {
                     Menu {
                         Button("Stop voice", systemImage: "stop.fill") { session.stop("Stopped. Microphone released.") }
-                        Button("Memory", systemImage: "brain") { session.showMemory() }
-                            .disabled(!session.signedIn || !session.memoryAvailable)
+                        Button("Memory", systemImage: "brain") { session.stop(); showingMemory = true }
+                            .disabled(!session.signedIn || connection.busy)
                         Button("Reconnect", systemImage: "arrow.clockwise") { Task { await connection.connect() } }
                             .disabled(connection.busy)
                         Button("Sign out", systemImage: "rectangle.portrait.and.arrow.right", role: .destructive) {
@@ -334,6 +386,7 @@ struct JarvisView: View {
             .background(.regularMaterial, in: Capsule())
             .padding(10)
         }
+        .sheet(isPresented: $showingMemory) { JarvisMemoryView(session: session, api: api) }
         .background(Brand.background)
         .toolbar(.hidden, for: .navigationBar, .tabBar)
         .navigationBarBackButtonHidden(true)

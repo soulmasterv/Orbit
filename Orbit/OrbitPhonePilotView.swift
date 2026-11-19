@@ -52,6 +52,30 @@ struct OrbitPhoneQueue: Decodable {
         let not_before: Double?
         let expires: Double
     }
+    struct Schedule: Decodable, Identifiable {
+        let id: String
+        let date: String
+        let time: String
+        let days: [Int]
+        let once: Bool
+        let reminder: String
+
+        var cairoTime: String {
+            let parts = time.split(separator: ":")
+            guard parts.count == 2, let hour = Int(parts[0]), let minute = Int(parts[1]),
+                  (0...23).contains(hour), (0...59).contains(minute) else { return "Time unavailable" }
+            return "\(hour % 12 == 0 ? 12 : hour % 12):\(String(format: "%02d", minute)) \(hour < 12 ? "AM" : "PM") Cairo"
+        }
+
+        var recurrence: String {
+            if once { return date }
+            let labels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+            let weekdays = Set(days).sorted().compactMap { labels.indices.contains($0) ? labels[$0] : nil }
+            return (weekdays.isEmpty ? "Weekdays unavailable" : weekdays.joined(separator: ", ")) + " · Starts " + date
+        }
+    }
+    let schedules: [Schedule]?
+
     let jobs: [Job]
 }
 
@@ -364,6 +388,7 @@ struct OrbitPhonePilotView: View {
                 do { try await Task.sleep(for: .seconds(5)) } catch { return }
             }
         }
+        .task(id: value?.queue_supported) { if value?.queue_supported == true { await refreshQueue() } }
         .onDisappear { api.invalidatePhonePilotStatus() }
         .onChange(of: phase) { _, next in
             if next == .background { api.invalidatePhonePilotStatus(); refreshed = nil; pendingCommand = nil }
@@ -391,6 +416,22 @@ struct OrbitPhonePilotView: View {
             }
         }
         if value?.queue_supported == true {
+            Section("Scheduled Calls") {
+                if queueLoading { ProgressView("Loading schedules…") }
+                if let queue {
+                    if let schedules = queue.schedules {
+                        if schedules.isEmpty { Text("No scheduled calls.").foregroundStyle(.secondary) }
+                        ForEach(schedules) { schedule in
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(schedule.reminder)
+                                Text(schedule.cairoTime)
+                                Text(schedule.recurrence).font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                    } else { Text("Schedules are unavailable on this server.").foregroundStyle(.secondary) }
+                } else { Text("Refresh the queue to load schedules.").foregroundStyle(.secondary) }
+            }
+
             Section("Outgoing call queue") {
                 Button("Refresh queue") { Task { await refreshQueue() } }.disabled(queueLoading || busy)
                 if let queue {
