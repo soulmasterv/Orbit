@@ -39,6 +39,16 @@ final class WhatsAppInboxTests: XCTestCase {
         XCTAssertNil(state.pending)
         XCTAssertNil(state.notice)
     }
+    func testMismatchedOrMissingSendReceiptCannotConfirmAnotherRequest() async {
+        let state = OrbitWhatsAppSubmission()
+        await state.submit(phone: "201000000001", text: "Fixture") { _ in
+            OrbitWhatsAppResult(status: "sent", request_id: UUID().uuidString, message_id: "other")
+        }
+        XCTAssertNotNil(state.pending)
+        let id = state.pending?.request_id
+        await state.check { _ in OrbitWhatsAppResult(status: "sent", request_id: id, message_id: nil) }
+        XCTAssertNotNil(state.pending)
+    }
     func testMissingReadStatusNeverDecodesAsRead() throws {
         let data = Data(#"{"connected":true,"messages":[{"id":"fixture","chat":"201000000001","text":"Fixture","outgoing":true,"at":1700000000,"status":"unknown"}]}"#.utf8)
         XCTAssertEqual(try JSONDecoder().decode(OrbitWhatsAppMessages.self, from: data).messages[0].status, "unknown")

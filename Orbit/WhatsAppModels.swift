@@ -69,7 +69,7 @@ final class OrbitWhatsAppSubmission: ObservableObject {
         catch { if epoch == generation { notice = "Status unavailable. Do not resend until you have checked WhatsApp." } }
     }
     private func accept(_ result: OrbitWhatsAppResult) {
-        if result.status == "sent" {
+        if result.status == "sent", result.request_id == pending?.request_id, result.message_id?.isEmpty == false {
             pending = nil; notice = "Sent. Delivery and read status appear when reported by WhatsApp."
         } else {
             notice = "Send unconfirmed. Check WhatsApp before sending again. No automatic resend."

@@ -121,13 +121,13 @@ struct OrbitWhatsAppChatView: View {
             VStack(alignment: .leading, spacing: 8) {
                 if let notice = submission.notice { Text(notice).font(.caption).foregroundStyle(submission.pending == nil ? Color.secondary : Color.orange) }
                 if submission.pending != nil {
-                    Button("Check send status") { Task { await submission.check { id in try await api.jarvisNativeRequest("/api/jarvis/whatsapp/requests/" + id) }; await refresh() } }.disabled(submission.busy || !active)
+                    Button("Check send status") { checkStatus() }.disabled(submission.busy || !active)
                 }
                 HStack(alignment: .bottom) {
                     TextField("Message", text: $draft, axis: .vertical).lineLimit(1...5).textFieldStyle(.roundedBorder)
                     Button("Send", systemImage: "arrow.up.circle.fill") { send() }
                         .labelStyle(.iconOnly).font(.title2)
-                        .disabled(!active || !connected || submission.busy || submission.pending != nil || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || draft.count > 12000)
+                        .disabled(!active || !connected || submission.busy || submission.pending != nil || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || draft.utf16.count > 12000)
                 }
             }.padding().background(.bar)
         }
@@ -160,11 +160,23 @@ struct OrbitWhatsAppChatView: View {
     private func send() {
         guard active, connected else { return }
         let text = draft
+        let context = api.latestReportsContext
         Task {
             await submission.submit(phone: phone, text: text) { request in
                 try await api.jarvisNativeRequest("/api/jarvis/whatsapp/send", method: "POST", body: JSONEncoder().encode(request))
             }
-            if submission.pending == nil { draft = "" }
+            guard active, api.latestReportsContext == context else { return }
+            if submission.pending == nil && draft == text { draft = "" }
+            await refresh()
+        }
+    }
+    private func checkStatus() {
+        let text = submission.pending?.text
+        let context = api.latestReportsContext
+        Task {
+            await submission.check { id in try await api.jarvisNativeRequest("/api/jarvis/whatsapp/requests/" + id) }
+            guard active, api.latestReportsContext == context else { return }
+            if submission.pending == nil && draft == text { draft = "" }
             await refresh()
         }
     }

@@ -2,27 +2,13 @@ diff --git a/whatsapp-adapter/main.mjs b/whatsapp-adapter/main.mjs
 index d2753ad..7b5d123 100644
 --- a/whatsapp-adapter/main.mjs
 +++ b/whatsapp-adapter/main.mjs
-@@ -1,6 +1,8 @@
- import {diaaCallback,diaaNumber} from './diaa-callback.mjs';
- import {resolveIdentity} from './identity.mjs';
- import {startNotifications} from './notification-http.mjs';
+@@ -3,0 +4,2 @@ import {startNotifications} from './notification-http.mjs';
 +import {WhatsAppInbox} from './whatsapp-inbox.mjs';
 +const inbox=new WhatsAppInbox('/state/orbit-inbox.json');
- import makeWASocket,{useMultiFileAuthState,DisconnectReason,downloadMediaMessage,fetchLatestBaileysVersion} from 'baileys';
- import pino from 'pino';
- import qr from 'qrcode-terminal';
-@@ -14,29 +16,40 @@ const logger=pino({level:'silent'}),seen=new Seen('/state/seen.json');
- const diaaUntil = new Map();
- let activeSocket=null;
- const recipient=config.notificationRecipient||'201011288486';if(!config.owners.includes(recipient))throw Error('Notification recipient must be an allowed owner');
+@@ -17 +19 @@ const recipient=config.notificationRecipient||'201011288486';if(!config.owners.i
 -startNotifications({key,recipient,getSocket:()=>activeSocket});
 +startNotifications({key,recipient,getSocket:()=>activeSocket,inbox});
- let chain=Promise.resolve(),queued=0,retries=0,quitting=false;
- async function connect(){
-   const {state,saveCreds}=await useMultiFileAuthState('/state/auth');
-   if(!state.creds.registered&&!state.creds.me?.id&&!pair)throw Error('Account not linked; run the interactive pairing command first');
-   const {version}=await fetchLatestBaileysVersion();
-   const sock=makeWASocket({version,auth:state,logger,syncFullHistory:false,markOnlineOnConnect:false,shouldSyncHistoryMessage:()=>false});
+@@ -23,0 +26,7 @@ async function connect(){
 +  const sendOriginal=sock.sendMessage.bind(sock);
 +  sock.sendMessage=async(jid,content,...args)=>{
 +    const sent=await sendOriginal(jid,content,...args);
@@ -30,49 +16,29 @@ index d2753ad..7b5d123 100644
 +    return sent;
 +  };
 +  sock.ev.on('messages.update',items=>{try{inbox.updates(items);}catch{console.error('Inbox receipt storage unavailable.');}});
-   let requested=false;
-   sock.ev.on('creds.update',saveCreds);
-   sock.ev.on('connection.update',async u=>{
-     if(u.qr&&pair&&!requested){requested=true;qr.generate(u.qr,{small:true});console.log('Scan this privately from WhatsApp > Linked devices. Do not share it.');}
-     if(u.connection==='open'){
+@@ -28,0 +38 @@ async function connect(){
 +      inbox.connected=true;
-       const linked=sock.user?.id?.split('@')[0]?.split(':')[0];
-       if(linked!==config.botNumber){quitting=true;sock.end();console.error('Linked account does not match the configured JARVIS number.');process.exit(1);}
-       state.creds.registered=true;await saveCreds();activeSocket=sock;retries=0;console.log('WhatsApp session saved; linked and listening for owner commands.');
-     }
+@@ -33 +43 @@ async function connect(){
 -    if(u.connection==='close')activeSocket=null;
 +    if(u.connection==='close'){activeSocket=null;inbox.connected=false;}
-     if(u.connection==='close'&&!quitting){if(u.lastDisconnect?.error?.output?.statusCode===DisconnectReason.loggedOut){console.error('WhatsApp logged out; pairing is required.');process.exit(1);}setTimeout(()=>connect().catch(()=>{console.error('WhatsApp connection unavailable.');process.exit(1);}),Math.min(60000,1000*2**Math.min(++retries,6)));}
-   });
-   sock.ev.on('messages.upsert',async event=>{
-     console.log('WhatsApp message event:', event.type==='notify'?'live':'history');
+@@ -37,0 +48,4 @@ async function connect(){
 +    for(const message of event.messages){
 +      await resolveIdentity(message,sock,config.owners);
 +      try{inbox.record(message,event.type==='notify');}catch{console.error('Inbox storage unavailable.');}
 +    }
-     if(event.type!=='notify')return;
+@@ -39 +52,0 @@ async function connect(){
 -    for(const message of event.messages)await resolveIdentity(message,sock,config.owners);
-     for(const item of event.messages){
-       console.log('WhatsApp sender checks:',JSON.stringify({
-         ownMessage:item.key?.fromMe===true,
 
 diff --git a/whatsapp-adapter/notification-http.mjs b/whatsapp-adapter/notification-http.mjs
 index 2dd1cfa..5fe2ab5 100644
 --- a/whatsapp-adapter/notification-http.mjs
 +++ b/whatsapp-adapter/notification-http.mjs
-@@ -1,13 +1,22 @@
- import http from 'node:http';
+@@ -1,0 +2 @@ import http from 'node:http';
 +import {inboxRoute} from './whatsapp-inbox.mjs';
- import crypto from 'node:crypto';
- import fs from 'node:fs';
+@@ -4 +5 @@ import fs from 'node:fs';
 -export function startNotifications({key,recipient,getSocket,file='/state/notifications.json',port=8085}){
 +export function startNotifications({key,recipient,getSocket,file='/state/notifications.json',port=8085,inbox}){
-  const seen=fs.existsSync(file)?JSON.parse(fs.readFileSync(file,'utf8')):{};
-  const save=()=>{fs.writeFileSync(file+'.tmp',JSON.stringify(seen),{mode:0o600});fs.renameSync(file+'.tmp',file);};
-  const server=http.createServer(async(req,res)=>{
-   const reply=(code,data)=>{res.writeHead(code,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify(data));};
-   const a=Buffer.from(req.headers.authorization||''),b=Buffer.from('Bearer '+key);
-   if(req.headers.origin||a.length!==b.length||!crypto.timingSafeEqual(a,b))return reply(403,{});
+@@ -10,0 +12,8 @@ export function startNotifications({key,recipient,getSocket,file='/state/notific
 +  if(inbox&&await inboxRoute(req,reply,{inbox,getSocket,key}))return;
 +  if(req.url==='/fun-call'&&req.method==='POST'){
 +   try{
@@ -81,31 +47,20 @@ index 2dd1cfa..5fe2ab5 100644
 +    return reply(r.status,await r.json());
 +   }catch{return reply(503,{status:'unknown'});}
 +  }
-   if(req.method==='GET'&&req.url==='/status')return reply(200,{ready:!!getSocket()});
-   if(req.method!=='POST'||req.url!=='/notify')return reply(404,{});
-   try{
 
 diff --git a/whatsapp-adapter/Dockerfile b/whatsapp-adapter/Dockerfile
 index bb21150..e078fef 100644
 --- a/whatsapp-adapter/Dockerfile
 +++ b/whatsapp-adapter/Dockerfile
-@@ -2,6 +2,6 @@ FROM node:24-bookworm-slim
- WORKDIR /app
- COPY --chown=node:node package*.json ./
- RUN npm ci --omit=dev
+@@ -5 +5 @@ RUN npm ci --omit=dev
 -COPY --chown=node:node core.mjs main.mjs notification-http.mjs identity.mjs diaa-callback.mjs diaa-1.mp3 diaa-2.mp3 ./
 +COPY --chown=node:node core.mjs main.mjs whatsapp-inbox.mjs notification-http.mjs identity.mjs diaa-callback.mjs diaa-1.mp3 diaa-2.mp3 ./
- USER node
- CMD ["node","main.mjs"]
 
 diff --git a/whatsapp-gateway.mjs b/whatsapp-gateway.mjs
 index 1e92435..79d7458 100644
 --- a/whatsapp-gateway.mjs
 +++ b/whatsapp-gateway.mjs
-@@ -84,6 +84,15 @@ export function startWhatsAppGateway({tasks,pool,data,env=process.env,fetcher=fe
-       res.writeHead(code,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify(v));};
-     const actual=Buffer.from(req.headers.authorization||''),expected=Buffer.from('Bearer '+key);
-     if(req.headers.origin||actual.length!==expected.length||!crypto.timingSafeEqual(actual,expected))return reply(403,{});
+@@ -86,0 +87,9 @@ export function startWhatsAppGateway({tasks,pool,data,env=process.env,fetcher=fe
 +    if(req.url==='/native/fun-call'&&req.method==='POST'){
 +      try{
 +        let raw='';for await(const chunk of req){raw+=chunk;if(Buffer.byteLength(raw)>6000)return reply(413,{});}
@@ -115,6 +70,3 @@ index 1e92435..79d7458 100644
 +        return reply(200,value);
 +      }catch{return reply(400,{error:'Call request unavailable. Check Tasks before retrying.'});}
 +    }
-     if(req.url!=='/command'||req.method!=='POST')return reply(404,{});
-     if(busy)return reply(429,{error:'I’m handling another request right now. This one hasn’t started—try again shortly.'});
-     busy=true;let lease;
