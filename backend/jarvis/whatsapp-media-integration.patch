@@ -1,0 +1,35 @@
+diff --git a/whatsapp-adapter/main.mjs b/whatsapp-adapter/main.mjs
+index 7b5d123..d6a895c 100644
+--- a/whatsapp-adapter/main.mjs
++++ b/whatsapp-adapter/main.mjs
+@@ -6 +6 @@
+-import makeWASocket,{useMultiFileAuthState,DisconnectReason,downloadMediaMessage,fetchLatestBaileysVersion} from 'baileys';
++import makeWASocket,{useMultiFileAuthState,DisconnectReason,downloadContentFromMessage,downloadMediaMessage,fetchLatestBaileysVersion} from 'baileys';
+@@ -19 +19,4 @@
+-startNotifications({key,recipient,getSocket:()=>activeSocket,inbox});
++startNotifications({key,recipient,getSocket:()=>activeSocket,inbox,download:(message)=>{
++  const type=message.message.imageMessage?'image':message.message.videoMessage?'video':'document';
++  return downloadContentFromMessage(message.message[type+'Message'],type,{options:{signal:AbortSignal.timeout(60000),redirect:'error'}});
++}});
+
+diff --git a/whatsapp-adapter/notification-http.mjs b/whatsapp-adapter/notification-http.mjs
+index 5fe2ab5..a646afb 100644
+--- a/whatsapp-adapter/notification-http.mjs
++++ b/whatsapp-adapter/notification-http.mjs
+@@ -5 +5 @@
+-export function startNotifications({key,recipient,getSocket,file='/state/notifications.json',port=8085,inbox}){
++export function startNotifications({key,recipient,getSocket,file='/state/notifications.json',port=8085,inbox,download}){
+@@ -12 +12 @@
+-  if(inbox&&await inboxRoute(req,reply,{inbox,getSocket,key}))return;
++  if(inbox&&await inboxRoute(req,reply,{inbox,getSocket,key,res,download}))return;
+@@ -34 +34 @@
+- server.requestTimeout=10000;server.listen(port,'0.0.0.0');return server;
++ server.requestTimeout=90000;server.headersTimeout=10000;server.listen(port,'0.0.0.0');return server;
+
+diff --git a/whatsapp-adapter/Dockerfile b/whatsapp-adapter/Dockerfile
+index e078fef..cd1e324 100644
+--- a/whatsapp-adapter/Dockerfile
++++ b/whatsapp-adapter/Dockerfile
+@@ -5 +5 @@
+-COPY --chown=node:node core.mjs main.mjs whatsapp-inbox.mjs notification-http.mjs identity.mjs diaa-callback.mjs diaa-1.mp3 diaa-2.mp3 ./
++COPY --chown=node:node core.mjs main.mjs whatsapp-inbox.mjs whatsapp-media.mjs notification-http.mjs identity.mjs diaa-callback.mjs diaa-1.mp3 diaa-2.mp3 ./

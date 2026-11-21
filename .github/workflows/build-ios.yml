@@ -29,7 +29,7 @@ jobs:
           .ci-venv/bin/python -m unittest discover -s backend -p 'test_*.py'
           .ci-venv/bin/python -m unittest discover -s backend/phone_pilot -p 'test_*.py'
       - name: Test JARVIS frontend lifecycle
-        run: node --test backend/jarvis/frontend.test.cjs backend/jarvis/app-sessions.test.mjs backend/jarvis/whatsapp-inbox.test.mjs
+        run: node --test backend/jarvis/frontend.test.cjs backend/jarvis/app-sessions.test.mjs backend/jarvis/whatsapp-inbox.test.mjs backend/jarvis/whatsapp-media.test.mjs
       - name: Generate Xcode project
         run: xcodegen generate
       - name: Show Xcode version

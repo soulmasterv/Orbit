@@ -1048,12 +1048,43 @@ final class ServerAPI: ObservableObject {
         }
     }
 
-    func jarvisNativeRequest<T: Decodable>(_ path: String, method: String = "GET", body: Data? = nil) async throws -> T {
+    func uploadWhatsAppAttachment(_ attachment: OrbitWhatsAppMediaDraft) async throws -> OrbitWhatsAppAttachment {
+        guard accessAllowed, !previewMode, !Task.isCancelled else { throw CancellationError() }
+        let context = latestReportsContext
+        var query = URLComponents()
+        query.queryItems = [URLQueryItem(name: "kind", value: attachment.kind.rawValue), URLQueryItem(name: "mime", value: attachment.mime)]
+        var command = try request(path: "/api/jarvis/whatsapp/media/" + attachment.id + "?" + (query.percentEncodedQuery ?? "").replacingOccurrences(of: "+", with: "%2B"), method: "PUT")
+        command.timeoutInterval = 90
+        command.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+        command.setValue(Data(attachment.name.utf8).base64EncodedString(), forHTTPHeaderField: "X-Orbit-File-Name")
+        if let thumbnail = attachment.thumbnail { command.setValue(thumbnail, forHTTPHeaderField: "X-Orbit-Thumbnail") }
+        command.setValue(String(attachment.size), forHTTPHeaderField: "Content-Length")
+        let (data, response) = try await session.upload(for: command, fromFile: attachment.url)
+        guard accessAllowed, latestReportsContext == context, !Task.isCancelled else { throw CancellationError() }
+        try validate(response)
+        let result = try JSONDecoder().decode(OrbitWhatsAppAttachment.self, from: data)
+        guard result.id == attachment.id, result.kind == attachment.kind, result.size == attachment.size else { throw URLError(.badServerResponse) }
+        return result
+    }
+
+    func downloadWhatsAppAttachment(_ attachment: OrbitWhatsAppAttachment) async throws -> URL {
+        guard accessAllowed, !previewMode, !Task.isCancelled, UUID(uuidString: attachment.id) != nil else { throw CancellationError() }
+        let context = latestReportsContext
+        var command = try request(path: "/api/jarvis/whatsapp/media/" + attachment.id)
+        command.timeoutInterval = 90
+        let (temporary, response) = try await session.download(for: command)
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        guard accessAllowed, latestReportsContext == context, !Task.isCancelled else { throw CancellationError() }
+        try validate(response)
+        return try OrbitWhatsAppMediaDraft.copy(temporary, name: attachment.name, kind: attachment.kind, mime: attachment.mime).url
+    }
+
+    func jarvisNativeRequest<T: Decodable>(_ path: String, method: String = "GET", body: Data? = nil, timeout: TimeInterval = 22) async throws -> T {
         guard accessAllowed, !previewMode, !Task.isCancelled else { throw CancellationError() }
         let context = latestReportsContext
         var command = try request(path: path)
         command.httpMethod = method
-        command.timeoutInterval = 22
+        command.timeoutInterval = timeout
         if let body { command.httpBody = body; command.setValue("application/json", forHTTPHeaderField: "Content-Type") }
         let (data, response) = try await session.data(for: command)
         guard accessAllowed, latestReportsContext == context, !Task.isCancelled else { throw CancellationError() }

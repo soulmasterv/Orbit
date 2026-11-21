@@ -66,7 +66,7 @@ final class WhatsAppInboxTests: XCTestCase {
                 return (200, Data(#"{"connected":true,"chats":[{"id":"201000000001","name":"Ahmed","latest":"See you tomorrow.","at":1700000000,"unread":2}]}"#.utf8))
             }
             if request.url?.path.hasSuffix("/read") == true { return (200, Data(#"{"status":"ok"}"#.utf8)) }
-            return (200, Data(#"{"connected":true,"messages":[{"id":"one","chat":"201000000001","text":"Are we meeting tomorrow?","outgoing":false,"at":1700000000,"status":"received"},{"id":"two","chat":"201000000001","text":"Yes, see you tomorrow.","outgoing":true,"at":1700000001,"status":"delivered"}]}"#.utf8))
+            return (200, Data(#"{"connected":true,"messages":[{"id":"one","chat":"201000000001","text":"Are we meeting tomorrow?","outgoing":false,"at":1700000000,"status":"received"},{"id":"two","chat":"201000000001","text":"Yes, see you tomorrow.","outgoing":true,"at":1700000001,"status":"delivered"},{"id":"three","chat":"201000000001","text":"Class notes","outgoing":true,"at":1700000002,"status":"sent","media":{"id":"11111111-1111-4111-8111-111111111111","kind":"document","name":"Class notes.pdf","mime":"application/pdf","size":245760,"state":"available"}}]}"#.utf8))
         }
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
         for (name, content) in [("whatsapp-inbox", AnyView(OrbitWhatsAppInboxView(api: api))), ("whatsapp-chat", AnyView(OrbitWhatsAppChatView(api: api, phone: "201000000001", name: "Ahmed")))] {
