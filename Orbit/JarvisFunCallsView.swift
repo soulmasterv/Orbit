@@ -88,6 +88,7 @@ struct JarvisFunCallsView: View {
     @ObservedObject var session: JarvisSession
     @ObservedObject var submission: JarvisFunCallSubmission
     var embedded = false
+    var nativeTransport = false
     @Environment(\.scenePhase) private var phase
     @Environment(\.dismiss) private var dismiss
     @State private var mode: JarvisFunMode = .silly
@@ -96,7 +97,7 @@ struct JarvisFunCallsView: View {
     @State private var message = ""
     @State private var error: String?
 
-    private var active: Bool { api.accessAllowed && session.signedIn && phase == .active }
+    private var active: Bool { api.accessAllowed && (nativeTransport || session.signedIn) && phase == .active }
     private var request: JarvisFunCallRequest? {
         try? JarvisFunCallRequest(mode: mode, number: specificNumber ? number : nil, message: message)
     }
@@ -166,9 +167,13 @@ struct JarvisFunCallsView: View {
                     try await DeviceAuthorization.authorizeFaceID(reason: "Authorize this Fun call")
                     try await DeviceAuthorization.waitForCallForeground(
                         isForeground: { UIApplication.shared.applicationState == .active },
-                        mayContinue: { api.accessAllowed && api.canControl && api.latestReportsContext == context && session.signedIn })
+                        mayContinue: { api.accessAllowed && api.canControl && api.latestReportsContext == context && (nativeTransport || session.signedIn) })
                 }, send: { request in
                     guard api.accessAllowed, api.canControl, api.latestReportsContext == context else { throw CancellationError() }
+                    if nativeTransport {
+                        let result: OrbitWhatsAppResult = try await api.jarvisNativeRequest("/api/jarvis/fun-call", method: "POST", body: JSONEncoder().encode(request))
+                        return result.status == "queued"
+                    }
                     return try await session.funCallRequest(request)
                 })
             }

@@ -13,7 +13,7 @@ enum StudentBotMode: String, CaseIterable, Codable, Identifiable {
     }
     var title: String {
         switch self {
-        case .assistant: "School Assistant"
+        case .assistant: "AI"
         case .calendar: "Calendar"
         case .local: "Local AI"
         }

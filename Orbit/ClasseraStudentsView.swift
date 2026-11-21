@@ -16,7 +16,7 @@ struct StudentDatabasesView: View {
             VStack(alignment: .leading, spacing: 15) {
                 Text("Students").font(.largeTitle.bold()).foregroundStyle(.white)
                 HStack(spacing: 0) {
-                    databaseTab("School assistant", selected: directory == .school) { directory = .school }
+                    databaseTab("AI", selected: directory == .school) { directory = .school }
                     databaseTab("Classera", selected: directory == .classera) { directory = .classera }
                     databaseTab("Calls", selected: directory == .calls) { directory = .calls }
                 }.padding(3).background(StudentPalette.surface, in: RoundedRectangle(cornerRadius: 10))

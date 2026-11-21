@@ -28,7 +28,7 @@ struct SettingsView: View {
                 } label: {
                     Label("Connections", systemImage: "network")
                 }
-                Text("Orbit / Classera · School Assistant")
+                Text("Orbit / Classera · AI")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section {

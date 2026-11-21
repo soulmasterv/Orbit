@@ -6,6 +6,12 @@ struct StudentCallsView: View {
     var body: some View {
         List {
             NavigationLink {
+                OrbitWhatsAppInboxView(api: api)
+            } label: {
+                Label("WhatsApp", systemImage: "message.fill")
+            }
+            .disabled(!api.accessAllowed)
+            NavigationLink {
                 FunCallsWorkspaceView(api: api)
             } label: {
                 Label("Fun calls", systemImage: "phone.fill")

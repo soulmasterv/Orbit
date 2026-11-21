@@ -1048,6 +1048,20 @@ final class ServerAPI: ObservableObject {
         }
     }
 
+    func jarvisNativeRequest<T: Decodable>(_ path: String, method: String = "GET", body: Data? = nil) async throws -> T {
+        guard accessAllowed, !previewMode, !Task.isCancelled else { throw CancellationError() }
+        let context = latestReportsContext
+        var command = try request(path: path)
+        command.httpMethod = method
+        command.timeoutInterval = 22
+        if let body { command.httpBody = body; command.setValue("application/json", forHTTPHeaderField: "Content-Type") }
+        let (data, response) = try await session.data(for: command)
+        guard accessAllowed, latestReportsContext == context, !Task.isCancelled else { throw CancellationError() }
+        try validate(response)
+        guard data.count <= 2_000_000 else { throw URLError(.dataLengthExceedsMaximum) }
+        return try JSONDecoder().decode(T.self, from: data)
+    }
+
     private func validate(_ response: URLResponse) throws {
         guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
         guard (200...299).contains(http.statusCode) else { throw HTTPFailure(status: http.statusCode) }

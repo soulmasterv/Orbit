@@ -24,9 +24,9 @@ struct SchoolAssistantConnectionSection: View {
                     .textInputAutocapitalization(.never).autocorrectionDisabled()
                     .accessibilityLabel("Students API key")
                 LabeledContent("API key", value: hasSavedKey ? "Saved in Keychain" : "Not configured")
-                Button("Save School Assistant") { Task { await save() } }.disabled(!api.accessAllowed || saving)
+                Button("Save AI") { Task { await save() } }.disabled(!api.accessAllowed || saving)
                 if let result { Text(result).font(.caption).foregroundStyle(.secondary) }
-            } header: { Text("School Assistant") }
+            } header: { Text("AI") }
               footer: {
                   Text("Enter the base URL only; the app adds /api/students. Both the URL and API key are kept in Keychain on this iPhone. Save only a server you trust. Leave the key blank to keep its current value when the URL is unchanged.")
               }

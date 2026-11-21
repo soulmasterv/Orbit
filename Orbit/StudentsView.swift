@@ -106,7 +106,7 @@ struct StudentsView: View {
             .disabled(!api.accessAllowed)
             StudentSearchField(text: $search)
             HStack {
-                Text("School assistant").font(.caption).foregroundStyle(StudentPalette.secondary)
+                Text("AI").font(.caption).foregroundStyle(StudentPalette.secondary)
                 Spacer()
                 Menu {
                     Picker("Messaging window", selection: $filter) {
