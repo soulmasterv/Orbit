@@ -102,8 +102,9 @@ export class WhatsAppMediaStore {
     const asset=this.state.assets[id];
     if(!asset||!fs.existsSync(this.file(id)))throw Error('Upload the attachment again');
     const source={url:this.file(id)};
-    if(asset.kind==='image')return {image:source,caption,mimetype:asset.mime};
-    if(asset.kind==='video')return {video:source,caption,mimetype:asset.mime};
+    const preview=asset.thumbnail?{jpegThumbnail:Buffer.from(asset.thumbnail,'base64')}:{};
+    if(asset.kind==='image')return {image:source,caption,mimetype:asset.mime,...preview};
+    if(asset.kind==='video')return {video:source,caption,mimetype:asset.mime,...preview};
     return {document:source,caption,mimetype:asset.mime,fileName:asset.name};
   }
 }

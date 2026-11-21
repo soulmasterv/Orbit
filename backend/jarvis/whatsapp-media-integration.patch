@@ -33,3 +33,11 @@ index e078fef..cd1e324 100644
 @@ -5 +5 @@
 -COPY --chown=node:node core.mjs main.mjs whatsapp-inbox.mjs notification-http.mjs identity.mjs diaa-callback.mjs diaa-1.mp3 diaa-2.mp3 ./
 +COPY --chown=node:node core.mjs main.mjs whatsapp-inbox.mjs whatsapp-media.mjs notification-http.mjs identity.mjs diaa-callback.mjs diaa-1.mp3 diaa-2.mp3 ./
+
+diff --git a/compose.whatsapp.yaml b/compose.whatsapp.yaml
+index f010203..c31e5c7 100644
+--- a/compose.whatsapp.yaml
++++ b/compose.whatsapp.yaml
+@@ -34 +34 @@
+-    tmpfs: [/tmp:size=16m]
++    tmpfs: [/tmp:size=128m]

@@ -38,3 +38,6 @@ test('oversized incoming media is described but never downloaded',async()=>{
 test('existing text-only ledger claims survive the media upgrade',async()=>{
  const f=fixture();try{const request={request_id:crypto.randomUUID(),destination:'201000000001',text:'Fixture'};const digest=crypto.createHash('sha256').update(JSON.stringify([request.destination,request.text])).digest('hex');f.inbox.state.requests[request.request_id]={digest,status:'unknown'};f.inbox.save();const next=new WhatsAppInbox(f.inbox.file);let sends=0;assert.equal((await next.send(request,{sendMessage:()=>{sends++;}})).status,'unknown');assert.equal(sends,0);}finally{f.close();}
 });
+test('prepared photo thumbnails are reused for WhatsApp delivery',async()=>{
+ const f=fixture();try{const id=crypto.randomUUID();await f.inbox.media.upload(id,'image','Photo.jpg','image/jpeg',stream(jpeg),jpeg.toString('base64'));const content=f.inbox.media.content(id,'Fixture');assert.deepEqual(content.jpegThumbnail,jpeg);assert.equal(content.mimetype,'image/jpeg');}finally{f.close();}
+});
