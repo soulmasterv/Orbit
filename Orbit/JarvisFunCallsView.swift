@@ -87,6 +87,7 @@ struct JarvisFunCallsView: View {
     @ObservedObject var api: ServerAPI
     @ObservedObject var session: JarvisSession
     @ObservedObject var submission: JarvisFunCallSubmission
+    var embedded = false
     @Environment(\.scenePhase) private var phase
     @Environment(\.dismiss) private var dismiss
     @State private var mode: JarvisFunMode = .silly
@@ -100,8 +101,12 @@ struct JarvisFunCallsView: View {
         try? JarvisFunCallRequest(mode: mode, number: specificNumber ? number : nil, message: message)
     }
 
-    var body: some View {
-        NavigationStack {
+    @ViewBuilder var body: some View {
+        if embedded { content }
+        else { NavigationStack { content } }
+    }
+
+    private var content: some View {
             Form {
                 Section("Mode") {
                     ForEach(JarvisFunMode.allCases) { value in
@@ -141,11 +146,13 @@ struct JarvisFunCallsView: View {
                 }
             }
             .navigationTitle("Fun calls")
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() }.disabled(submission.busy) } }
+            .toolbar {
+                if !embedded { ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() }.disabled(submission.busy) } }
+            }
+            .navigationBarBackButtonHidden(submission.busy)
             .interactiveDismissDisabled(submission.busy)
-            .onChange(of: api.accessAllowed) { _, allowed in if !allowed { dismiss() } }
-            .onChange(of: phase) { _, next in if next == .background { number = ""; message = ""; dismiss() } }
-        }
+            .onChange(of: api.accessAllowed) { _, allowed in if !allowed { number = ""; message = ""; if !embedded { dismiss() } } }
+            .onChange(of: phase) { _, next in if next == .background { number = ""; message = ""; if !embedded { dismiss() } } }
     }
 
     private func submit() {

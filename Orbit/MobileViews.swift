@@ -13,7 +13,7 @@ struct MobileHubView: View {
                     Label("Recent events", systemImage: "clock")
                 }
                 if mobile.state?.outbox != nil {
-                    NavigationLink { MessageOutboxView() } label: { Label("Saved message", systemImage: "tray") }
+                    NavigationLink { MessageOutboxView() } label: { Label("Check last message", systemImage: "tray") }
                 }
                 NavigationLink { StudentsSettingsView(api: api) } label: { Label("Connection settings", systemImage: "gearshape") }
             }
@@ -130,7 +130,7 @@ struct StudentMessageComposer: View {
                 Button("Refresh eligibility") { Task { await students.refresh(); await mobile.refresh() } }.disabled(mobile.busy)
                 Text("Pricing is unknown until Meta reports it. An open window does not guarantee no charge.").font(.caption).foregroundStyle(.secondary)
             }
-            if mobile.state?.outbox != nil { Section { NavigationLink("Saved operation — inspect status") { MessageOutboxView() } } }
+            if mobile.state?.outbox != nil { Section { NavigationLink("Check last message") { MessageOutboxView() } } }
             MobileResultSection()
         }.navigationTitle("Compose Message")
         .onAppear { students.claimVisibility(refreshOwner); text = mobile.draft(phone: phone) }
@@ -160,8 +160,9 @@ struct MessageOutboxView: View {
     @Environment(\.orbitAccessAllowed) private var accessAllowed
     var body: some View {
         Form {
+            Text("Check the result of your last manual WhatsApp message sent from Orbit.").font(.caption).foregroundStyle(.secondary)
             if let operation = mobile.state?.outbox {
-                Section("Saved operation") {
+                Section("Last manual message") {
                     LabeledContent("Request ID", value: operation.requestID.uuidString).font(.caption).textSelection(.enabled)
                     LabeledContent("Recipient", value: operation.phone)
                     Text(operation.text).textSelection(.enabled)
@@ -170,9 +171,9 @@ struct MessageOutboxView: View {
                     Button("Check status (does not send)") { Task { await mobile.recover() } }.disabled(mobile.busy)
                     Button("I reviewed this operation; start a new action") { review = true }.disabled(mobile.busy)
                 }
-            } else { Text("No saved message operation.") }
+            } else { Text("No manual message to review.") }
             MobileResultSection()
-        }.navigationTitle("Message Status")
+        }.navigationTitle("Check last message")
         .onChange(of: accessAllowed) { _, allowed in if !allowed { review = false } }
         .task(id: "\(phase == .active)-\(mobile.state?.outbox?.requestID.uuidString ?? "none")") {
             guard phase == .active else { return }

@@ -21,7 +21,10 @@ final class JarvisSession: NSObject, ObservableObject, WKNavigationDelegate, WKU
     @Published var confirmation: String?
     let funCalls = JarvisFunCallSubmission()
 
-    override init() {
+    private let voiceEnabled: Bool
+
+    init(voiceEnabled: Bool = true) {
+        self.voiceEnabled = voiceEnabled
         super.init()
         observers.append(NotificationCenter.default.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { [weak self] note in
             let began = (note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt) == AVAudioSession.InterruptionType.began.rawValue
@@ -71,6 +74,7 @@ final class JarvisSession: NSObject, ObservableObject, WKNavigationDelegate, WKU
 
     func activate() {
         gate.activate()
+        guard voiceEnabled else { return }
         if let web = webView, JarvisPolicy.isVoiceDocument(web.url) {
             web.setAllMediaPlaybackSuspended(false, completionHandler: nil)
         }
@@ -218,6 +222,7 @@ final class JarvisSession: NSObject, ObservableObject, WKNavigationDelegate, WKU
         guard message.frameInfo.isMainFrame, JarvisPolicy.isVoiceDocument(message.frameInfo.request.url),
               JarvisPolicy.isVoiceDocument(webView?.url), let body = message.body as? [String: Any] else { return }
         if body["kind"] as? String == "startTap" {
+            guard voiceEnabled else { return }
             gate.arm()
             if gate.armed {
                 notice = nil
@@ -247,7 +252,7 @@ final class JarvisSession: NSObject, ObservableObject, WKNavigationDelegate, WKU
     func webView(_ webView: WKWebView, requestMediaCapturePermissionFor origin: WKSecurityOrigin,
                  initiatedByFrame frame: WKFrameInfo, type: WKMediaCaptureType,
                  decisionHandler: @escaping (WKPermissionDecision) -> Void) {
-        guard type == .microphone, frame.isMainFrame, JarvisPolicy.isVoiceDocument(webView.url),
+        guard voiceEnabled, type == .microphone, frame.isMainFrame, JarvisPolicy.isVoiceDocument(webView.url),
               JarvisPolicy.isVoiceDocument(frame.request.url),
               JarvisPolicy.isCaptureOrigin(protocol: origin.protocol, host: origin.host, port: origin.port),
               let attempt = gate.consume() else { decisionHandler(.deny); return }
@@ -292,7 +297,7 @@ final class JarvisSession: NSObject, ObservableObject, WKNavigationDelegate, WKU
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         loading = false
-        if gate.foreground && JarvisPolicy.isVoiceDocument(webView.url) {
+        if voiceEnabled && gate.foreground && JarvisPolicy.isVoiceDocument(webView.url) {
             webView.setAllMediaPlaybackSuspended(false, completionHandler: nil)
         }
     }
@@ -365,7 +370,7 @@ private final class WeakJarvisHandler: NSObject, WKScriptMessageHandler {
     }
 }
 
-private struct JarvisWebView: UIViewRepresentable {
+struct JarvisWebView: UIViewRepresentable {
     @ObservedObject var session: JarvisSession
     func makeCoordinator() -> JarvisSession { session }
     func makeUIView(context: Context) -> WKWebView { session.makeWebView(loadInitialPage: false) }
@@ -381,7 +386,6 @@ struct JarvisView: View {
     @StateObject private var session = JarvisSession()
     @State private var connection: JarvisAppConnection?
     @State private var showingMemory = false
-    @State private var showingFunCalls = false
     @Environment(\.scenePhase) private var phase
     @Environment(\.dismiss) private var dismiss
     var body: some View {
@@ -399,8 +403,6 @@ struct JarvisView: View {
                 if let connection {
                     Menu {
                         Button("Stop voice", systemImage: "stop.fill") { session.stop("Stopped. Microphone released.") }
-                        Button("Fun calls", systemImage: "phone.fill") { session.stop(); showingFunCalls = true }
-                            .disabled(!session.signedIn || connection.busy)
                         Button("Memory", systemImage: "brain") { session.stop(); showingMemory = true }
                             .disabled(!session.signedIn || connection.busy)
                         Button("Reconnect", systemImage: "arrow.clockwise") { Task { await connection.connect() } }
@@ -424,7 +426,6 @@ struct JarvisView: View {
             .background(.regularMaterial, in: Capsule())
             .padding(10)
         }
-        .sheet(isPresented: $showingFunCalls) { JarvisFunCallsView(api: api, session: session, submission: session.funCalls) }
         .sheet(isPresented: $showingMemory) { JarvisMemoryView(session: session, api: api) }
         .background(Brand.background)
         .toolbar(.hidden, for: .navigationBar, .tabBar)

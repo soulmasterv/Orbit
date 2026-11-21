@@ -30,6 +30,25 @@ struct StudentDatabasesView: View {
                     .disabled(!api.accessAllowed)
                 }
                 OrbitVersionLink()
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Calls").font(.caption).foregroundStyle(StudentPalette.secondary)
+                    NavigationLink {
+                        FunCallsWorkspaceView(api: api)
+                    } label: {
+                        HStack {
+                            Label("Fun calls", systemImage: "phone.fill")
+                            Spacer()
+                            Image(systemName: "chevron.right").font(.caption)
+                        }
+                        .padding(.horizontal, 12)
+                        .frame(minHeight: 44)
+                        .background(StudentPalette.surface, in: RoundedRectangle(cornerRadius: 9))
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!api.accessAllowed)
+                    .accessibilityIdentifier("students.funCalls")
+                }
                 HStack(spacing: 0) {
                     databaseTab("School assistant", selected: directory == .school) { directory = .school }
                     databaseTab("Classera", selected: directory == .classera) { directory = .classera }

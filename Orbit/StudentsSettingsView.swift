@@ -1,6 +1,11 @@
 import SwiftUI
 
 struct StudentsSettingsView: View {
+    @ObservedObject var api: ServerAPI
+    var body: some View { ConnectionsView(api: api) }
+}
+
+struct SchoolAssistantConnectionSection: View {
     @EnvironmentObject private var mobile: MobileStore
     @ObservedObject var api: ServerAPI
     @State private var baseURL = ""
@@ -10,7 +15,7 @@ struct StudentsSettingsView: View {
     @State private var saving = false
 
     var body: some View {
-        Form {
+        Group {
             Section {
                 TextField("HTTPS base URL", text: $baseURL)
                     .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
@@ -19,20 +24,18 @@ struct StudentsSettingsView: View {
                     .textInputAutocapitalization(.never).autocorrectionDisabled()
                     .accessibilityLabel("Students API key")
                 LabeledContent("API key", value: hasSavedKey ? "Saved in Keychain" : "Not configured")
-                Button("Save Students Connection") { Task { await save() } }.disabled(!api.accessAllowed || saving)
+                Button("Save School Assistant") { Task { await save() } }.disabled(!api.accessAllowed || saving)
                 if let result { Text(result).font(.caption).foregroundStyle(.secondary) }
-            } header: { Text("Students connection") }
+            } header: { Text("School Assistant") }
               footer: {
                   Text("Enter the base URL only; the app adds /api/students. Both the URL and API key are kept in Keychain on this iPhone. Save only a server you trust. Leave the key blank to keep its current value when the URL is unchanged.")
               }
             Section {
-                NavigationLink("Student tools & saved messages") { MobileHubView(api: api) }
+                NavigationLink("Student tools") { MobileHubView(api: api) }
                 Text("Management and manual messages require a compatible backend. Review any saved message before changing server or account.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
-        .navigationTitle("Students Connection").navigationBarTitleDisplayMode(.inline)
-        .scrollContentBackground(.hidden).background(Brand.background)
         .onAppear {
             do {
                 let saved = try KeychainManager.loadStudentsConnection()

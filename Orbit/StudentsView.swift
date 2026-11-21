@@ -127,14 +127,14 @@ struct StudentsView: View {
                     NavigationLink("Feedback") { MobileFeedbackView(api: api, selectedID: nil) }
                     NavigationLink("Recent events") { MobileEventsView(api: api) }
                     if mobile.state?.outbox != nil {
-                        NavigationLink("Review saved message") { MessageOutboxView() }
+                        NavigationLink("Check last message") { MessageOutboxView() }
                     }
                 } label: { Image(systemName: "ellipsis.circle").frame(minWidth: 30, minHeight: 30) }
                     .accessibilityLabel("Student tools, feedback and events")
             }
             StudentAccessFilters(selection: $activity)
             if mobile.state?.outbox != nil {
-                NavigationLink { MessageOutboxView() } label: { Label("Review saved message", systemImage: "tray") }
+                NavigationLink { MessageOutboxView() } label: { Label("Check last message", systemImage: "tray") }
                     .font(.caption.weight(.medium))
             }
             SnapshotStamp(date: store.snapshot?.receivedAt, failed: store.error != nil)
