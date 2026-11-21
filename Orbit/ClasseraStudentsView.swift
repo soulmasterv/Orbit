@@ -14,49 +14,17 @@ struct StudentDatabasesView: View {
     var body: some View {
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 15) {
-                HStack {
-                    Text("Students").font(.largeTitle.bold()).foregroundStyle(.white)
-                    Spacer()
-                    NavigationLink {
-                        OrbitDiaaFriendsView(api: api)
-                    } label: {
-                        Text("Allowed Callers")
-                            .font(.subheadline)
-                            .foregroundStyle(StudentPalette.accent)
-                            .frame(minHeight: 44)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(!api.accessAllowed)
-                }
-                OrbitVersionLink()
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Calls").font(.caption).foregroundStyle(StudentPalette.secondary)
-                    NavigationLink {
-                        FunCallsWorkspaceView(api: api)
-                    } label: {
-                        HStack {
-                            Label("Fun calls", systemImage: "phone.fill")
-                            Spacer()
-                            Image(systemName: "chevron.right").font(.caption)
-                        }
-                        .padding(.horizontal, 12)
-                        .frame(minHeight: 44)
-                        .background(StudentPalette.surface, in: RoundedRectangle(cornerRadius: 9))
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(!api.accessAllowed)
-                    .accessibilityIdentifier("students.funCalls")
-                }
+                Text("Students").font(.largeTitle.bold()).foregroundStyle(.white)
                 HStack(spacing: 0) {
                     databaseTab("School assistant", selected: directory == .school) { directory = .school }
                     databaseTab("Classera", selected: directory == .classera) { directory = .classera }
+                    databaseTab("Calls", selected: directory == .calls) { directory = .calls }
                 }.padding(3).background(StudentPalette.surface, in: RoundedRectangle(cornerRadius: 10))
             }.padding(.horizontal, 16).padding(.top, 6).padding(.bottom, 14)
             switch directory {
             case .school: StudentsView(api: api, store: schoolStore, embedded: true)
             case .classera: ClasseraStudentsView(api: api, embedded: true)
+            case .calls: StudentCallsView(api: api)
             }
         }
         .modifier(StudentAppearance())
@@ -111,18 +79,6 @@ struct ClasseraStudentsView: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 12) {
-                    NavigationLink {
-                        ClasseraActionsView(api: api)
-                    } label: {
-                        HStack {
-                            Label("Actions", systemImage: "slider.horizontal.3")
-                            Spacer()
-                            Image(systemName: "chevron.right").font(.caption.weight(.semibold))
-                        }
-                        .padding(.horizontal, 12)
-                        .frame(minHeight: 44)
-                        .background(StudentPalette.surface, in: RoundedRectangle(cornerRadius: 9))
-                    }.buttonStyle(.plain)
                     StudentSearchField(text: $search)
                     HStack {
                         Text("\(filtered.count) \(directoryFilter == .optedOut ? "opted out" : "subscribers")")
@@ -179,7 +135,10 @@ struct ClasseraStudentsView: View {
             ToolbarItem(placement: .topBarLeading) {
                 NavigationLink { ClasseraMonitoringView(api: api) } label: { Label("Monitoring", systemImage: "chart.bar.xaxis") }
             }
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                NavigationLink("Actions") { ClasseraActionsView(api: api) }
+                    .disabled(!api.accessAllowed)
+                    .accessibilityLabel("Classera actions")
             Button { phone = ""; newName = ""; error = nil; add = true } label: {
                 Label("Add", systemImage: "plus").font(.subheadline.weight(.semibold))
                     .foregroundStyle(.white).padding(.horizontal, 10).padding(.vertical, 7)

@@ -3,7 +3,7 @@ import SwiftUI
 /// Presentation state only, held in memory. Never persisted to UserDefaults or logs.
 @MainActor
 final class OrbitNavigationState: ObservableObject {
-    enum StudentDirectory { case school, classera }
+    enum StudentDirectory { case school, classera, calls }
 
     @Published var studentDirectory: StudentDirectory = .classera
     @Published var selectedTab: Int
