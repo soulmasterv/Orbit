@@ -19,6 +19,7 @@ final class JarvisSession: NSObject, ObservableObject, WKNavigationDelegate, WKU
     private var alertCompletion: ((Bool) -> Void)?
     weak var appConnection: JarvisAppConnection?
     @Published var confirmation: String?
+    let funCalls = JarvisFunCallSubmission()
 
     override init() {
         super.init()
@@ -122,17 +123,26 @@ final class JarvisSession: NSObject, ObservableObject, WKNavigationDelegate, WKU
     }
 
     func memoryRequest(action: String? = nil, id: String? = nil, text: String? = nil) async throws -> JarvisMemory {
-        guard signedIn, appConnection?.connected == true, UIApplication.shared.applicationState == .active,
-              let web = webView, JarvisPolicy.isOrigin(web.url) else {
-            throw APIError.message("Reconnect to JARVIS to manage memory.")
-        }
         let arguments: [String: Any] = [
             "action": action as Any? ?? NSNull(),
             "entryID": id as Any? ?? NSNull(),
             "text": text as Any? ?? NSNull()
         ]
+        let json = try await runControlsScript(Self.memoryScript, arguments: arguments)
+        let response = try JSONDecoder().decode(JarvisMemoryResponse.self, from: Data(json.utf8))
+        guard let memory = response.memory else {
+            throw APIError.message("Memory is unavailable on this JARVIS server.")
+        }
+        return memory
+    }
+
+    private func runControlsScript(_ script: String, arguments: [String: Any]) async throws -> String {
+        guard signedIn, appConnection?.connected == true, UIApplication.shared.applicationState == .active,
+              let web = webView, JarvisPolicy.isOrigin(web.url) else {
+            throw APIError.message("Reconnect to JARVIS to use Controls.")
+        }
         let result: Any? = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Any?, Error>) in
-            OrbitJarvisScriptRunner.execute(Self.memoryScript, webView: web, arguments: arguments) { value, error in
+            OrbitJarvisScriptRunner.execute(script, webView: web, arguments: arguments) { value, error in
                 if let error { continuation.resume(throwing: error) }
                 else { continuation.resume(returning: value) }
             }
@@ -142,12 +152,33 @@ final class JarvisSession: NSObject, ObservableObject, WKNavigationDelegate, WKU
               let json = result as? String else {
             throw APIError.message("JARVIS session is unavailable. Reconnect and retry.")
         }
-        let response = try JSONDecoder().decode(JarvisMemoryResponse.self, from: Data(json.utf8))
-        guard let memory = response.memory else {
-            throw APIError.message("Memory is unavailable on this JARVIS server.")
-        }
-        return memory
+        return json
     }
+
+    func funCallRequest(_ request: JarvisFunCallRequest) async throws -> Bool {
+        let body = try JSONSerialization.jsonObject(with: JSONEncoder().encode(request))
+        let json = try await runControlsScript(Self.funCallScript, arguments: ["payload": body])
+        struct Reply: Decodable { let queued: Bool }
+        return try JSONDecoder().decode(Reply.self, from: Data(json.utf8)).queued
+    }
+
+    static let funCallScript = """
+    if (location.origin !== 'https://jarvis.labbing.space') throw Error('Reconnect to JARVIS.');
+    const options = {credentials: 'same-origin', redirect: 'error', cache: 'no-store'};
+    const sessionResponse = await fetch('/session', {...options, signal: AbortSignal.timeout(15000)});
+    if (!sessionResponse.ok) throw Error('Reconnect to JARVIS.');
+    const session = await sessionResponse.json();
+    if (typeof session.csrf !== 'string' || !session.csrf) throw Error('Reconnect to JARVIS.');
+    const response = await fetch('/api/controls', {
+      ...options, method: 'POST', signal: AbortSignal.timeout(30000),
+      headers: {'Content-Type': 'application/json', 'X-CSRF-Token': session.csrf},
+      body: JSON.stringify(payload)
+    });
+    if (!response.ok) throw Error('Call could not be confirmed. Check Tasks.');
+    const value = await response.json();
+    return JSON.stringify({queued: value.status === 'queued' && !value.error});
+    """
+
 
     static let memoryScript = """
     if (location.origin !== 'https://jarvis.labbing.space') throw Error('Reconnect to JARVIS.');
@@ -350,6 +381,7 @@ struct JarvisView: View {
     @StateObject private var session = JarvisSession()
     @State private var connection: JarvisAppConnection?
     @State private var showingMemory = false
+    @State private var showingFunCalls = false
     @Environment(\.scenePhase) private var phase
     @Environment(\.dismiss) private var dismiss
     var body: some View {
@@ -367,6 +399,8 @@ struct JarvisView: View {
                 if let connection {
                     Menu {
                         Button("Stop voice", systemImage: "stop.fill") { session.stop("Stopped. Microphone released.") }
+                        Button("Fun calls", systemImage: "phone.fill") { session.stop(); showingFunCalls = true }
+                            .disabled(!session.signedIn || connection.busy)
                         Button("Memory", systemImage: "brain") { session.stop(); showingMemory = true }
                             .disabled(!session.signedIn || connection.busy)
                         Button("Reconnect", systemImage: "arrow.clockwise") { Task { await connection.connect() } }
@@ -390,6 +424,7 @@ struct JarvisView: View {
             .background(.regularMaterial, in: Capsule())
             .padding(10)
         }
+        .sheet(isPresented: $showingFunCalls) { JarvisFunCallsView(api: api, session: session, submission: session.funCalls) }
         .sheet(isPresented: $showingMemory) { JarvisMemoryView(session: session, api: api) }
         .background(Brand.background)
         .toolbar(.hidden, for: .navigationBar, .tabBar)

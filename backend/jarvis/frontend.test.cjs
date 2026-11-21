@@ -95,3 +95,37 @@ test('socket closure checks login expiry with GET only and does not reconnect',a
   f.sockets[0].onclose();await flush();assert.equal(requests,1);assert.equal(f.sockets.length,1);
   assert.equal(f.window.orbitJarvis.snapshot().authenticated,false);assert.match(f.elements.status.textContent,/Session expired/);
 });
+test('native Fun calls uses the session CSRF and exactly one controls POST', async () => {
+  const swift=fs.readFileSync(__dirname+'/../../Orbit/JarvisView.swift','utf8');
+  const script=swift.split('static let funCallScript = """')[1].split('"""')[0];
+  const run=new (Object.getPrototypeOf(async function(){}).constructor)('payload','location','fetch',script);
+  const payload={operation:'fun_call',request_id:'test-fixture-uuid',mode:'bibo',message:'Quotes " and Arabic مرحبا'};
+  const requests=[];
+  const fetch=async(path,options)=>{
+    requests.push({path,options});
+    return {ok:true,json:async()=>path==='/session'?{csrf:'test-csrf'}:{status:'queued',call_placed:false}};
+  };
+  const result=JSON.parse(await run(payload,{origin:'https://jarvis.labbing.space'},fetch));
+  assert.equal(result.queued,true);
+  assert.deepEqual(requests.map(r=>r.path),['/session','/api/controls']);
+  assert.equal(requests[1].options.headers['X-CSRF-Token'],'test-csrf');
+  assert.deepEqual(JSON.parse(requests[1].options.body),payload);
+  assert.equal(requests[1].options.redirect,'error');
+  assert.equal(requests[1].options.credentials,'same-origin');
+});
+test('native Fun calls refuses login origins, missing CSRF and does not retry a failed POST', async () => {
+  const swift=fs.readFileSync(__dirname+'/../../Orbit/JarvisView.swift','utf8');
+  const script=swift.split('static let funCallScript = """')[1].split('"""')[0];
+  const run=new (Object.getPrototypeOf(async function(){}).constructor)('payload','location','fetch',script);
+  let posts=0;
+  const fetch=async(path)=>{
+    if(path==='/session')return {ok:true,json:async()=>({csrf:'test-csrf'})};
+    posts++;throw Error('Response lost');
+  };
+  await assert.rejects(run({}, {origin:'https://quiet-sky-4b47.cloudflareaccess.com'},fetch));
+  assert.equal(posts,0);
+  await assert.rejects(run({}, {origin:'https://jarvis.labbing.space'},async()=>({ok:true,json:async()=>({})})));
+  assert.equal(posts,0);
+  await assert.rejects(run({}, {origin:'https://jarvis.labbing.space'},fetch));
+  assert.equal(posts,1);
+});
