@@ -120,6 +120,9 @@ def register(app, token, transport=forward, media_transport=media_forward):
     @app.route('/api/jarvis/whatsapp/requests/<uuid:identifier>', methods=['GET'])
     def native_whatsapp_request(identifier):
         return handle('/inbox/requests/' + str(identifier))
+    @app.route('/api/jarvis/allowed-callers', methods=['GET', 'POST'])
+    def native_allowed_callers():
+        return handle('/allowed-callers')
     @app.route('/api/jarvis/fun-call', methods=['POST'])
     def native_fun_call():
         return handle('/fun-call')

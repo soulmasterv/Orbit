@@ -1452,7 +1452,7 @@ extension ServerAPI {
         let (data, response) = try await session.data(for: command)
         guard accessAllowed && context == latestReportsContext && epoch == studentsAccessGeneration && originalBase == activeBaseURL && !Task.isCancelled else { throw CancellationError() }
         guard let response = response as? HTTPURLResponse, response.url == command.url,
-              data.count < (path == "/api/jarvis-phone/diaa-friends" ? 131072 : 32768) else { throw URLError(.badServerResponse) }
+              data.count < 32768 else { throw URLError(.badServerResponse) }
         guard response.statusCode == 200 else { throw HTTPFailure(status: response.statusCode) }
         return try JSONDecoder().decode(T.self, from: data)
     }
@@ -1632,26 +1632,29 @@ extension ServerAPI {
         return try await operation { maySubmit() && phonePilotIsForeground() }
     }
 
-    func diaaFriends() async throws -> OrbitDiaaFriends {
-        try await phonePilotRequest("/api/jarvis-phone/diaa-friends")
+    func phonePilotQueue() async throws -> OrbitPhoneQueue {
+        try await phonePilotRequest("/api/jarvis-phone/queue")
     }
-    func changeDiaaFriend(_ number: String, add: Bool, name: String? = nil) async throws -> OrbitDiaaFriends {
-        guard canControl && phonePilotIsForeground() && !Task.isCancelled else { throw CancellationError() }
+}
+
+extension ServerAPI {
+    func allowedCallers() async throws -> OrbitAllowedCallers {
+        try await jarvisNativeRequest("/api/jarvis/allowed-callers")
+    }
+    func changeAllowedCaller(_ change: OrbitCallerChange) async throws -> OrbitAllowedCallers {
+        guard canControl, !previewMode, phonePilotIsForeground(), !Task.isCancelled,
+              ["save", "delete"].contains(change.action), OrbitCallerNumber.normalized(change.number) == change.number else { throw CancellationError() }
         let context = latestReportsContext
         let epoch = studentsAccessGeneration
         let endpoint = activeBaseURL
         actionBusy = true
         defer { actionBusy = false }
-        try await authorizeConfirmed(add ? "Add this caller to Diaa Friends" : "Remove this caller from Diaa Friends")
-        guard accessAllowed && !needsVerification && connection == .connected && phonePilotIsForeground(),
-              context == latestReportsContext && epoch == studentsAccessGeneration &&
-              endpoint == activeBaseURL && !Task.isCancelled else { throw CancellationError() }
-        var payload = ["action": add ? "add" : "remove", "number": number]
-        if let name, add { payload["name"] = name }
-        let body = try JSONEncoder().encode(payload)
-        return try await phonePilotRequest("/api/jarvis-phone/diaa-friends", method: "POST", body: body)
-    }
-    func phonePilotQueue() async throws -> OrbitPhoneQueue {
-        try await phonePilotRequest("/api/jarvis-phone/queue")
+        try await authorizeConfirmed(change.action == "delete" ? "Remove this allowed caller" : "Save this caller's incoming modes")
+        try await DeviceAuthorization.waitForCallForeground(isForeground: phonePilotIsForeground, mayContinue: {
+            self.accessAllowed && context == self.latestReportsContext && epoch == self.studentsAccessGeneration && endpoint == self.activeBaseURL && !Task.isCancelled
+        })
+        guard accessAllowed, !needsVerification, connection == .connected, phonePilotIsForeground(),
+              context == latestReportsContext, epoch == studentsAccessGeneration, endpoint == activeBaseURL, !Task.isCancelled else { throw CancellationError() }
+        return try await jarvisNativeRequest("/api/jarvis/allowed-callers", method: "POST", body: JSONEncoder().encode(change))
     }
 }

@@ -19,7 +19,7 @@ struct StudentCallsView: View {
             .disabled(!api.accessAllowed)
             .accessibilityIdentifier("students.funCalls")
             NavigationLink {
-                OrbitDiaaFriendsView(api: api)
+                OrbitAllowedCallersView(api: api)
             } label: {
                 Label("Allowed Callers", systemImage: "person.crop.circle.badge.checkmark")
             }

@@ -75,7 +75,7 @@ struct OrbitDiaaCallHistoryView: View {
                     if let total {
                         Text("\(total) calls seen")
                         ForEach(records) { call in
-                            Text(OrbitDiaaFriendsView.cairoCallTime(call.seen_at))
+                            Text(OrbitAllowedCallersView.cairoCallTime(call.seen_at))
                         }
                         if records.count < total {
                             Button("Load more") { Task { await load(reset: false) } }.disabled(loading)
