@@ -11,6 +11,7 @@ struct OrbitAllowedCallersView: View {
     var body: some View {
         List {
             if active {
+                OrbitIncomingOverrideCard(api: api, state: state)
                 Section {
                     NavigationLink { OrbitDiaaSettingsView(api: api) } label: {
                         Label("Diaa playback", systemImage: "waveform")
@@ -36,14 +37,17 @@ struct OrbitAllowedCallersView: View {
                                             .font(.caption).foregroundStyle(caller.enabled ? Color.green : Color.secondary)
                                     }
                                     Text(caller.number).font(.subheadline).foregroundStyle(.secondary)
-                                    Text("Current: " + OrbitIncomingMode.title(caller.currentMode)).font(.subheadline)
+                                    Text((state.snapshot?.incomingOverride == nil ? "Current: " : "Saved: ") + OrbitIncomingMode.title(caller.currentMode)).font(.subheadline)
+                                    if state.snapshot?.incomingOverride != nil {
+                                        Text("Temporarily overridden").font(.caption).foregroundStyle(.orange)
+                                    }
                                     Text(caller.modes.map(OrbitIncomingMode.title).joined(separator: " · "))
                                         .font(.caption).foregroundStyle(.secondary)
                                 }.padding(.vertical, 3)
                             }
                         }
                     }
-                } header: { Text("Incoming calls") } footer: {
+                } header: { Text("Allowed callers") } footer: {
                     Text("Modes control incoming calls to the JARVIS phone number. Guest access does not include commands, email, calendar or private memory.")
                 }
                 Section("Caller choices") {
@@ -69,6 +73,19 @@ struct OrbitAllowedCallersView: View {
             if active { await reload() }
         }
         .refreshable { await reload() }
+        .onChange(of: phase) { _, value in
+            if value == .active { Task { await reload() } }
+        }
+        .task(id: "\(api.latestReportsContext)|\(phase == .active)|\(api.accessAllowed)") {
+            guard api.accessAllowed, phase == .active else { return }
+            while !Task.isCancelled, api.accessAllowed, phase == .active {
+                let remaining = state.snapshot?.incomingOverride?.expires.timeIntervalSinceNow ?? 5
+                let delay = remaining > 0 ? max(0.25, min(5, remaining + 0.1)) : 5
+                do { try await Task.sleep(for: .seconds(delay)) } catch { return }
+                guard !Task.isCancelled, api.accessAllowed, phase == .active else { return }
+                if state.snapshot?.incomingOverride != nil { await reload() }
+            }
+        }
     }
 
     @ViewBuilder private func callerDetail(_ number: String) -> some View {
@@ -107,9 +124,13 @@ struct OrbitAllowedCallerDetail: View {
                     if caller.isOwner { Text("Owner · Private JARVIS access").foregroundStyle(.secondary) }
                 }
                 Section("Incoming mode") {
+                    if let override = state.snapshot?.incomingOverride {
+                        Text("Temporarily overridden by \(OrbitIncomingMode.title(override.mode)). These personal settings remain saved.")
+                            .foregroundStyle(.orange)
+                    }
                     LabeledContent("Admin default", value: OrbitIncomingMode.title(caller.defaultMode))
                     LabeledContent("Caller selected", value: caller.selectedMode.map(OrbitIncomingMode.title) ?? "Using default")
-                    LabeledContent("Current mode", value: OrbitIncomingMode.title(caller.currentMode))
+                    LabeledContent(state.snapshot?.incomingOverride == nil ? "Current mode" : "Saved personal mode", value: OrbitIncomingMode.title(caller.currentMode))
                 }
                 Section("Assigned modes") {
                     ForEach(caller.modes, id: \.self) { Text(OrbitIncomingMode.title($0)) }
@@ -162,6 +183,9 @@ struct OrbitAllowedCallerEditor: View {
     var body: some View {
         NavigationStack {
             Form {
+                if state.snapshot?.incomingOverride != nil {
+                    Section { Text("Incoming mode is temporarily overridden. Edits here change saved personal settings, not the active override.").foregroundStyle(.orange) }
+                }
                 Section {
                     TextField("Name", text: $draft.name).textContentType(.name)
                     if draft.original == nil {

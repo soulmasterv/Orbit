@@ -47,6 +47,41 @@ struct OrbitAllowedCallers: Decodable {
     let version: Int
     let availableModes: [String]
     let callers: [OrbitAllowedCaller]
+    var incomingOverride: OrbitIncomingOverride? = nil
+    var availableOverrideModes: [String]? = nil
+    enum CodingKeys: String, CodingKey {
+        case version, availableModes, callers, availableOverrideModes
+        case incomingOverride = "override"
+    }
+    var overrideModes: [String] {
+        (availableOverrideModes ?? []).filter { $0 != "jarvis" && OrbitIncomingMode(rawValue: $0) != nil }
+    }
+}
+
+struct OrbitIncomingOverride: Decodable, Equatable {
+    let mode: String
+    let expiresAt: Double
+    var expires: Date { Date(timeIntervalSince1970: expiresAt / 1000) }
+    func remaining(at date: Date) -> Int { Int(max(0, min(999_999_999, ceil(expires.timeIntervalSince(date))))) }
+    func countdown(at date: Date) -> String {
+        let seconds = remaining(at: date)
+        return seconds == 0 ? "Checking server expiry…" : String(format: "%d:%02d remaining", seconds / 60, seconds % 60)
+    }
+}
+
+struct OrbitIncomingOverrideChange: Encodable {
+    let action: String
+    var mode: String? = nil
+    var minutes: Int? = nil
+    var isValid: Bool {
+        if action == "clear_override" { return mode == nil && minutes == nil }
+        return action == "override" && ["silly", "bibo", "diaa", "diaa-noqta"].contains(mode ?? "") && (1...120).contains(minutes ?? 0)
+    }
+    static func customMinutes(_ input: String) -> Int? {
+        guard !input.isEmpty, input.utf8.allSatisfy({ (48...57).contains($0) }),
+              let value = Int(input), (1...120).contains(value) else { return nil }
+        return value
+    }
 }
 
 struct OrbitCallerChange: Encodable {

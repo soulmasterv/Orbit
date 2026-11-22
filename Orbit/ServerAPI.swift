@@ -1638,6 +1638,21 @@ extension ServerAPI {
 }
 
 extension ServerAPI {
+    func changeIncomingOverride(_ change: OrbitIncomingOverrideChange) async throws -> OrbitAllowedCallers {
+        guard canControl, !previewMode, phonePilotIsForeground(), !Task.isCancelled, change.isValid else { throw CancellationError() }
+        let context = latestReportsContext
+        let epoch = studentsAccessGeneration
+        let endpoint = activeBaseURL
+        actionBusy = true
+        defer { actionBusy = false }
+        try await authorizeConfirmed(change.action == "override" ? "Force incoming mode, including unknown callers, for the selected duration" : "Stop the incoming mode override for new calls")
+        try await DeviceAuthorization.waitForCallForeground(isForeground: phonePilotIsForeground, mayContinue: {
+            self.accessAllowed && context == self.latestReportsContext && epoch == self.studentsAccessGeneration && endpoint == self.activeBaseURL && !Task.isCancelled
+        })
+        guard accessAllowed, !needsVerification, connection == .connected, phonePilotIsForeground(),
+              context == latestReportsContext, epoch == studentsAccessGeneration, endpoint == activeBaseURL, !Task.isCancelled else { throw CancellationError() }
+        return try await jarvisNativeRequest("/api/jarvis/allowed-callers", method: "POST", body: JSONEncoder().encode(change))
+    }
     func allowedCallers() async throws -> OrbitAllowedCallers {
         try await jarvisNativeRequest("/api/jarvis/allowed-callers")
     }
