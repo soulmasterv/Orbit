@@ -71,11 +71,18 @@ struct OrbitPhonePilotView: View {
     @State private var loading = false
     @State private var queue: OrbitPhoneQueue?
     @State private var queueLoading = false
+    @State private var pairing: OrbitPhonePairing?
     private var fresh: Bool { phase == .active && api.phonePilotStatusIsFresh && (refreshed.map { Date().timeIntervalSince($0) < 20 } ?? false) }
     private var canSend: Bool { fresh && api.canControl && !busy && !loading && pendingCommand == nil }
     var body: some View {
         Form {
             Section("Phone connection") {
+                Button("Set up Android with pairing QR") {
+                    Task {
+                        do { pairing = try await api.phonePairingQR() }
+                        catch { failure = "Android pairing setup could not be authorized or loaded." }
+                    }
+                }.disabled(!api.canControl || busy)
                 if let value {
                     LabeledContent("Companion", value: fresh ? (value.phone_seen_seconds.map { $0 < 20 ? "Connected" : "Last seen \($0)s ago" } ?? "Not connected") : "Status is stale")
                     LabeledContent("USB / ADB", value: value.runtime.adb.capitalized)
@@ -143,6 +150,7 @@ struct OrbitPhonePilotView: View {
             }
         }
         .navigationTitle("Phone controls")
+        .sheet(item: $pairing) { OrbitPhonePairingView(pairing: $0) }
         .confirmationDialog("Confirm phone change", isPresented: Binding(get: { pendingCommand != nil }, set: { if !$0 { pendingCommand = nil } }), titleVisibility: .visible) {
             if let command = pendingCommand {
                 Button("Confirm") { pendingCommand = nil; Task { await send(command) } }
@@ -157,6 +165,7 @@ struct OrbitPhonePilotView: View {
         }
         .onDisappear { api.invalidatePhonePilotStatus() }
         .onChange(of: phase) { _, next in
+            if next != .active { pairing = nil }
             if next == .background { api.invalidatePhonePilotStatus(); refreshed = nil; pendingCommand = nil }
         }
         .onChange(of: api.latestReportsContext) { _, _ in

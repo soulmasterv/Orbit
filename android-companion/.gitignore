@@ -1,0 +1,7 @@
+build/
+lib/
+test-build/
+*.apk
+*.idsig
+*.p12
+password.txt
