@@ -7,10 +7,7 @@ struct StudentsView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var visible = false
     @State private var search = ""
-    @State private var filter: StudentsFilter = .all
-    @State private var activity: StudentActivityStatus?
     private let embedded: Bool
-    @State private var selectedGrade = ""
     @State private var refreshOwner = UUID()
     @Environment(\.orbitNavigation) private var navigation
     @State private var localAnchor: String?
@@ -27,9 +24,6 @@ struct StudentsView: View {
     }
 
     private var refreshEnabled: Bool { visible && scenePhase == .active && api.accessAllowed }
-    private var grades: [String] {
-        StudentsDirectory.grades(in: store.snapshot?.students ?? [])
-    }
 
     var body: some View {
         ScrollView {
@@ -63,7 +57,7 @@ struct StudentsView: View {
         .navigationDestination(for: SchoolStudentRoute.self) { route in
             StudentDetailView(api: api, store: store, phone: route.phone)
         }
-        .navigationTitle(embedded ? "Orbit" : "Students").navigationBarTitleDisplayMode(.inline)
+        .navigationTitle(embedded ? "Orbit" : "Contacts").navigationBarTitleDisplayMode(.inline)
         .scrollDismissesKeyboard(.interactively)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -71,9 +65,6 @@ struct StudentsView: View {
             }
         }
         .onAppear { store.claimVisibility(refreshOwner); visible = true }
-        .onChange(of: grades) { _, available in
-            if !selectedGrade.isEmpty && !available.contains(selectedGrade) { selectedGrade = "" }
-        }
         .onDisappear { visible = false; store.suspend(owner: refreshOwner, preserveVerification: api.accessAllowed || api.retainsReadSnapshots) }
         .task(id: "\(refreshEnabled)|\(api.latestReportsContext)") {
             guard refreshEnabled else { store.suspend(owner: refreshOwner, clear: !api.accessAllowed && !api.retainsReadSnapshots, preserveVerification: api.accessAllowed || api.retainsReadSnapshots); return }
@@ -109,20 +100,6 @@ struct StudentsView: View {
                 Text("AI").font(.caption).foregroundStyle(StudentPalette.secondary)
                 Spacer()
                 Menu {
-                    Picker("Messaging window", selection: $filter) {
-                        ForEach(StudentsFilter.allCases) { item in Text(item.rawValue).tag(item) }
-                    }
-                    if filter == .grade {
-                        Picker("Grade", selection: $selectedGrade) {
-                            Text("All grades").tag("")
-                            ForEach(grades, id: \.self) { grade in Text("Grade \(grade)").tag(grade) }
-                        }
-                    }
-                } label: {
-                    Label(filter == .grade && !selectedGrade.isEmpty ? "Grade \(selectedGrade)" : filter.rawValue,
-                          systemImage: "line.3.horizontal.decrease").font(.caption.weight(.medium))
-                }
-                Menu {
                     NavigationLink("Student tools and settings") { MobileHubView(api: api) }
                     NavigationLink("Feedback") { MobileFeedbackView(api: api, selectedID: nil) }
                     NavigationLink("Recent events") { MobileEventsView(api: api) }
@@ -132,7 +109,6 @@ struct StudentsView: View {
                 } label: { Image(systemName: "ellipsis.circle").frame(minWidth: 30, minHeight: 30) }
                     .accessibilityLabel("Student tools, feedback and events")
             }
-            StudentAccessFilters(selection: $activity)
             if mobile.state?.outbox != nil {
                 NavigationLink { MessageOutboxView() } label: { Label("Check last message", systemImage: "tray") }
                     .font(.caption.weight(.medium))
@@ -143,8 +119,7 @@ struct StudentsView: View {
     }
 
     private func directory(_ snapshot: StudentsSnapshot, at now: ContinuousClock.Instant) -> some View {
-        let rows = StudentsDirectory.filtered(snapshot, search: search, filter: filter, grade: selectedGrade, at: now)
-            .filter { $0.activityStatus.matches(activity) }
+        let rows = StudentsDirectory.filtered(snapshot, search: search, filter: .all, grade: "", at: now)
         let open = snapshot.students.filter { snapshot.isWindowOpen(for: $0, at: now) }.count
         return VStack(alignment: .leading, spacing: 0) {
             ViewThatFits(in: .horizontal) {
@@ -155,7 +130,7 @@ struct StudentsView: View {
             if rows.isEmpty {
                 ContentUnavailableView(snapshot.students.isEmpty ? "No students yet" : "No matching students",
                     systemImage: "person.3",
-                    description: Text(snapshot.students.isEmpty ? "Profiles appear after students contact the bot." : "Try another search, window filter or grade."))
+                    description: Text(snapshot.students.isEmpty ? "Profiles appear after students contact the bot." : "Try another name or number."))
                     .frame(maxWidth: .infinity).padding(.vertical, 20)
             }
             ForEach(Array(rows.enumerated()), id: \.element.id) { index, student in

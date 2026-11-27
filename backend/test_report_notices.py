@@ -2,7 +2,7 @@ import json
 import sys
 import types
 import unittest
-from classera_report_notices import NoticeTransport, NoticeDispatch, notice_template_valid, report_date_label
+from classera_report_notices import NoticeTransport, NoticeDispatch, report_date_label
 from install_report_notices import patch_sender
 import test_report_settings as fixturelib
 
@@ -33,15 +33,11 @@ class NoticeTransportTests(unittest.TestCase):
         self.assertEqual(NoticeTransport(provider).send('201000000001', '12F', 'Fixture'), 'accepted')
         self.assertEqual(provider.calls, ['window', ('plaintext', '*Notice for 12F:*\n\n- Fixture')])
 
-    def test_closed_window_uses_verified_template_exactly_once(self):
+    def test_closed_window_never_uses_template(self):
         provider = FakeProvider()
-        self.assertEqual(NoticeTransport(provider).send('201000000001', '12F', 'Fixture', report_date='1/11/2026'), 'accepted')
-        posts = [c for c in provider.calls if isinstance(c, tuple) and c[0] == 'POST']
-        self.assertEqual(len(posts), 1)
-        request = posts[0][2]
-        self.assertFalse(request['allow_redirects'])
-        self.assertEqual(request['json']['template'], {'name': 'classera_wa_notice', 'language': {'code': 'en_US'}, 'components': [{'type': 'body', 'parameters': [{'type': 'text', 'text': '12F'}, {'type': 'text', 'text': '1/11/2026'}, {'type': 'text', 'text': 'Fixture'}]}]})
-        self.assertNotIn('fixture-key', json.dumps(request['json']))
+        self.assertEqual(NoticeTransport(provider).send('201000000001', '12F', 'Fixture', report_date='1/11/2026'), 'skipped_window_closed')
+        self.assertEqual(provider.calls, ['window'])
+
 
     def test_unknown_near_expiry_or_unapproved_never_sends_freeform(self):
         for window in [{'window_open': None, 'seconds_left': None}, {'window_open': True, 'seconds_left': 2}, {'window_open': True, 'seconds_left': 86401}, {'window_open': False, 'seconds_left': 0}]:
@@ -61,17 +57,15 @@ class NoticeTransportTests(unittest.TestCase):
         self.assertEqual(NoticeTransport(provider).send('201000000001', '12F', 'Fixture'), 'unknown')
         self.assertEqual(provider.calls, ['window', 'one-send'])
 
-    def test_notice_template_requires_three_text_parameters_and_exact_language(self):
-        value = {'name': 'classera_wa_notice', 'language': 'en_US', 'status': 'APPROVED', 'components': [{'type': 'BODY', 'text': 'Notice for {{1}} - {{2}}: {{3}}'}]}
-        self.assertTrue(notice_template_valid(value))
-        value['components'][0]['text'] = 'Class {{1}} notice {{2}}'
-        self.assertFalse(notice_template_valid(value))
-        value['components'][0]['text'] = 'Notice for {{1}} - {{2}}: {{3}}'; value['language'] = 'en_us'
-        self.assertFalse(notice_template_valid(value))
+    def test_unknown_window_never_uses_template_metadata(self):
+        provider = FakeProvider({'window_open': None, 'seconds_left': None})
+        self.assertEqual(NoticeTransport(provider).send('201000000001', '12F', 'Fixture'), 'skipped_window_unknown')
+        self.assertEqual(provider.calls, ['window'])
+
 
     def test_unknown_report_date_never_uses_today_for_a_template(self):
         provider = FakeProvider()
-        self.assertEqual(NoticeTransport(provider).send('201000000001', '12F', 'Fixture'), 'skipped_report_date_unknown')
+        self.assertEqual(NoticeTransport(provider).send('201000000001', '12F', 'Fixture'), 'skipped_window_closed')
         self.assertFalse(any(isinstance(c, tuple) and c[0] == 'POST' for c in provider.calls))
         self.assertEqual(report_date_label('12F 1/11/26'), '1/11/2026')
         self.assertEqual(report_date_label('12E 29_02_2024'), '29/2/2024')
@@ -95,19 +89,57 @@ class NoticeBatchTests(unittest.TestCase):
                 if not allowed(): return 'skipped_ineligible'
                 sent.append((phone, klass, text)); return 'accepted'
         self.dispatch = NoticeDispatch(self.settings, Transport(), ready=lambda: True)
-    def tearDown(self): self.fixture.tearDown()
+    def tearDown(self):
+        import classera_report_notices
+        classera_report_notices._dispatch = None
+        self.fixture.tearDown()
     def queue(self):
         import uuid
         self.settings.mutate('classera-1', 'next-notice', {'request_id': str(uuid.uuid4()), 'expected_revision': self.settings.snapshot('classera-1')['revision'], 'text': 'Next report only'})
 
-    def test_ai_and_no_ai_recipients_share_one_notice_without_duplicate_send(self):
+    def test_webhook_hook_requires_exact_recipient_parent_class_and_recent_inbound(self):
+        import sqlite3, time, classera_report_notices
+        path = self.settings.path.with_name('delivery-fixture.db')
+        with sqlite3.connect(path) as c:
+            c.execute('CREATE TABLE deliveries(report TEXT,recipient TEXT,message_id TEXT,classera_id TEXT,status TEXT)')
+            c.execute('INSERT INTO deliveries VALUES(?,?,?,?,?)', ('12F 1/11/26','201000000001','parent-1','classera-1','delivered'))
+        self.queue(); batch = self.dispatch.prepare('12F', '12F 1/11/26', ['201000000001'])
+        self.dispatch.after_report(batch, '201000000001', True)
+        classera_report_notices._dispatch = self.dispatch
+        message = {'from':'201000000001','id':'inbound-1','timestamp':str(int(time.time())-1),'context':{'id':'parent-1'}}
+        for changed in [dict(message, context={'id':'wrong'}), dict(message, timestamp='1'), dict(message, **{'from':'201000000002'})]:
+            classera_report_notices.after_ai_request(changed, '12F', delivery_path=path)
+        classera_report_notices.after_ai_request(message, '12E', delivery_path=path)
+        self.assertEqual(self.sent, [])
+        classera_report_notices.after_ai_request(message, '12F', delivery_path=path)
+        classera_report_notices.after_ai_request(message, '12F', delivery_path=path)
+        self.assertEqual(len(self.sent), 1)
+
+    def test_transport_uncertainty_or_process_restart_never_resends_reserved_notice(self):
+        self.queue(); batch = self.dispatch.prepare('12F', '12F 1/11/26', ['201000000001'])
+        self.dispatch.after_report(batch, '201000000001', True)
+        class UnknownTransport:
+            def send(inner, *args, **kwargs): self.sent.append('attempt'); return 'unknown'
+        self.dispatch.transport = UnknownTransport()
+        self.dispatch.after_ai('201000000001', '12F', '12F 1/11/26')
+        NoticeDispatch(self.settings, UnknownTransport(), ready=lambda: True).after_ai('201000000001', '12F', '12F 1/11/26')
+        self.assertEqual(self.sent, ['attempt'])
+
+    def test_reports_defer_notice_and_only_matching_ai_request_sends_once(self):
         self.queue(); people = ['201000000001', '201000000002']
         batch = self.dispatch.prepare('12F', '12F 1/11/26', people)
         for phone in people: self.dispatch.after_report(batch, phone, True)
-        self.dispatch.after_report(batch, people[0], True)
-        self.assertEqual(len(self.sent), 2)
-        self.assertEqual(self.settings.snapshot('classera-1')['latest_notice']['outcomes'], {'accepted': 2})
-        self.assertIsNone(self.dispatch.prepare('12F', '12F 2/11/26', people))
+        self.assertEqual(self.sent, [])
+        self.assertEqual(self.settings.snapshot('classera-1')['latest_notice']['outcomes'], {'awaiting_ai': 2})
+        self.dispatch.after_ai(people[0], '12F', 'another-report')
+        self.dispatch.after_ai(people[0], '12E', '12F 1/11/26')
+        self.assertEqual(self.sent, [])
+        self.dispatch.after_ai(people[0], '12F', '12F 1/11/26')
+        self.dispatch.after_ai(people[0], '12F', '12F 1/11/26')
+        self.assertEqual(len(self.sent), 1)
+        self.dispatch.after_ai(people[1], '12F', '12F 1/11/26')
+        self.assertEqual(self.settings.snapshot('classera-1')['latest_notice']['outcomes'], {'accepted': 1, 'skipped_ineligible': 1})
+
 
     def test_notice_queued_after_a_batch_started_waits_for_next_new_report(self):
         people = ['201000000001']
@@ -128,6 +160,7 @@ class NoticeBatchTests(unittest.TestCase):
         batch = self.dispatch.prepare('12F', 'next-report', people)
         self.dispatch.after_report(batch, people[0], False)
         self.dispatch.after_report(batch, people[1], True)
+        self.dispatch.after_ai(people[1], '12F', 'next-report')
         self.assertEqual(self.sent, [])
         self.assertEqual(self.settings.snapshot('classera-1')['latest_notice']['outcomes'], {'skipped_report_failed': 1, 'skipped_ineligible': 1})
 

@@ -84,7 +84,7 @@ struct HomeView: View {
                 SectionHeading(title: "Workspace")
                 VStack(spacing: 10) {
                     Button { navigation?.openStudents() } label: {
-                        CompactWorkspaceRow(title: "Students", subtitle: "Student directories and messaging windows")
+                        CompactWorkspaceRow(title: "Contacts", subtitle: "AI, Classera and calls")
                     }.disabled(navigation == nil || !api.accessAllowed).accessibilityIdentifier("workspace.students")
                     NavigationLink(value: WorkspaceRoute.phoneControls) {
                         CompactWorkspaceRow(title: "Phone controls", subtitle: "Connection, notifications and call automation", divider: true)

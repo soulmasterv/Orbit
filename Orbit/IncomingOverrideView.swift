@@ -20,8 +20,6 @@ struct OrbitIncomingOverrideCard: View {
                     Text(override.countdown(at: timeline.date)).monospacedDigit().foregroundStyle(.orange)
                         .accessibilityLabel("Incoming override: " + override.countdown(at: timeline.date))
                 }
-                Text("Includes unknown incoming numbers. Individual settings are temporarily overridden and remain saved.")
-                    .font(.subheadline).foregroundStyle(.secondary)
                 Button("Stop now", role: .destructive) { pending = OrbitIncomingOverrideChange(action: "clear_override") }
                     .disabled(!canChange)
             } else {
@@ -41,12 +39,8 @@ struct OrbitIncomingOverrideCard: View {
                     guard let minutes else { return }
                     pending = OrbitIncomingOverrideChange(action: "override", mode: mode, minutes: minutes)
                 }.disabled(!canChange || !modes.contains(mode) || minutes == nil)
-                Text(modes.isEmpty ? "Override controls are unavailable until supported server settings are loaded." : "Includes unknown incoming numbers while active. Individual settings stay saved.")
-                    .font(.subheadline).foregroundStyle(.secondary)
             }
-        } header: { Label("Force incoming mode", systemImage: "timer") } footer: {
-            Text("Stopping or expiry changes new incoming calls. An ongoing call is not cut off. Caller /mode choices do not bypass an active override.")
-        }
+        } header: { Label("Force incoming mode", systemImage: "timer") }
         .confirmationDialog(pending?.action == "override" ? "Force incoming mode?" : "Stop incoming override?", isPresented: Binding(
             get: { pending != nil }, set: { if !$0 { pending = nil } }
         ), titleVisibility: .visible, presenting: pending) { change in

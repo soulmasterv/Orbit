@@ -74,6 +74,11 @@ struct ClasseraSubscriptionPolicy: Codable {
 }
 
 enum ClasseraDirectoryFilter: String, CaseIterable, Identifiable {
+    static func unfiltered(_ students: [ClasseraStudent], search: String) -> [ClasseraStudent] {
+        let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
+        let matching = students.filter { query.isEmpty || $0.displayName.localizedCaseInsensitiveContains(query) || $0.phone.contains(query) }
+        return matching.filter { !$0.activityStatus.matches(.suspended) } + matching.filter { $0.activityStatus.matches(.suspended) }
+    }
     case current = "All", allowed = "Allowed", suspended = "Suspended", optedOut = "Opted out"
     var id: String { rawValue }
     func apply(to students: [ClasseraStudent], search: String) -> [ClasseraStudent] {

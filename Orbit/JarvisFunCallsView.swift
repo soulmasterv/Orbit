@@ -2,14 +2,12 @@ import SwiftUI
 
 enum JarvisFunMode: String, CaseIterable, Identifiable, Encodable {
     case silly, bibo, diaa
-    case diaaNoqta = "diaa-noqta"
     var id: String { rawValue }
     var title: String {
         switch self {
         case .silly: "Hossam"
         case .bibo: "Bibo"
-        case .diaa: "Diaa (both clips)"
-        case .diaaNoqta: "Diaa Noqta"
+        case .diaa: "Diaa"
         }
     }
 }

@@ -279,13 +279,13 @@ class ReportSettings:
             return dict(c.execute('SELECT * FROM orbit_report_notices WHERE id=?', (queued['id'],)).fetchone())
 
     def record_notice_result(self, notice_id, phone, outcome):
-        if outcome not in ['accepted', 'failed', 'unknown', 'skipped_window_closed', 'skipped_window_unknown', 'skipped_report_failed', 'skipped_ineligible', 'skipped_report_date_unknown']:
+        if outcome not in ['accepted', 'failed', 'unknown', 'awaiting_ai', 'skipped_window_closed', 'skipped_window_unknown', 'skipped_report_failed', 'skipped_ineligible', 'skipped_report_date_unknown']:
             raise Problem('invalid_outcome')
         with self.connect() as c:
             c.execute('BEGIN IMMEDIATE')
             c.execute("UPDATE orbit_report_notice_targets SET outcome=? WHERE notice_id=? AND phone=? AND outcome='reserved'", (outcome, notice_id, phone))
             rows = c.execute('SELECT outcome FROM orbit_report_notice_targets WHERE notice_id=?', (notice_id,)).fetchall()
-            if rows and all(r['outcome'] not in ['pending', 'reserved'] for r in rows):
+            if rows and all(r['outcome'] not in ['pending', 'reserved', 'awaiting_ai'] for r in rows):
                 state = 'completed' if all(r['outcome'] == 'accepted' for r in rows) else 'partial' if any(r['outcome'] == 'accepted' for r in rows) else 'failed'
                 c.execute('UPDATE orbit_report_notices SET state=? WHERE id=?', (state, notice_id))
 

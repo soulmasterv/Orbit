@@ -1,7 +1,7 @@
 """Next-report notice dispatch hooks. Never run a send during import or API GET.
 
-At dispatch, plaintext requires verified current inbound-window evidence. Closed
-or unknown windows require the approved classera_wa_notice/en_US template.
+Notices wait for a matching successful AI request. Only plaintext inside a
+verified current inbound window is allowed; templates are never used.
 """
 import hashlib
 import json
@@ -32,6 +32,10 @@ def producer_ready(root=ROOT):
         receipt = json.loads((root / 'shared/orbit_report_notice_hooks.json').read_text())
         if receipt.get('version') != 1 or receipt.get('enabled') is not True:
             return False
+        if receipt.get('notice_policy') != 'ai_request_window': return False
+        webhook = root.parent / 'classera-webhook/app.py'
+        if hashlib.sha256(webhook.read_bytes()).hexdigest() != receipt.get('ai_webhook'):
+            return False
         for name, directory in CLASSES.items():
             expected = receipt.get('senders', {}).get(name)
             if not isinstance(expected, str) or not re.fullmatch(r'[a-f0-9]{64}', expected):
@@ -43,48 +47,11 @@ def producer_ready(root=ROOT):
         return False
 
 
-def notice_template_valid(value):
-    if not isinstance(value, dict) or value.get('name') != 'classera_wa_notice' or value.get('language') != 'en_US' or value.get('status') != 'APPROVED':
-        return False
-    components = value.get('components')
-    if not isinstance(components, list) or any(not isinstance(c, dict) or c.get('type') not in ['BODY', 'HEADER', 'FOOTER'] for c in components):
-        return False
-    bodies = [c for c in components if c.get('type') == 'BODY']
-    if len(bodies) != 1 or not isinstance(bodies[0].get('text'), str) or set(re.findall(r'\{\{([^}]+)\}\}', bodies[0]['text'])) != {'1', '2', '3'}:
-        return False
-    for component in components:
-        if component['type'] == 'HEADER' and component.get('format') != 'TEXT': return False
-        if component['type'] != 'BODY' and (not isinstance(component.get('text'), str) or '{{' in component['text']): return False
-    return True
-
-
 class NoticeTransport:
     def __init__(self, provider=None, root=ROOT, now=time.monotonic):
         self.provider = provider or Kapso(root=root)
         self.now = now
         self.cache = {}
-
-    def template_ready(self, class_name):
-        if class_name in self.cache and self.cache[class_name][0] > self.now():
-            return self.cache[class_name][1]
-        verified = False
-        try:
-            key, phone_id = self.provider.settings(class_name)
-            response = self.provider.http.get('https://api.kapso.ai/platform/v1/whatsapp/phone_numbers',
-                headers={'X-API-Key': key}, params={'phone_number_id': phone_id}, timeout=10, allow_redirects=False)
-            if response.status_code != 200: return False
-            matches = [row for row in response.json().get('data', []) if str(row.get('phone_number_id', row.get('id', ''))) == phone_id]
-            if len(matches) != 1 or not re.fullmatch(r'[0-9]{5,30}', str(matches[0].get('business_account_id', ''))): return False
-            account = str(matches[0]['business_account_id'])
-            response = self.provider.http.get('https://api.kapso.ai/meta/whatsapp/v24.0/' + account + '/message_templates',
-                headers={'X-API-Key': key}, params={'name': 'classera_wa_notice', 'language': 'en_US', 'limit': 10}, timeout=10, allow_redirects=False)
-            if response.status_code == 200:
-                verified = any(notice_template_valid(value) for value in response.json().get('data', []))
-        except Exception:
-            verified = False
-        finally:
-            self.cache[class_name] = (self.now() + 60, verified)
-        return verified
 
     def send(self, phone, class_name, text, allowed=lambda: True, report_date=None):
         try:
@@ -100,26 +67,7 @@ class NoticeTransport:
                 status, message = self.provider.send(phone, class_name, heading + '\n\n- ' + text)
                 return status if status in ['accepted', 'failed', 'unknown'] else 'unknown'
             except Exception: return 'unknown'
-        if not self.template_ready(class_name):
-            return 'skipped_window_closed' if window.get('window_open') is False else 'skipped_window_unknown'
-        if not report_date:
-            return 'skipped_report_date_unknown'
-        try:
-            key, phone_id = self.provider.settings(class_name)
-            if not allowed(): return 'skipped_ineligible'
-            response = self.provider.http.post('https://api.kapso.ai/meta/whatsapp/v24.0/' + phone_id + '/messages',
-                headers={'X-API-Key': key, 'Content-Type': 'application/json'},
-                json={'messaging_product': 'whatsapp', 'to': phone, 'type': 'template', 'template': {
-                    'name': 'classera_wa_notice', 'language': {'code': 'en_US'}, 'components': [
-                        {'type': 'body', 'parameters': [{'type': 'text', 'text': class_name},
-                            {'type': 'text', 'text': report_date}, {'type': 'text', 'text': text}]}]}},
-                timeout=12, allow_redirects=False)
-            if response.status_code == 408: return 'unknown'
-            if 400 <= response.status_code < 500: return 'failed'
-            if not 200 <= response.status_code < 300: return 'unknown'
-            messages = response.json().get('messages', [])
-            return 'accepted' if messages and isinstance(messages[0].get('id'), str) and messages[0]['id'] else 'unknown'
-        except Exception: return 'unknown'
+        return 'skipped_window_closed' if window.get('window_open') is False else 'skipped_window_unknown'
 
 
 class NoticeDispatch:
@@ -140,22 +88,37 @@ class NoticeDispatch:
                                              already_started=already_started, report_date=report_date)
         return {'notice_id': claimed['id'], 'class_name': class_name, 'report_date': label} if claimed else None
 
+    def eligible(self, phone, class_name):
+        with self.settings.connect(True) as c:
+            return bool(c.execute('''SELECT 1 FROM subscribers s
+              WHERE s.phone=? AND s.class_name=? AND s.status='active' AND s.ai_enabled=1
+              AND NOT EXISTS(SELECT 1 FROM signup_sessions p WHERE p.phone=s.phone)
+              AND NOT EXISTS(SELECT 1 FROM orbit_student_controls a WHERE a.phone=s.phone
+                AND (a.activity_status IS NULL OR a.activity_status<>'allowed'))''', (phone, class_name)).fetchone())
+
     def after_report(self, batch, phone, report_accepted):
         if not batch: return
-        text = self.settings.reserve_notice_target(batch['notice_id'], phone)
-        if text is None: return
-        outcome = 'skipped_report_failed'
         if report_accepted:
-            def eligible():
-                with self.settings.connect(True) as c:
-                    return bool(c.execute('''SELECT 1 FROM subscribers s
-                      WHERE s.phone=? AND s.class_name=? AND s.status='active'
-                      AND NOT EXISTS(SELECT 1 FROM signup_sessions p WHERE p.phone=s.phone)
-                      AND NOT EXISTS(SELECT 1 FROM orbit_student_controls a WHERE a.phone=s.phone
-                        AND (a.activity_status IS NULL OR a.activity_status<>'allowed'))''', (phone, batch['class_name'])).fetchone())
-            outcome = self.transport.send(phone, batch['class_name'], text, allowed=eligible, report_date=batch.get('report_date')) if eligible() else 'skipped_ineligible'
-        self.settings.record_notice_result(batch['notice_id'], phone, outcome)
+            # A report send never sends a notice. Keep the target pending for its AI request.
+            with self.settings.connect() as c:
+                c.execute("UPDATE orbit_report_notice_targets SET outcome='awaiting_ai' WHERE notice_id=? AND phone=? AND outcome='pending'", (batch['notice_id'], phone))
+            return
+        text = self.settings.reserve_notice_target(batch['notice_id'], phone)
+        if text is not None: self.settings.record_notice_result(batch['notice_id'], phone, 'skipped_report_failed')
 
+    def after_ai(self, phone, class_name, report_title):
+        if class_name not in CLASSES: return
+        batch_id = hashlib.sha256(json.dumps([class_name, report_title], ensure_ascii=False).encode()).hexdigest()
+        with self.settings.connect() as c:
+            c.execute('BEGIN IMMEDIATE')
+            row = c.execute("SELECT id,text FROM orbit_report_notices WHERE class_id=? AND batch_id=? AND state='claimed'", (CLASSES[class_name], batch_id)).fetchone()
+            if not row: return
+            changed = c.execute("UPDATE orbit_report_notice_targets SET outcome='reserved' WHERE notice_id=? AND phone=? AND outcome IN ('pending','awaiting_ai')", (row['id'], phone)).rowcount
+            if changed != 1: return
+            ident, text = row['id'], row['text']
+        eligible = lambda: self.eligible(phone, class_name)
+        outcome = self.transport.send(phone, class_name, text, allowed=eligible, report_date=report_date_label(report_title)) if eligible() else 'skipped_ineligible'
+        self.settings.record_notice_result(ident, phone, outcome)
 
 _dispatch = None
 def prepare(class_name, report_title, recipients, **options):
@@ -174,3 +137,30 @@ def after_report(batch, phone, report_accepted):
         if batch and _dispatch: _dispatch.after_report(batch, phone, report_accepted)
     except Exception:
         print('Report notice outcome is unconfirmed; it will not be retried automatically.', flush=True)
+
+
+def after_ai_request(message, class_name, *, delivery_path=ROOT / 'shared/delivery_state.db'):
+    """Called only after the authenticated webhook successfully sends requested AI analysis.
+
+    Exact recipient + outbound context + class ledger binding; no latest-report fallback.
+    No pending notice is reserved unless a matching accepted report exists.
+    """
+    import sqlite3
+    global _dispatch
+    if class_name not in CLASSES or not isinstance(message, dict): return
+    phone = message.get('from'); context = message.get('context')
+    parent = context.get('id') if isinstance(context, dict) else None
+    raw = message.get('timestamp')
+    if not isinstance(phone, str) or not re.fullmatch(r'[1-9][0-9]{7,14}', phone): return
+    if not isinstance(parent, str) or not 1 <= len(parent) <= 512: return
+    if isinstance(raw, bool) or not re.fullmatch(r'[0-9]{1,12}', str(raw)): return
+    age = time.time() - int(raw)
+    if not 0 <= age <= 86340: return
+    try:
+        with sqlite3.connect(Path(delivery_path).resolve().as_uri() + '?mode=ro', uri=True) as c:
+            row = c.execute("SELECT report FROM deliveries WHERE recipient=? AND message_id=? AND classera_id=? AND status IN ('accepted','sent','delivered','read') LIMIT 1", (phone, parent, CLASSES[class_name])).fetchone()
+        if not row or not isinstance(row[0], str): return
+        if _dispatch is None: _dispatch = NoticeDispatch()
+        _dispatch.after_ai(phone, class_name, row[0])
+    except Exception:
+        print('Report notice could not be confirmed after AI request; no automatic retry.', flush=True)

@@ -4,14 +4,15 @@ import Combine
 enum OrbitIncomingMode: String, CaseIterable, Identifiable {
     case jarvis, silly, bibo, diaa
     case noqta = "diaa-noqta"
+    static var allCases: [Self] { [.jarvis, .silly, .bibo, .diaa] }
+    static func canonical(_ mode: String) -> String { mode == "diaa-noqta" ? "diaa" : mode }
     var id: String { rawValue }
     var title: String {
         switch self {
-        case .jarvis: "Private JARVIS"
+        case .jarvis: "Private AI"
         case .silly: "Hossam"
         case .bibo: "Bibo feeding call"
-        case .diaa: "Diaa full playlist"
-        case .noqta: "Noqta"
+        case .diaa, .noqta: "Diaa"
         }
     }
     static func title(_ mode: String) -> String { Self(rawValue: mode)?.title ?? mode }
@@ -41,6 +42,10 @@ struct OrbitAllowedCaller: Decodable, Identifiable, Equatable {
     var isOwner: Bool { modes.contains("jarvis") }
     var currentMode: String { selectedMode ?? defaultMode }
     var displayName: String { name.isEmpty ? "Unnamed caller" : name }
+    var displayModes: [String] {
+        let assigned = Set(modes.map(OrbitIncomingMode.canonical))
+        return OrbitIncomingMode.allCases.map(\.rawValue).filter { assigned.contains($0) }
+    }
 }
 
 struct OrbitAllowedCallers: Decodable {
@@ -54,7 +59,7 @@ struct OrbitAllowedCallers: Decodable {
         case incomingOverride = "override"
     }
     var overrideModes: [String] {
-        (availableOverrideModes ?? []).filter { $0 != "jarvis" && OrbitIncomingMode(rawValue: $0) != nil }
+        (availableOverrideModes ?? []).filter { $0 != "jarvis" && $0 != "diaa-noqta" && OrbitIncomingMode(rawValue: $0) != nil }
     }
 }
 
@@ -75,7 +80,7 @@ struct OrbitIncomingOverrideChange: Encodable {
     var minutes: Int? = nil
     var isValid: Bool {
         if action == "clear_override" { return mode == nil && minutes == nil }
-        return action == "override" && ["silly", "bibo", "diaa", "diaa-noqta"].contains(mode ?? "") && (1...120).contains(minutes ?? 0)
+        return action == "override" && ["silly", "bibo", "diaa"].contains(mode ?? "") && (1...120).contains(minutes ?? 0)
     }
     static func customMinutes(_ input: String) -> Int? {
         guard !input.isEmpty, input.utf8.allSatisfy({ (48...57).contains($0) }),
@@ -105,8 +110,8 @@ struct OrbitCallerDraft: Identifiable {
 
     init(_ caller: OrbitAllowedCaller? = nil) {
         original = caller; number = caller?.number ?? ""; name = caller?.name ?? ""
-        enabled = caller?.enabled ?? true; modes = Set(caller?.modes ?? [])
-        defaultMode = caller?.defaultMode ?? ""
+        enabled = caller?.enabled ?? true; modes = Set((caller?.modes ?? []).map(OrbitIncomingMode.canonical))
+        defaultMode = OrbitIncomingMode.canonical(caller?.defaultMode ?? "")
     }
     var isOwner: Bool { original?.isOwner == true }
     mutating func assign(_ mode: String, enabled: Bool) {
@@ -118,7 +123,7 @@ struct OrbitCallerDraft: Identifiable {
     }
     func change(available: [String], existing: [OrbitAllowedCaller]) -> OrbitCallerChange? {
         guard let normalized = OrbitCallerNumber.normalized(number), name.count <= 80,
-              !modes.isEmpty, modes.contains(defaultMode), modes.isSubset(of: Set(available)),
+              !modes.isEmpty, modes.contains(defaultMode), modes.isSubset(of: Set(available.map(OrbitIncomingMode.canonical))),
               modes.allSatisfy({ OrbitIncomingMode(rawValue: $0) != nil }) else { return nil }
         if let original {
             guard normalized == original.number, !isOwner || (enabled && modes.contains("jarvis")) else { return nil }

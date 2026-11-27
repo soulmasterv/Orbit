@@ -1,5 +1,28 @@
 import SwiftUI
 
+private struct OrbitAllowedCallerRow: View {
+    let caller: OrbitAllowedCaller
+    let overridden: Bool
+    var body: some View {
+        HStack(spacing: 12) {
+            Text(String(caller.displayName.prefix(1)).uppercased())
+                .font(.title3.weight(.semibold)).foregroundStyle(.blue)
+                .frame(width: 42, height: 42).background(Color.blue.opacity(0.14), in: Circle())
+            VStack(alignment: .leading, spacing: 5) {
+                Text(caller.displayName).font(.headline)
+                Text(caller.number).font(.subheadline).foregroundStyle(.secondary)
+                HStack(spacing: 7) {
+                    Circle().fill(caller.enabled ? Color.green : Color.gray).frame(width: 6, height: 6)
+                    Text(caller.enabled ? "Enabled" : "Disabled")
+                    Text("·")
+                    Text(overridden ? "Temporarily overridden" : OrbitIncomingMode.title(caller.currentMode))
+                }.font(.caption).foregroundStyle(overridden ? Color.orange : Color.secondary)
+            }
+            Spacer(minLength: 0)
+        }.padding(.vertical, 5)
+    }
+}
+
 struct OrbitAllowedCallersView: View {
     @ObservedObject var api: ServerAPI
     @StateObject private var state = OrbitAllowedCallersState()
@@ -13,11 +36,6 @@ struct OrbitAllowedCallersView: View {
             if active {
                 OrbitIncomingOverrideCard(api: api, state: state)
                 Section {
-                    NavigationLink { OrbitDiaaSettingsView(api: api) } label: {
-                        Label("Diaa playback", systemImage: "waveform")
-                    }
-                }
-                Section {
                     if state.busy { ProgressView("Updating callers…") }
                     if let error = state.error {
                         Text(error).foregroundStyle(.orange)
@@ -29,32 +47,11 @@ struct OrbitAllowedCallersView: View {
                             NavigationLink {
                                 callerDetail(caller.number)
                             } label: {
-                                VStack(alignment: .leading, spacing: 5) {
-                                    HStack {
-                                        Text(caller.displayName).font(.headline)
-                                        Spacer()
-                                        Text(caller.enabled ? "Enabled" : "Disabled")
-                                            .font(.caption).foregroundStyle(caller.enabled ? Color.green : Color.secondary)
-                                    }
-                                    Text(caller.number).font(.subheadline).foregroundStyle(.secondary)
-                                    Text((state.snapshot?.incomingOverride == nil ? "Current: " : "Saved: ") + OrbitIncomingMode.title(caller.currentMode)).font(.subheadline)
-                                    if state.snapshot?.incomingOverride != nil {
-                                        Text("Temporarily overridden").font(.caption).foregroundStyle(.orange)
-                                    }
-                                    Text(caller.modes.map(OrbitIncomingMode.title).joined(separator: " · "))
-                                        .font(.caption).foregroundStyle(.secondary)
-                                }.padding(.vertical, 3)
+                                OrbitAllowedCallerRow(caller: caller, overridden: state.snapshot?.incomingOverride != nil)
                             }
                         }
                     }
-                } header: { Text("Allowed callers") } footer: {
-                    Text("Modes control incoming calls to the JARVIS phone number. Guest access does not include commands, email, calendar or private memory.")
-                }
-                Section("Caller choices") {
-                    Text("Callers can send /mode to the JARVIS WhatsApp number to see their choices. Their selection stays until they change it. /mode default returns to your default.")
-                        .foregroundStyle(.secondary)
-                    Text("One SIM/session and the existing call limits apply.").foregroundStyle(.secondary)
-                }
+                } header: { Text("Allowed callers") }
             }
         }
         .navigationTitle("Allowed Callers")
@@ -121,7 +118,7 @@ struct OrbitAllowedCallerDetail: View {
                     Text(caller.displayName).font(.headline)
                     Text(caller.number).foregroundStyle(.secondary)
                     LabeledContent("Status", value: caller.enabled ? "Enabled" : "Disabled")
-                    if caller.isOwner { Text("Owner · Private JARVIS access").foregroundStyle(.secondary) }
+                    if caller.isOwner { Text("Owner · Private AI access").foregroundStyle(.secondary) }
                 }
                 Section("Incoming mode") {
                     if let override = state.snapshot?.incomingOverride {
@@ -133,7 +130,7 @@ struct OrbitAllowedCallerDetail: View {
                     LabeledContent(state.snapshot?.incomingOverride == nil ? "Current mode" : "Saved personal mode", value: OrbitIncomingMode.title(caller.currentMode))
                 }
                 Section("Assigned modes") {
-                    ForEach(caller.modes, id: \.self) { Text(OrbitIncomingMode.title($0)) }
+                    ForEach(caller.displayModes, id: \.self) { Text(OrbitIncomingMode.title($0)) }
                 }
                 Section {
                     Button("Edit caller") { editor = OrbitCallerDraft(caller) }.disabled(!canEdit)
@@ -141,8 +138,6 @@ struct OrbitAllowedCallerDetail: View {
                     if !caller.isOwner {
                         Button("Delete caller", role: .destructive) { deleting = true }.disabled(!canEdit)
                     }
-                } footer: {
-                    Text(caller.isOwner ? "The owner cannot be removed or disabled. Private JARVIS remains assigned." : "Private JARVIS is reserved for the owner. Guests can use only their assigned incoming modes.")
                 }
                 if let error = state.error {
                     Section { Text(error).foregroundStyle(.orange); Button("Refresh") { Task { await reload() } }.disabled(state.busy) }
@@ -176,7 +171,7 @@ struct OrbitAllowedCallerEditor: View {
     init(api: ServerAPI, state: OrbitAllowedCallersState, initial: OrbitCallerDraft) {
         self.api = api; self.state = state; _draft = State(initialValue: initial)
     }
-    private var available: [String] { state.snapshot?.availableModes ?? [] }
+    private var available: [String] { OrbitIncomingMode.allCases.map(\.rawValue).filter { Set((state.snapshot?.availableModes ?? []).map(OrbitIncomingMode.canonical)).contains($0) } }
     private var change: OrbitCallerChange? { draft.change(available: available, existing: state.snapshot?.callers ?? []) }
     private var canSave: Bool { api.canControl && phase == .active && !state.busy && !state.needsRefresh && change != nil }
     private var assigned: [String] { available.filter { draft.modes.contains($0) } }
@@ -202,15 +197,12 @@ struct OrbitAllowedCallerEditor: View {
                             set: { draft.assign(mode, enabled: $0) }
                         )).disabled(mode == "jarvis" || OrbitIncomingMode(rawValue: mode) == nil)
                     }
-                    if !draft.isOwner { Text("Private JARVIS is owner-only.").font(.caption).foregroundStyle(.secondary) }
                 }
                 Section {
                     Picker("Default mode", selection: $draft.defaultMode) {
                         if draft.defaultMode.isEmpty { Text("Assign a mode first").tag("") }
                         ForEach(assigned, id: \.self) { Text(OrbitIncomingMode.title($0)).tag($0) }
                     }
-                } footer: {
-                    Text("Saving a default keeps the caller's existing selection while that mode remains assigned. Only the caller can reset it with /mode default.")
                 }
                 if let error = state.error {
                     Section {

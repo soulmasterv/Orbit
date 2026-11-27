@@ -87,7 +87,7 @@ struct ContentView: View {
                 StudentDatabasesView(api: api, directory: $navigation.studentDirectory, onWorkspace: { navigation.selectedTab = 0 })
                     .toolbar(.visible, for: .tabBar)
             }
-                .tabItem { Label("Students", systemImage: "person.3") }
+                .tabItem { Label("Contacts", systemImage: "person.3") }
                 .tag(3)
             NavigationStack(path: $navigation.settingsPath) { SettingsView(api: api) }
                 .tabItem { Label("Settings", systemImage: "gearshape") }

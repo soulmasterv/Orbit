@@ -14,7 +14,7 @@ struct StudentDatabasesView: View {
     var body: some View {
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 15) {
-                Text("Students").font(.largeTitle.bold()).foregroundStyle(.white)
+                Text("Contacts").font(.largeTitle.bold()).foregroundStyle(.white)
                 HStack(spacing: 0) {
                     databaseTab("AI", selected: directory == .school) { directory = .school }
                     databaseTab("Classera", selected: directory == .classera) { directory = .classera }
@@ -51,7 +51,6 @@ struct ClasseraStudentsView: View {
         _directory = StateObject(wrappedValue: api.classeraDirectoryStore)
     }
     @State private var search = ""
-    @State private var directoryFilter: ClasseraDirectoryFilter = .current
     @State private var generation = 0
     @State private var add = false
     @State private var phone = ""
@@ -72,7 +71,7 @@ struct ClasseraStudentsView: View {
         })
     }
     private var filtered: [ClasseraStudent] {
-        directoryFilter.apply(to: students, search: search)
+        ClasseraDirectoryFilter.unfiltered(students, search: search)
     }
     private var classCount: Int { Set(students.flatMap(\.subscriptions).filter(\.editable).map(\.className)).count }
     var body: some View {
@@ -81,22 +80,10 @@ struct ClasseraStudentsView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     StudentSearchField(text: $search)
                     HStack {
-                        Text("\(filtered.count) \(directoryFilter == .optedOut ? "opted out" : "subscribers")")
+                        Text("\(filtered.count) contacts")
                         Spacer()
                         Text("\(classCount) classes")
                     }.font(.caption).foregroundStyle(StudentPalette.secondary)
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 8) {
-                            ForEach(ClasseraDirectoryFilter.allCases) { filter in
-                                Button { directoryFilter = filter } label: {
-                                    Text(filter.rawValue).font(.subheadline).foregroundStyle(.white)
-                                        .padding(.horizontal, 13).padding(.vertical, 10)
-                                        .background(directoryFilter == filter ? StudentPalette.accent : StudentPalette.surface,
-                                                    in: RoundedRectangle(cornerRadius: 9))
-                                }.buttonStyle(.plain).accessibilityAddTraits(directoryFilter == filter ? .isSelected : [])
-                            }
-                        }
-                    }
                     if loading { ProgressView("Refreshing…").font(.caption) }
                     if let error {
                         Text(error).font(.caption).foregroundStyle(.orange)
@@ -118,7 +105,7 @@ struct ClasseraStudentsView: View {
                 if !loading && error == nil && filtered.isEmpty {
                     ContentUnavailableView(students.isEmpty ? "No Classera subscribers" : "No matching students",
                         systemImage: "person.2",
-                        description: Text(students.isEmpty ? "New WhatsApp signups appear here." : "Try a different name, phone or activity filter."))
+                        description: Text(students.isEmpty ? "New WhatsApp signups appear here." : "Try a different name or number."))
                 }
             }.padding(.bottom, 12).scrollTargetLayout()
         }.modifier(StudentAppearance())

@@ -395,7 +395,7 @@ struct ClasseraReportSettingsView: View {
                         VStack(alignment: .leading, spacing: 10) {
                             Text("Next report notice").font(.headline)
                             Text("For the next class-wide daily report only. Manual one-person sends do not consume it.").font(.caption).foregroundStyle(.secondary)
-                            Text("Uses plain text only inside a verified 24-hour window; otherwise it requires the approved classera_wa_notice template. Unavailable notices are skipped and recorded; report delivery continues.").font(.caption).foregroundStyle(.secondary)
+                            Text("Sent as a plain-text message after the student requests AI analysis for that report, within a verified 24-hour window. No template is sent.").font(.caption).foregroundStyle(.secondary)
                             TextEditor(text: Binding(get: { store.draft }, set: store.setDraft))
                                 .frame(minHeight: 175).scrollContentBackground(.hidden)
                                 .padding(8)
@@ -463,7 +463,7 @@ struct ClasseraReportSettingsView: View {
         .confirmationDialog("Save next-report notice?", isPresented: Binding(get: { noticeConfirmation != nil }, set: { if !$0 { noticeConfirmation = nil } }), titleVisibility: .visible, presenting: noticeConfirmation) { review in
             Button(review.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Clear queued notice" : "Queue for next report") { Task { await store.saveNotice(api: api, confirmedText: review.text, revision: review.revision) } }
             Button("Cancel", role: .cancel) {}
-        } message: { review in Text(review.text.isEmpty ? "Only an unclaimed queued notice is cleared. An already-started report is unchanged." : review.text + "\n\nNext class-wide report only. Closed or unknown windows need an approved notice template; otherwise the notice is skipped and recorded.") }
+        } message: { review in Text(review.text.isEmpty ? "Only an unclaimed queued notice is cleared. An already-started report is unchanged." : review.text + "\n\nNext class-wide report only. The notice waits for the matching AI request and an open 24-hour window. Closed or unknown windows are skipped.") }
         .confirmationDialog("Cancel unresolved request?", isPresented: $cancelConfirmation, titleVisibility: .visible) {
             Button("Cancel unresolved request", role: .destructive) { Task { await store.checkPending(api: api, cancel: true) } }
             Button("Keep checking", role: .cancel) {}
@@ -472,10 +472,11 @@ struct ClasseraReportSettingsView: View {
     static func outcomeLabel(_ key: String) -> String {
         ["accepted": "Accepted by provider", "failed": "Failed", "unknown": "Outcome unknown",
          "pending": "Waiting for report", "reserved": "Dispatch unconfirmed",
-         "skipped_window_closed": "Skipped: closed window / template unavailable",
-         "skipped_window_unknown": "Skipped: unknown window / template unavailable",
+         "awaiting_ai": "Waiting for AI request",
+         "skipped_window_closed": "Skipped: closed window",
+         "skipped_window_unknown": "Skipped: unknown window",
          "skipped_report_failed": "Skipped: report not accepted",
-         "skipped_report_date_unknown": "Skipped: report date unavailable for template",
+         "skipped_report_date_unknown": "Skipped: report date unavailable",
          "skipped_ineligible": "Skipped: student no longer eligible"][key] ?? "Unrecognized outcome"
     }
 }

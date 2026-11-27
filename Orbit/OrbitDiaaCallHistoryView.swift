@@ -8,6 +8,7 @@ struct OrbitDiaaCallHistory: Decodable {
 
     let total: Int
     let calls: [Call]
+    let coverage: String?
 }
 
 struct OrbitDiaaCallHistoryView: View {
@@ -87,7 +88,7 @@ struct OrbitDiaaCallHistoryView: View {
                         Text(number)
                     }
                 } footer: {
-                    Text("Times are in Cairo. Call history starts when detailed tracking was enabled.")
+                    Text("Cairo time · Recorded Diaa calls. Other modes may not have historical records.")
                 }
             }
         }
@@ -130,7 +131,7 @@ struct OrbitDiaaCallHistoryView: View {
             total = result.total
         } catch {
             guard requestID == id, visible, !Task.isCancelled else { return }
-            self.error = "Call history could not be loaded. Pull down to retry."
+            self.error = api.friendly(error)
         }
     }
 }
