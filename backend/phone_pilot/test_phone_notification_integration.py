@@ -98,6 +98,14 @@ class RoutingTests(unittest.TestCase):
         self.poll(105,[{'id':recovery,'status':'failed'}]);self.push(106);self.push(107)
         self.assertEqual([p['event_id'] for p in self.sent],[error,recovery])
         self.assertEqual(self.row(error)['actual'],self.row(recovery)['actual'])
+    def test_failed_delivery_after_recovery_submission_falls_back_as_incident(self):
+        self.settings('sms',True);error=self.event();self.poll()
+        self.poll(102,[{'id':error,'status':'submitted'}])
+        recovery=self.event('health_recovery',103);self.poll(104)
+        self.poll(105,[{'id':recovery,'status':'submitted'}]);self.push(106)
+        self.poll(107,[{'id':recovery,'status':'failed'}]);self.push(108);self.push(109)
+        self.assertEqual([p['event_id'] for p in self.sent],[error,recovery])
+        self.assertEqual(self.row(recovery)['actual'],'web')
     def test_unavailable_sim_no_silent_fallback(self):
         self.settings('sms',False)
         with broker.connect() as c:routing.put(c,'orbit_companion_diagnostics',{'sim_ready':False})

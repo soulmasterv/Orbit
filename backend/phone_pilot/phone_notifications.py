@@ -116,9 +116,9 @@ def prepare(c, now):
                 target = error['actual'] if error else None
                 if fallback_active and target != 'web': target = None
                 if not target: status = 'waiting_for_error'
-            if fallback_active and r['phase'] != 'recovery':
-                target = 'web'
-                if actual != 'web':
+            if fallback_active:
+                if r['phase'] != 'recovery': target='web'
+                if target=='web' and actual != 'web':
                     status = 'fallback_pending'
                     c.execute("UPDATE alert_events SET push='pending',next_push=0,expires=MAX(expires,?) WHERE id=? AND push='not_needed'", (now+300,r['event_id']))
             elif actual: target = actual
