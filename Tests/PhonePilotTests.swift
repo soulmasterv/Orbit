@@ -126,6 +126,12 @@ final class PhonePilotTests: XCTestCase {
         XCTAssertTrue(MockURLProtocol.requests.isEmpty)
         XCTAssertFalse(api.actionBusy)
     }
+    func testBackgroundPairingRequestDoesNotRevealCredentials() async throws {
+        let api = api(foreground: { false })
+        try await ready(api)
+        do { _ = try await api.phonePairingQR(); XCTFail() } catch { }
+        XCTAssertTrue(MockURLProtocol.requests.isEmpty)
+    }
     func testPairingLockDuringAuthorizationSendsNothing() async throws {
         var instance: ServerAPI!
         instance = api(authorize: { _ in instance.setAccessAllowed(false) })
