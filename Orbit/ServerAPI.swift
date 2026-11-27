@@ -1638,6 +1638,46 @@ extension ServerAPI {
 }
 
 extension ServerAPI {
+    func internetTracker(phone input: String) async throws -> InternetTrackerSnapshot {
+        guard let phone = InternetTrackerFormat.phone(input) else { throw APIError.message("Invalid contact number.") }
+        let result: InternetTrackerSnapshot = try await jarvisNativeRequest("/api/jarvis/internet/" + phone)
+        guard result.phone == phone, result.version == 1 else { throw URLError(.cannotParseResponse) }
+        return result
+    }
+    func updateInternetTracker(phone input: String, change: InternetTrackerChange) async throws -> InternetTrackerSnapshot {
+        guard !previewMode, let phone = InternetTrackerFormat.phone(input), change.valid else { throw CancellationError() }
+        return try await withDiaaWriteAuthorization(change.mayStartCheck ? "Authorize this Internet check and its selected delivery channel" : "Save Internet Tracker settings", faceIDRequired: change.mayStartCheck) { maySubmit in
+            guard maySubmit() else { throw CancellationError() }
+            let result: InternetTrackerSnapshot = try await self.jarvisNativeRequest("/api/jarvis/internet/" + phone, method: "POST", body: JSONEncoder().encode(change))
+            guard result.phone == phone, result.version == 1 else { throw URLError(.cannotParseResponse) }
+            return result
+        }
+    }
+    func vnStat() async throws -> VnStatSnapshot { try await jarvisNativeRequest("/api/vnstat") }
+    func internetRecording(phone input: String, event: String) async throws -> URL {
+        guard let phone = InternetTrackerFormat.phone(input), event.range(of: #"^[A-F0-9]{8}$"#, options: .regularExpression) != nil,
+              accessAllowed, !previewMode, !Task.isCancelled else { throw CancellationError() }
+        let context = latestReportsContext
+        var command = try request(path: "/api/jarvis/internet/" + phone + "/recordings/" + event)
+        command.timeoutInterval = 45
+        let (temporary, response) = try await session.download(for: command)
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        guard accessAllowed, context == latestReportsContext, !Task.isCancelled else { throw CancellationError() }
+        if (response as? HTTPURLResponse)?.statusCode == 410 { throw APIError.message("Recording expired") }
+        try validate(response)
+        let size = try temporary.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+        guard size >= 44, size <= 50*1024*1024 else { throw APIError.message("Recording unavailable") }
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("orbit-internet-recordings", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        let privateFolder = folder.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: privateFolder, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+        let file = privateFolder.appendingPathComponent(event + ".wav")
+        do {
+            try FileManager.default.copyItem(at: temporary, to: file)
+            try FileManager.default.setAttributes([.protectionKey: FileProtectionType.complete, .posixPermissions: 0o600], ofItemAtPath: file.path)
+            return file
+        } catch { InternetRecordingFiles.remove(file); throw error }
+    }
     func changeIncomingOverride(_ change: OrbitIncomingOverrideChange) async throws -> OrbitAllowedCallers {
         guard canControl, !previewMode, phonePilotIsForeground(), !Task.isCancelled, change.isValid else { throw CancellationError() }
         let context = latestReportsContext

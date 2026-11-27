@@ -244,6 +244,9 @@ struct ClasseraStudentEditor: View {
                 }
                 subscriptionsSection.id("subscriptions")
                 messagingSection.id("messaging")
+                NavigationLink { ContactCallsView(api: api, phone: phone) } label: {
+                    Label("Calls", systemImage: "phone")
+                }.disabled(!api.accessAllowed)
                 managementSection.id("management")
                 Button { Task { await reload() } } label: {
                     Label("Reload from server", systemImage: "arrow.clockwise")

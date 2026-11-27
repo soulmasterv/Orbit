@@ -257,6 +257,7 @@ struct StudentDetailView: View {
                     }.disabled(store.mutationBusy || !api.accessAllowed)
                     Text("Review required and optional subjects. Changes are saved together and do not send a message.").font(.caption).foregroundStyle(.secondary)
                 }.id("subjects")
+                Section { NavigationLink("Calls") { ContactCallsView(api: api, phone: phone) }.disabled(!api.accessAllowed) }
                 Section("Manual message") {
                     NavigationLink("Compose plain text to this student") {
                         StudentMessageComposer(api: api, students: store, phone: phone)

@@ -24,6 +24,8 @@ struct StudentCallsView: View {
                 Label("Allowed Callers", systemImage: "person.crop.circle.badge.checkmark")
             }
             .disabled(!api.accessAllowed)
+            NavigationLink { OrbitWiFiView(api: api) } label: { Label("WiFi", systemImage: "wifi") }
+                .disabled(!api.accessAllowed)
         }
         .scrollContentBackground(.hidden)
         .background(StudentPalette.background)

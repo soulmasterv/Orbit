@@ -80,6 +80,8 @@ def forward(path, method, body=None):
         return {'error': 'WhatsApp request unavailable. Refresh status before retrying.'}, error.code if error.code in (400, 401, 403, 404, 409, 413, 429, 503) else 502
 
 def register(app, token, transport=forward, media_transport=media_forward):
+    from orbit_internet_native import register as register_internet
+    register_internet(app, token, transport=transport)
     def allowed():
         return not request.headers.get('Origin') and hmac.compare_digest(request.headers.get('Authorization', ''), 'Bearer ' + token)
     def handle(path):

@@ -132,6 +132,7 @@ struct OrbitAllowedCallerDetail: View {
                 Section("Assigned modes") {
                     ForEach(caller.displayModes, id: \.self) { Text(OrbitIncomingMode.title($0)) }
                 }
+                Section { NavigationLink("Calls") { ContactCallsView(api: api, phone: number) } }
                 Section {
                     Button("Edit caller") { editor = OrbitCallerDraft(caller) }.disabled(!canEdit)
                     NavigationLink("Call history") { OrbitDiaaCallHistoryView(api: api, number: caller.number, name: caller.name) }
