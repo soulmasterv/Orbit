@@ -149,6 +149,14 @@ def register(app,token):
         if request.path.startswith('/api/jarvis-phone/'):
             response.headers['Cache-Control']='no-store';response.headers['X-Content-Type-Options']='nosniff'
         return response
+    @app.post('/api/jarvis-phone/pairing-qr')
+    @auth
+    def phone_pairing_qr():
+        from companion_health import pairing_payload
+        try:
+            return jsonify(pairing_payload(HOME))
+        except (OSError, ValueError, sqlite3.Error):
+            return jsonify(error='companion_pairing_unavailable'), 503
     @app.get('/api/jarvis-phone/status')
     @auth
     def phone_status():return jsonify(snapshot())

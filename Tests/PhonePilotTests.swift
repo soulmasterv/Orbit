@@ -119,6 +119,27 @@ final class PhonePilotTests: XCTestCase {
         do { _ = try await api.phonePilotSend(invalid); XCTFail() } catch { }
         XCTAssertTrue(MockURLProtocol.requests.isEmpty)
     }
+    func testPairingAuthorizationCancellationSendsNothing() async throws {
+        let api = api(authorize: { _ in throw CancellationError() })
+        try await ready(api)
+        do { _ = try await api.phonePairingQR(); XCTFail() } catch { }
+        XCTAssertTrue(MockURLProtocol.requests.isEmpty)
+        XCTAssertFalse(api.actionBusy)
+    }
+    func testBackgroundPairingRequestDoesNotRevealCredentials() async throws {
+        let api = api(foreground: { false })
+        try await ready(api)
+        do { _ = try await api.phonePairingQR(); XCTFail() } catch { }
+        XCTAssertTrue(MockURLProtocol.requests.isEmpty)
+    }
+    func testPairingLockDuringAuthorizationSendsNothing() async throws {
+        var instance: ServerAPI!
+        instance = api(authorize: { _ in instance.setAccessAllowed(false) })
+        try await ready(instance)
+        do { _ = try await instance.phonePairingQR(); XCTFail() } catch { }
+        XCTAssertTrue(MockURLProtocol.requests.isEmpty)
+        XCTAssertFalse(instance.actionBusy)
+    }
     func testBackgroundBeforeAuthorizationSendsNothing() async throws {
         var authorized = false
         let api = api(authorize: { _ in authorized = true }, foreground: { false })

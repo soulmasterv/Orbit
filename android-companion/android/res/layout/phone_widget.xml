@@ -1,0 +1,7 @@
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:id="@+id/widget_root"
+    android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical"
+    android:padding="16dp" android:background="#15181E">
+    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Orbit Phone" android:textColor="#54A6FF" android:textSize="18sp" android:textStyle="bold"/>
+    <TextView android:id="@+id/widget_status" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:textColor="#EEF2F8" android:textSize="13sp" android:paddingTop="8dp"/>
+    <Button android:id="@+id/widget_pause" android:layout_width="match_parent" android:layout_height="48dp" android:text="Pause forwarding" android:textAllCaps="false"/>
+</LinearLayout>

@@ -1635,6 +1635,23 @@ extension ServerAPI {
     func phonePilotQueue() async throws -> OrbitPhoneQueue {
         try await phonePilotRequest("/api/jarvis-phone/queue")
     }
+    func phonePairingQR() async throws -> OrbitPhonePairing {
+        guard canControl && !previewMode && phonePilotIsForeground() else { throw CancellationError() }
+        let context = latestReportsContext
+        let epoch = studentsAccessGeneration
+        actionBusy = true
+        defer { actionBusy = false }
+        try await authorize("Display the private Android companion pairing QR.")
+        guard accessAllowed && phonePilotIsForeground() && context == latestReportsContext && epoch == studentsAccessGeneration && !Task.isCancelled else {
+            throw CancellationError()
+        }
+        let pairing: OrbitPhonePairing = try await phonePilotRequest("/api/jarvis-phone/pairing-qr", method: "POST")
+        guard phonePilotIsForeground() else { throw CancellationError() }
+        guard pairing.format == "orbit-phone-pairing", pairing.version == 1,
+              pairing.key.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil,
+              UUID(uuidString: pairing.device) != nil else { throw URLError(.cannotParseResponse) }
+        return pairing
+    }
 }
 
 extension ServerAPI {
