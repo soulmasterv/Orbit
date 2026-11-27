@@ -33,7 +33,8 @@ public class MainActivity extends Activity {
     private TextView permissions, battery, health, sync, forwardingSummary;
     private TextView forwardResult, forwardTime, counts, destination, channel, channelDetail;
     private TextView bluetooth, pairingStatus, diagnostics, forwardControls;
-    private LinearLayout history, pairingForm;
+    private LinearLayout history, pairingForm, notificationHistory;
+    private String notificationSnapshot = "";
     private ScrollView scroll;
     private Button monitorButton, checkButton, pauseButton;
     private Switch forwardSwitch;
@@ -378,13 +379,14 @@ public class MainActivity extends Activity {
         channelDetail = text("", 14, muted);
         channelDetail.setPadding(0, dp(8), 0, dp(10));
         selected.addView(channelDetail);
-        button(selected, "Choose notification channel", this::chooseChannel, true);
-        caption(selected, "This controls server alerts. Incoming SMS forwarding has its own switch.");
+        button(selected, "Phone alert settings", () -> PhoneNotifications.settings(this), true);
+        caption(selected, "Phone errors, recoveries, incoming-call notices and companion health use one choice. SMS forwarding is separate.");
         section(page, "Delivery information");
         LinearLayout info = card(page);
-        caption(info, "Web notifications use the subscription already paired on the server.");
-        caption(info, "WhatsApp uses web notifications when the gateway is unavailable.");
-        caption(info, "SMS alerts use SIM credit. Unconfirmed alert delivery can use the serverâ€™s web fallback.");
+        caption(info, "Orbit uses your paired push subscription. SMS uses SIM credit. Automatic fallback follows the Use Orbit if SMS fails switch.");
+        section(page, "Notification history");
+        notificationHistory = card(page);
+        caption(page, "History is cached on this phone. Orbit accepted and SMS sent do not guarantee receipt.");
         button(info, "View connection diagnostics", () -> { select(3); diagnostics.setVisibility(View.VISIBLE); }, false);
     }
 
@@ -414,6 +416,10 @@ public class MainActivity extends Activity {
         }, true);
         pair.addView(pairingForm);
         pairingForm.setVisibility(prefs().getString("key", "").isEmpty() ? View.VISIBLE : View.GONE);
+        section(page, "Notifications");
+        LinearLayout notifications = card(page);
+        button(notifications, "Phone alerts", () -> PhoneNotifications.settings(this), false);
+        caption(notifications, "Delivery: Orbit or SMS. Includes incident history in Alerts.");
         section(page, "Android permissions");
         LinearLayout access = card(page);
         button(access, "Grant SMS permissions", () -> requestPermissions(new String[]{Manifest.permission.SEND_SMS, Manifest.permission.RECEIVE_SMS}, 6), false);
@@ -434,11 +440,11 @@ public class MainActivity extends Activity {
         diagnostics.setPadding(0, dp(10), 0, 0);
         tools.addView(diagnostics);
         diagnostics.setVisibility(View.GONE);
-        caption(page, "Orbit Phone Â· " + version() + "\nExisting JARVIS server and companion pairing");
+        caption(page, "Orbit Phone · " + version() + "\nExisting Orbit server and companion pairing");
     }
 
     private void chooseChannel() {
-        String[] names = {"Web notifications", "WhatsApp", "SMS Â· uses SIM credit"};
+        String[] names = {"Web notifications", "WhatsApp", "SMS · uses SIM credit"};
         String[] values = {"web", "whatsapp", "sms"};
         String current = prefs().getString("notificationMode", "web");
         int checked = current.equals("sms") ? 2 : current.equals("whatsapp") ? 1 : 0;
@@ -510,12 +516,12 @@ public class MainActivity extends Activity {
         boolean running = enabled && fresh(prefs().getLong("lastServiceAt", 0), 25000);
         boolean checking = prefs().getBoolean("connectionChecking", false) && running;
         String error = prefs().getString("lastConnectionError", "");
-        status.setText(!paired ? "Pair your phone" : !enabled ? "Monitoring paused" : online ? "Connected" : checking ? "Connectingâ€¦" : "Connection needs attention");
+        status.setText(!paired ? "Pair your phone" : !enabled ? "Monitoring paused" : online ? "Connected" : checking ? "Connecting…" : "Connection needs attention");
         status.setTextColor(online ? GREEN : !enabled ? muted : AMBER);
         statusDetail.setText(!paired ? "Add the companion key in Settings to connect to Ubuntu." : !enabled ? "Server alerts are paused. SMS forwarding has its own switch." : online ? "The companion is checking in with Ubuntu." : connectionHelp(error));
         monitorButton.setText(enabled ? "Pause monitoring" : "Start monitoring");
         checkButton.setEnabled(enabled && !checking);
-        connection.setText(online ? "Connected" : checking ? "Checkingâ€¦" : enabled ? "Unavailable" : "Paused");
+        connection.setText(online ? "Connected" : checking ? "Checking…" : enabled ? "Unavailable" : "Paused");
         lastCheck.setText(age(prefs().getLong("lastServerAt", 0)));
         monitoringState.setText(running ? "Running" : enabled ? "Needs attention" : "Paused");
         permissions.setText(allowed(Manifest.permission.SEND_SMS) && allowed(Manifest.permission.RECEIVE_SMS) ? "Granted" : "Setup needed");
@@ -533,20 +539,22 @@ public class MainActivity extends Activity {
         long at = prefs().getLong("lastForwardAt", 0);
         String result = prefs().getString("lastForwardResult", "");
         forwardResult.setText(!forwarding ? "Forwarding is off" : paused ? pauseUntil == Long.MAX_VALUE ? "Paused until resumed" : "Paused until " + time(pauseUntil) : !allowed(Manifest.permission.SEND_SMS) || !allowed(Manifest.permission.RECEIVE_SMS) ? "SMS permission needed" : at == 0 ? "Waiting for a new SMS" : result.isEmpty() ? prefs().getString("forwardStatus", "Result unavailable") : ForwardHistory.label(result));
-        forwardTime.setText(at == 0 ? "" : time(at) + " Â· " + prefs().getInt("lastForwardParts", 0) + " SMS part(s)");
+        forwardTime.setText(at == 0 ? "" : time(at) + " · " + prefs().getInt("lastForwardParts", 0) + " SMS part(s)");
         counts.setText(prefs().getInt("forwardAttempts", 0) + " / " + prefs().getInt("forwardSuppressed", 0));
         forwardControls.setText(ForwardControls.summary(this));
         renderHistory();
         renderHealth(online);
-        String mode = prefs().getString("notificationMode", "web");
-        channel.setText(mode.equals("sms") ? "SMS alerts" : mode.equals("whatsapp") ? "WhatsApp" : "Web notifications");
-        channelDetail.setText(!prefs().getBoolean("channelSynced", false) ? "Waiting to sync with Ubuntu." : mode.equals("whatsapp") ? prefs().getBoolean("whatsappReady", false) ? "Gateway connected. Web fallback available." : "Gateway unavailable. Server uses web fallback." : mode.equals("sms") ? "Paid alert SMS enabled." : "Server alerts use your paired web subscription.");
+        String mode = PhoneNotifications.delivery(this);
+        channel.setText("Phone alerts: " + PhoneNotifications.channel(mode));
+        channelDetail.setText(!prefs().getBoolean("phoneAlertSynced",false) ? "Waiting to sync with Ubuntu." : PhoneNotifications.fallback(this) ? "Use Orbit if SMS fails: on. Existing incidents keep their channel." : "Automatic Orbit fallback is off. Existing incidents keep their channel.");
+        String snapshot=prefs().getString("phoneNotificationHistory","[]");
+        if(!snapshot.equals(notificationSnapshot) || notificationHistory.getChildCount()==0) {notificationSnapshot=snapshot;PhoneNotifications.history(this,notificationHistory);}
         pairingStatus.setText(paired ? "Saved on this phone" : "Setup needed");
         try {
             BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
             bluetooth.setText(adapter == null ? "Unavailable" : adapter.isEnabled() ? "On" : "Off");
         } catch (Exception e) { bluetooth.setText("Check Android settings"); }
-        diagnostics.setText("Companion " + version() + "\nMonitoring service Â· " + (running ? "running" : "inactive") + "\nServer check-in Â· " + age(prefs().getLong("lastServerAt", 0)) + "\nLast connection error Â· " + (error.isEmpty() ? "none" : error) + "\n" + connectionHelp(error) + "\n" + prefs().getString("pilotStatus", "No remote changes received") + "\nLatest general SMS result Â· " + prefs().getString("lastSmsStatus", "none"));
+        diagnostics.setText("Companion " + version() + "\nMonitoring service · " + (running ? "running" : "inactive") + "\nServer check-in · " + age(prefs().getLong("lastServerAt", 0)) + "\nLast connection error · " + (error.isEmpty() ? "none" : error) + "\n" + connectionHelp(error) + "\n" + prefs().getString("pilotStatus", "No remote changes received") + "\nLatest general SMS result · " + prefs().getString("lastSmsStatus", "none"));
     }
 
     private void renderHistory() {
@@ -562,7 +570,7 @@ public class MainActivity extends Activity {
                 LinearLayout view = card(history);
                 String state = entry.optString("status");
                 view.addView(text(ForwardHistory.label(state), 15, state.equals("delivered") ? GREEN : state.equals("failed") ? AMBER : foreground));
-                caption(view, time(entry.optLong("at")) + " Â· " + entry.optInt("parts") + " SMS part(s)");
+                caption(view, time(entry.optLong("at")) + " · " + entry.optInt("parts") + " SMS part(s)");
                 if (state.equals("submitted")) caption(view, "The carrier has not confirmed arrival.");
                 if (state.equals("failed")) caption(view, smsError(entry.optInt("error")));
             }
@@ -596,7 +604,7 @@ public class MainActivity extends Activity {
             case "SSLHandshakeException": return "Secure connection failed. Check the phone date and server certificate.";
             case "BackgroundStartRestricted": return "Android restricted background startup. Reopen the app and allow background monitoring.";
             case "": return "Waiting for a connection check.";
-            default: return error.startsWith("HTTP 5") ? "The server is unavailable. Check Ubuntuâ€™s school-api service." : "Connection failed. Open diagnostics for the recorded error.";
+            default: return error.startsWith("HTTP 5") ? "The server is unavailable. Check Ubuntu’s school-api service." : "Connection failed. Open diagnostics for the recorded error.";
         }
     }
     private String smsError(int error) {
@@ -604,7 +612,7 @@ public class MainActivity extends Activity {
             case 2: return "Radio is off. Check mobile service.";
             case 3: return "The modem rejected the message format.";
             case 4: return "No mobile service available.";
-            case 5: return "Androidâ€™s SMS sending limit was reached.";
+            case 5: return "Android’s SMS sending limit was reached.";
             case 0: return "The send could not be completed. Check the SIM and permissions.";
             default: return "Carrier or modem rejected sending. Result code " + error + ".";
         }

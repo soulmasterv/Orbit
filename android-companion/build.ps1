@@ -31,11 +31,11 @@ if ($LASTEXITCODE) { throw 'DEX compilation failed' }
 Copy-Item "$out\resources.apk" "$out\unaligned.apk" -Force
 Push-Location "$out\dex"
 try { & "$tools\aapt.exe" add "$out\unaligned.apk" classes.dex } finally { Pop-Location }
-& "$tools\zipalign.exe" -f -p 4 "$out\unaligned.apk" "$out\Orbit-Phone-v35-unsigned.apk"
+& "$tools\zipalign.exe" -f -p 4 "$out\unaligned.apk" "$out\Orbit-Phone-v37-unsigned.apk"
 if ($LASTEXITCODE) { throw 'APK alignment failed' }
 $signing = $SigningDirectory
-& "$javaBin\java.exe" -jar "$tools\lib\apksigner.jar" sign --ks "$signing\jarvis-alerts-release.p12" --ks-key-alias jarvis-alerts-release --ks-pass "file:$signing\password.txt" --out "$out\Orbit-Phone-v35.apk" "$out\Orbit-Phone-v35-unsigned.apk"
+& "$javaBin\java.exe" -jar "$tools\lib\apksigner.jar" sign --ks "$signing\jarvis-alerts-release.p12" --ks-key-alias jarvis-alerts-release --ks-pass "file:$signing\password.txt" --out "$out\Orbit-Phone-v37.apk" "$out\Orbit-Phone-v37-unsigned.apk"
 if ($LASTEXITCODE) { throw 'Signing failed' }
-& "$javaBin\java.exe" -jar "$tools\lib\apksigner.jar" verify --verbose --print-certs "$out\Orbit-Phone-v35.apk"
+& "$javaBin\java.exe" -jar "$tools\lib\apksigner.jar" verify --verbose --print-certs "$out\Orbit-Phone-v37.apk"
 if ($LASTEXITCODE) { throw 'Signature verification failed' }
-& "$tools\aapt.exe" dump badging "$out\Orbit-Phone-v35.apk" | Select-Object -First 5
+& "$tools\aapt.exe" dump badging "$out\Orbit-Phone-v37.apk" | Select-Object -First 5
