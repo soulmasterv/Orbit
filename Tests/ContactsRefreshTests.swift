@@ -16,7 +16,7 @@ final class ContactsRefreshTests: XCTestCase {
     }
     func testUnfilteredClasseraContactsIncludeOptedOutAndKeepSuspendedLast() throws {
         func row(_ phone: String, status: String, activity: String) -> [String: Any] {
-            ["phone": phone, "profile_name": phone, "activity_status": activity,
+            ["phone": phone, "profile_name": phone, "activity_status": activity, "revision": String(repeating: "a", count: 64),
              "subscriptions": [["class_name":"12F","name":phone,"status":status,"ai_enabled":1]]]
         }
         let data = try JSONSerialization.data(withJSONObject: ["version":1,"students":[
