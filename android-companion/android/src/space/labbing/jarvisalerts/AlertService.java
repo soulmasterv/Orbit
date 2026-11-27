@@ -91,7 +91,7 @@ public class AlertService extends Service {
         HttpsURLConnection c=(HttpsURLConnection)new URL(ENDPOINT).openConnection();c.setInstanceFollowRedirects(false);c.setConnectTimeout(4500);c.setReadTimeout(4500);c.setRequestMethod("POST");c.setDoOutput(true);c.setRequestProperty("Content-Type","application/json");c.setRequestProperty("X-Jarvis-Phone-Key",prefs(this).getString("key",""));
 
         prefs(this).edit().putBoolean("connectionChecking", true).apply();
-        try{byte[] data=body.toString().getBytes(StandardCharsets.UTF_8);c.setFixedLengthStreamingMode(data.length);try(OutputStream o=c.getOutputStream()){o.write(data);}int code=c.getResponseCode();if(code!=200)throw new IOException("HTTP "+code);ByteArrayOutputStream out=new ByteArrayOutputStream();try(InputStream in=c.getInputStream()){byte[] buf=new byte[2048];int n;while((n=in.read(buf))!=-1){out.write(buf,0,n);if(out.size()>24000)throw new IOException("Oversize response");}}return new JSONObject(out.toString("UTF-8"));}finally{c.disconnect();prefs(this).edit().putBoolean("connectionChecking", false).apply();}
+        try{byte[] data=body.toString().getBytes(StandardCharsets.UTF_8);c.setFixedLengthStreamingMode(data.length);try(OutputStream o=c.getOutputStream()){o.write(data);}int code=c.getResponseCode();if(code!=200)throw new IOException("HTTP "+code);ByteArrayOutputStream out=new ByteArrayOutputStream();try(InputStream in=c.getInputStream()){byte[] buf=new byte[2048];int n;while((n=in.read(buf))!=-1){out.write(buf,0,n);if(out.size()>98304)throw new IOException("Oversize response");}}return new JSONObject(out.toString("UTF-8"));}finally{c.disconnect();prefs(this).edit().putBoolean("connectionChecking", false).apply();}
 
     }
 
@@ -100,7 +100,7 @@ public class AlertService extends Service {
         boolean receive = checkSelfPermission(android.Manifest.permission.RECEIVE_SMS) == 0;
         android.telephony.TelephonyManager phone = (android.telephony.TelephonyManager)getSystemService(TELEPHONY_SERVICE);
         boolean sim = phone.getSimState() == android.telephony.TelephonyManager.SIM_STATE_READY;
-        return new JSONObject().put("version",1).put("sms_permissions",send&&receive)
+        return new JSONObject().put("version",1).put("sms_permissions",send&&receive).put("sms_send_permission",send)
             .put("sim_ready",sim).put("forward_enabled",prefs(this).getBoolean("forwardEnabled",false));
     }
 
@@ -120,13 +120,15 @@ public class AlertService extends Service {
 
         JSONObject result;
 
-        try{result=request(new JSONObject().put("device",device).put("acks",acknowledgments).put("mode",prefs(this).getString("notificationMode","web")).put("pilot_revision",prefs(this).getInt("pilotRevision",0)).put("forward_enabled",prefs(this).getBoolean("forwardEnabled",false)).put("diagnostics",diagnostics()));}
+        try{result=request(new JSONObject().put("device",device).put("acks",acknowledgments).put("mode",prefs(this).getString("notificationMode","web")).put("pilot_revision",prefs(this).getInt("pilotRevision",0)).put("forward_enabled",prefs(this).getBoolean("forwardEnabled",false)).put("diagnostics",diagnostics()).put("phone_delivery",prefs(this).getString("phoneAlertDelivery","web")).put("phone_fallback",prefs(this).getBoolean("phoneAlertFallback",true)));}
 
-        catch(Exception e){if(failures==0)ActivityTimeline.record(this,"Server connection lost");failures++;String detail=e.getMessage()!=null&&e.getMessage().startsWith("HTTP ")?e.getMessage():e.getClass().getSimpleName();prefs(this).edit().putString("lastConnectionError",detail).apply();status("Connection failed: "+detail);if(failures>=3&&!unreachable&&prefs(this).getBoolean("pairedOnce",false)){unreachable=true;prefs(this).edit().putBoolean("unreachable",true).commit();sendSms("local-"+UUID.randomUUID(),"Ubuntu alert endpoint is unreachable from the Samsung. ADB or voice control may be unavailable.");}return;}
+        catch(Exception e){if(failures==0)ActivityTimeline.record(this,"Server connection lost");failures++;String detail=e.getMessage()!=null&&e.getMessage().startsWith("HTTP ")?e.getMessage():e.getClass().getSimpleName();prefs(this).edit().putString("lastConnectionError",detail).apply();status("Connection failed: "+detail);if(failures>=3&&!unreachable&&prefs(this).getBoolean("pairedOnce",false)){unreachable=true;prefs(this).edit().putBoolean("unreachable",true).commit();ActivityTimeline.record(this,"Endpoint unavailable; phone alert delivery awaits the incident router");}return;}
 
         synchronized(LOCK){JSONObject live=object(prefs(this).getString("acks","{}"));for(int i=0;i<acknowledgments.length();i++){JSONObject old=acknowledgments.getJSONObject(i);String id=old.getString("id");if(live.optString(id).equals(old.getString("status")))live.remove(id);}prefs(this).edit().putString("acks",live.toString()).commit();}
 
-        prefs(this).edit().putBoolean("whatsappReady",result.optBoolean("whatsapp_ready",false)).putBoolean("channelSynced",true).apply();
+        prefs(this).edit().putBoolean("whatsappReady",result.optBoolean("whatsapp_ready",false)).putBoolean("channelSynced",true)
+            .putBoolean("phoneAlertSynced", result.has("notification_history") && result.optString("phone_delivery").equals(prefs(this).getString("phoneAlertDelivery","web")) && result.optBoolean("phone_fallback") == prefs(this).getBoolean("phoneAlertFallback",true))
+            .putString("phoneNotificationHistory", result.optJSONArray("notification_history")==null?prefs(this).getString("phoneNotificationHistory","[]"):result.optJSONArray("notification_history").toString()).apply();
         JSONObject control=result.optJSONObject("phone_control");
         if(control!=null){synchronized(LOCK){
             int revision=control.optInt("revision",0);String mode=control.optString("mode","");
@@ -142,7 +144,7 @@ public class AlertService extends Service {
         if(failures>0)ActivityTimeline.record(this,"Server connection recovered");
         failures=0;prefs(this).edit().remove("lastConnectionError").putBoolean("pairedOnce",true).putLong("lastServerAt",System.currentTimeMillis()).putString("deliveryRecent",result.optJSONArray("delivery_recent")==null?"[]":result.optJSONArray("delivery_recent").toString()).commit();
 
-        if(unreachable){unreachable=false;prefs(this).edit().putBoolean("unreachable",false).commit();sendSms("local-"+UUID.randomUUID(),"The Samsung can reach the Ubuntu alert endpoint again.");}
+        if(unreachable){unreachable=false;prefs(this).edit().putBoolean("unreachable",false).commit();ActivityTimeline.record(this,"Endpoint connection recovered");}
 
         JSONObject health=result.optJSONObject("health");boolean old=health==null||System.currentTimeMillis()/1000.0-health.optDouble("at",0)>60;
 
@@ -150,19 +152,20 @@ public class AlertService extends Service {
 
         staleSamples=old?staleSamples+1:0;
 
-        if(old&&staleSamples>=3&&!stale){stale=true;prefs(this).edit().putBoolean("stale",true).commit();sendSms("local-"+UUID.randomUUID(),"Ubuntu responds, but its phone health monitor has stopped checking in.");}else if(!old&&stale){stale=false;prefs(this).edit().putBoolean("stale",false).commit();sendSms("local-"+UUID.randomUUID(),"Phone health monitoring is checking in again.");}
+        if(old&&staleSamples>=3&&!stale){stale=true;prefs(this).edit().putBoolean("stale",true).commit();ActivityTimeline.record(this,"Phone health monitor report is stale");}else if(!old&&stale){stale=false;prefs(this).edit().putBoolean("stale",false).commit();ActivityTimeline.record(this,"Phone health monitor report recovered");}
 
-        JSONArray jobs=result.optJSONArray("jobs");if(jobs!=null)for(int i=0;i<jobs.length();i++){JSONObject j=jobs.getJSONObject(i);if(j.optDouble("expires")>System.currentTimeMillis()/1000.0)sendSms(j.getString("id"),j.getString("body"));}
+        JSONArray jobs=result.optJSONArray("jobs");if(jobs!=null)for(int i=0;i<jobs.length();i++){JSONObject j=jobs.getJSONObject(i);if(j.optDouble("expires")>System.currentTimeMillis()/1000.0)sendSms(j.getString("id"),j.getString("body"),j.optBoolean("phone_alert",false));}
 
         PhoneWidget.updateAll(this);
-        status("Connected. Notification channel: "+prefs(this).getString("notificationMode","web")+". Last check "+new java.text.SimpleDateFormat("HH:mm:ss",Locale.US).format(new Date()));
+        status("Connected. Phone alerts: "+("sms".equals(prefs(this).getString("phoneAlertDelivery","web"))?"SMS":"Orbit")+". Last check "+new java.text.SimpleDateFormat("HH:mm:ss",Locale.US).format(new Date()));
 
     }
 
-    void sendSms(String id,String text){
+    void sendSms(String id,String text){sendSms(id,text,false);}
+    void sendSms(String id,String text,boolean phoneAlert){
         synchronized(LOCK){
 
-        if(!prefs(this).getBoolean("enabled",false)||!prefs(this).getString("notificationMode","web").equals("sms")){prefs(this).edit().putLong("lastBlockedSmsAt",System.currentTimeMillis()).putString("lastBlockedSmsReason","Alert SMS blocked by notification choice or paused monitoring").commit();if(!id.startsWith("local-"))ack(this,id,"failed");return;}
+        if(!prefs(this).getBoolean("enabled",false)||!(phoneAlert || prefs(this).getString("notificationMode","web").equals("sms"))){prefs(this).edit().putLong("lastBlockedSmsAt",System.currentTimeMillis()).putString("lastBlockedSmsReason","Alert SMS blocked by notification choice or paused monitoring").commit();if(!id.startsWith("local-"))ack(this,id,"failed");return;}
         if(id.length()>65||text.length()>300)return;
 
         // All broker summaries are English. Bound each SMS to a short single-part summary.
@@ -191,7 +194,7 @@ public class AlertService extends Service {
 
         try{SmsManager.getDefault().sendTextMessage(DEST,null,text,PendingIntent.getBroadcast(this,id.hashCode(),sent,flags),PendingIntent.getBroadcast(this,id.hashCode(),delivered,flags));}
 
-        catch(Exception e){ack(this,id,"failed");status("SMS unavailable; Ubuntu will use web fallback when reachable.");}
+        catch(Exception e){ack(this,id,"failed");status("Alert SMS failed. Delivery follows your phone alert settings.");}
 
         }
     }

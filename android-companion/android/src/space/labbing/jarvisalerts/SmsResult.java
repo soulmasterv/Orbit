@@ -33,7 +33,7 @@ public class SmsResult extends BroadcastReceiver {
                         AlertService.prefs(c).edit().putString("lastForwardResult",status).commit();
                 }
             }
-            if(status!=null){AlertService.ack(c,id,status);if(i.getBooleanExtra("forward",false)&&id.equals(AlertService.prefs(c).getString("lastForwardId","")))AlertService.prefs(c).edit().putString("forwardStatus","Forward SMS: "+status+".").apply();}
+            if(status!=null){if(!i.getBooleanExtra("forward",false))AlertService.ack(c,id,status);if(i.getBooleanExtra("forward",false)&&id.equals(AlertService.prefs(c).getString("lastForwardId","")))AlertService.prefs(c).edit().putString("forwardStatus","Forward SMS: "+status+".").apply();}
 
         }
 
