@@ -1,6 +1,16 @@
 import Foundation
 import Combine
 
+struct InternetTrackerDirectory: Decodable {
+    struct Contact: Decodable, Identifiable {
+        struct Line: Decodable { let number: String; let provider: String }
+        let phone: String; let name: String?; let allowed: Bool; let lines: [Line]
+        var id: String { phone }
+        var title: String { name?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? name! : phone }
+    }
+    let version: Int; let contacts: [Contact]
+}
+
 struct InternetTrackerSnapshot: Decodable {
     struct Line: Decodable, Identifiable {
         let slot: Int; let number: String?; let provider: String?; let weekly: Bool

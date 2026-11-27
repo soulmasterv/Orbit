@@ -20,6 +20,14 @@ export function remaining(result,carrier){
 export class OrbitInternetTracker {
  constructor({requests,normalizeLine,normalizeCarrier,now=Date.now}){this.requests=requests;this.root=requests.root;this.normalizeLine=normalizeLine;this.normalizeCarrier=normalizeCarrier;this.now=now;this.operations=path.join(this.root,'internet-orbit-operations.json');}
  phone(value){if(typeof value!=='string'||! /^[1-9][0-9]{7,14}$/.test(value))throw new TrackerError('Invalid contact');return value;}
+ directory(){
+  const s=this.requests.read(),phones=[...new Set([...Object.keys(s.users||{}),...Object.keys(s.invites||{}),...this.requests.owners])].filter(p=>/^[1-9][0-9]{7,14}$/.test(p)).sort();
+  if(phones.length>2000)throw new TrackerError('Contact list unavailable',503);
+  return {version:1,contacts:phones.map(phone=>{
+   const row=s.users?.[phone]||{},lines=row.lines||(row.landline?[{number:row.landline,carrier:'vodafone'}]:[]);
+   return {phone,name:typeof row.name==='string'?row.name.slice(0,120):null,allowed:this.requests.allowed(phone,s),lines:lines.slice(0,2).filter(l=>typeof l.number==='string').map(l=>({number:l.number,provider:l.carrier||'vodafone'}))};
+  })};
+ }
  jobs(phone){
   const jobs=new Map();
   for(const [dir,status] of [['internet-done','unknown'],['internet-processing','running'],['internet-queued','queued']]){
@@ -107,6 +115,10 @@ export class OrbitInternetTracker {
   const recording=this.recording(matches[0],this.result(matches[0]));if(!recording)throw new TrackerError('Recording expired',410);return recording;
  }
  async route(req,reply,res){
+  if(req.url==='/internet/contacts'){
+   if(req.method!=='GET'){reply(405,{error:'Read only'});return true;}
+   try{reply(200,this.directory());}catch{reply(503,{error:'Contact list unavailable'});}return true;
+  }
   if(!req.url?.startsWith('/internet/contact/'))return false;
   const match=/^\/internet\/contact\/([1-9][0-9]{7,14})(?:\/recordings\/([A-F0-9]{8}))?$/.exec(req.url);
   if(!match){reply(404,{error:'Not found'});return true;}

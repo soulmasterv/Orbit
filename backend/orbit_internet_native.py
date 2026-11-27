@@ -49,6 +49,14 @@ def recording_forward(phone,event):
 def register(app,token,transport=forward,audio=recording_forward,traffic=traffic_snapshot):
     def allowed():return bool(token) and not request.headers.get('Origin') and hmac.compare_digest(request.headers.get('Authorization',''),'Bearer '+token)
     def valid(phone):return re.fullmatch(r'[1-9][0-9]{7,14}',phone or '') is not None
+    @app.get('/api/jarvis/internet/contacts')
+    def internet_directory():
+        if not allowed():return jsonify(error='unauthorized'),401
+        if request.args:return jsonify(error='invalid_request'),422
+        try:
+            data,status=transport('/internet/contacts','GET',None)
+            return jsonify(data),status
+        except Exception:return jsonify(error='Internet contacts unavailable. Try again.'),503
     @app.route('/api/jarvis/internet/<phone>',methods=['GET','POST'])
     def internet_contact(phone):
         if not allowed():return jsonify(error='unauthorized'),401

@@ -10,10 +10,17 @@ class InternetNativeTests(unittest.TestCase):
         register(app,'fixture-owner',transport=transport,audio=audio,traffic=lambda:{'version':1,'interfaces':[]})
         self.client=app.test_client();self.auth={'Authorization':'Bearer fixture-owner'}
     def test_all_routes_require_native_bearer_and_reject_browser_origin(self):
-        for path in ['/api/vnstat','/api/jarvis/internet/201000000001','/api/jarvis/internet/201000000001/recordings/ABCD1234']:
+        for path in ['/api/vnstat','/api/jarvis/internet/contacts','/api/jarvis/internet/201000000001','/api/jarvis/internet/201000000001/recordings/ABCD1234']:
             self.assertEqual(self.client.get(path).status_code,401)
             self.assertEqual(self.client.get(path,headers={**self.auth,'Origin':'https://example.com'}).status_code,401)
         self.assertEqual(self.calls,[]);self.assertEqual(self.audio,[])
+    def test_directory_is_authenticated_read_only_and_uses_existing_tracker(self):
+        path='/api/jarvis/internet/contacts'
+        self.assertEqual(self.client.get(path,headers=self.auth).status_code,200)
+        self.assertEqual(self.calls,[('/internet/contacts','GET',None)])
+        self.assertEqual(self.client.get(path+'?phone=other',headers=self.auth).status_code,422)
+        self.assertEqual(self.client.post(path,headers=self.auth,json={}).status_code,422)
+        self.assertEqual(len(self.calls),1)
     def test_get_is_fixed_read_only_and_post_is_not_retried(self):
         path='/api/jarvis/internet/201000000001';self.assertEqual(self.client.get(path,headers=self.auth).status_code,200)
         self.assertEqual(self.calls,[('/internet/contact/201000000001','GET',None)])

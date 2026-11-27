@@ -4,6 +4,15 @@ import fs from 'node:fs';import os from 'node:os';import path from 'node:path';i
 import {OrbitInternetTracker,remaining} from './orbit-internet-tracker.mjs';
 import http from 'node:http';
 const PHONE='201000000002',OWNER='201000000001';
+test('directory includes existing users, invited contacts and owner without jobs or writes',t=>{
+ const f=fixture(t);f.line(1);f.line(2,'we');
+ const s=f.requests.read();s.users[PHONE].name='Saved contact';s.users['201000000003']={lines:[{number:'0445678901',carrier:'we'}],providerConsent:'private fixture'};f.requests.save(s);
+ const before=JSON.stringify(f.requests.read());
+ const list=f.tracker.directory();assert.equal(list.version,1);assert.equal(list.contacts.length,3);
+ const saved=list.contacts.find(c=>c.phone===PHONE);assert.equal(saved.name,'Saved contact');assert.equal(saved.lines.length,2);
+ assert.equal(list.contacts.find(c=>c.phone==='201000000003').allowed,false);
+ assert.ok(!JSON.stringify(list).includes('private fixture'));assert.equal(JSON.stringify(f.requests.read()),before);assert.equal(f.calls,0);
+});
 function fixture(t){
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'orbit-tracker-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
  for(const d of ['internet-queued','internet-processing','internet-done','internet-results','internet-audio'])fs.mkdirSync(path.join(root,d));

@@ -1661,6 +1661,11 @@ extension ServerAPI {
         guard result.phone == phone, result.version == 1 else { throw URLError(.cannotParseResponse) }
         return result
     }
+    func internetContacts() async throws -> InternetTrackerDirectory {
+        let result: InternetTrackerDirectory = try await jarvisNativeRequest("/api/jarvis/internet/contacts")
+        guard result.version == 1 else { throw URLError(.cannotParseResponse) }
+        return result
+    }
     func updateInternetTracker(phone input: String, change: InternetTrackerChange) async throws -> InternetTrackerSnapshot {
         guard !previewMode, let phone = InternetTrackerFormat.phone(input), change.valid else { throw CancellationError() }
         return try await withDiaaWriteAuthorization(change.mayStartCheck ? "Authorize this Internet check and its selected delivery channel" : "Save Internet Tracker settings", faceIDRequired: change.mayStartCheck) { maySubmit in
