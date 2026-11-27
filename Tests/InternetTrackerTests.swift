@@ -1,4 +1,6 @@
 import XCTest
+import SwiftUI
+import UIKit
 @testable import Orbit
 
 @MainActor final class InternetTrackerTests: XCTestCase {
@@ -62,5 +64,41 @@ import XCTest
         let second = await state.submit(change) { _ in count += 1; return initial }
         XCTAssertFalse(first); XCTAssertFalse(second); XCTAssertEqual(count, 1); XCTAssertTrue(state.uncertain)
         await state.load { initial }; XCTAssertFalse(state.uncertain)
+    }
+    func testNativeTrackerLayoutLoadsBothProvidersWithoutAnyMutation() async throws {
+        let suite = "InternetTrackerLayout.\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite); MockURLProtocol.handler = nil }
+        let config = URLSessionConfiguration.ephemeral; config.protocolClasses = [MockURLProtocol.self]
+        let api = ServerAPI(session: URLSession(configuration: config), defaults: defaults,
+                            tokenProvider: { "fixture-owner" }, authorize: { _ in })
+        let sample: [String: Any] = ["version": 1, "phone": "201000000001", "allowed": true,
+            "permissionGranted": true, "permissionEditable": true, "friendChecksEnabled": true,
+            "revision": String(repeating: "a", count: 64), "policy": "fixture-v1", "audioProvider": "Fixture",
+            "lines": [["slot": 1, "number": "0223456789", "provider": "vodafone", "weekly": true,
+                       "nextAt": 1_800_000_000_000, "channel": "whatsapp"],
+                      ["slot": 2, "number": "0334567890", "provider": "we", "weekly": false]],
+            "pending": false, "history": []]
+        let data = try JSONSerialization.data(withJSONObject: sample)
+        var reads = 0; var writes = 0
+        MockURLProtocol.handler = { request in
+            if request.httpMethod == "GET" { reads += 1 } else { writes += 1 }
+            return (200, data)
+        }
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene); window.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
+        window.rootViewController = UIHostingController(rootView: NavigationStack {
+            InternetTrackerView(api: api, phone: "201000000001")
+        }.preferredColorScheme(.dark).environment(\.scenePhase, .active))
+        window.makeKeyAndVisible(); defer { window.isHidden = true; window.rootViewController = nil }
+        let ready = expectation(description: "Native tracker loaded")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { ready.fulfill() }
+        await fulfillment(of: [ready], timeout: 4); window.layoutIfNeeded()
+        XCTAssertGreaterThan(reads, 0); XCTAssertEqual(writes, 0)
+        let image = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in
+            window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+        }
+        let attachment = XCTAttachment(image: image); attachment.name = "internet-tracker-two-providers-dark"
+        attachment.lifetime = .keepAlways; add(attachment)
     }
 }
